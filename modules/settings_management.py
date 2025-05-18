@@ -287,14 +287,14 @@ class SettingsManagementFrame(ctk.CTkFrame):
     def export_material_template(self):
         """성분(원료) 데이터용 엑셀 템플릿을 내보냅니다."""
         sheets = {
-            "원료정보": ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "NMPA등록번호", "등록일", "사용여부(Y/N)"],
+            "원료정보": ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "사용여부(Y/N)"],
             "전성분정보": ["원료코드", "한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터"]
         }
         excel_handler.export_multisheet_template(sheets, "원료_템플릿.xlsx")
 
     def export_client_template(self):
         """거래처 데이터용 엑셀 템플릿을 내보냅니다."""
-        headers = ["거래처 유형", "거래처코드(사업자번호)", "거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부(Y/N)"]
+        headers = ["거래처 유형", "거래처코드(사업자번호)", "거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부(Y/N)"] # noqa
         excel_handler.export_template(headers, "거래처_템플릿.xlsx")
 
     def export_user_template(self):

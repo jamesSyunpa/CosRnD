@@ -1,7 +1,7 @@
 import os
 import sys
 import bcrypt
-from sqlalchemy import create_engine, text, event
+from sqlalchemy import create_engine, text, event, inspect
 import configparser
 from sqlalchemy.orm import sessionmaker, joinedload
 from datetime import datetime
@@ -9,7 +9,7 @@ from datetime import datetime
 from database.models import Base, User, Client, Material, Ingredient, Formulation
 
 # --- 스키마 버전 관리 ---
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 10
 class DBManager:
     _instance = None
 
@@ -54,10 +54,12 @@ class DBManager:
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
 
+        # 스키마 마이그레이션 및 테이블 생성
+        self._check_and_run_migrations()
+        Base.metadata.create_all(self.engine)
+
         self.Session = sessionmaker(bind=self.engine)
 
-        self._check_and_run_migrations()
-        
         # DB가 새로 생성된 경우에만 초기 설정 콜백 호출
         if is_new_db and on_initial_setup:
             on_initial_setup()
@@ -65,6 +67,8 @@ class DBManager:
 
     def get_session(self):
         """새로운 데이터베이스 세션을 반환합니다."""
+        if not self.Session:
+            raise RuntimeError("Database is not set up. Call setup_database() first.")
         return self.Session()
 
     def dispose_engine(self):
@@ -75,27 +79,29 @@ class DBManager:
             self.Session = None
             print("데이터베이스 엔진 연결이 해제되었습니다.")
 
-    def _run_migrations(self, connection):
+    def _run_migrations(self):
         """
         데이터베이스 스키마를 확인하고 누락된 컬럼을 추가하는 간단한 마이그레이션 실행.
         """
         print("데이터베이스 스키마 확인 및 업데이트 시작...")
+        inspector = inspect(self.engine)
         with self.engine.connect() as connection:
             # 모든 모델의 테이블에 대해 반복
             for table_name, table in Base.metadata.tables.items():
                 try:
-                    # PRAGMA를 사용하여 실제 DB의 컬럼 정보 가져오기
-                    cursor = connection.execute(text(f"PRAGMA table_info({table_name})"))
-                    existing_columns = {row[1] for row in cursor.fetchall()}
+                    # Inspector를 사용하여 실제 DB의 컬럼 정보 가져오기
+                    existing_columns = {c['name'] for c in inspector.get_columns(table_name)}
                     
                     # 모델에 정의된 컬럼과 비교
                     for column in table.c:
                         if column.name not in existing_columns:
-                            # 누락된 컬럼 추가
-                            col_type = column.type.compile(self.engine.dialect)
-                            # text()를 사용하여 SQL 실행
-                            connection.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {column.name} {col_type}'))
-                            print(f"테이블 '{table_name}'에 누락된 컬럼 '{column.name}' 추가 완료.")
+                            # SQLAlchemy의 DDL 컴파일러를 사용하여 ADD COLUMN 구문 생성
+                            from sqlalchemy.schema import CreateColumn
+                            # 트랜잭션 내에서 DDL 실행
+                            with connection.begin() as trans:
+                                add_column_ddl = str(CreateColumn(column).compile(self.engine))
+                                connection.execute(text(add_column_ddl))
+                                print(f"테이블 '{table_name}'에 누락된 컬럼 '{column.name}' 추가 완료.")
                 except Exception as e:
                     # 테이블이 아직 존재하지 않는 경우 등 예외 처리
                     if "no such table" in str(e):
@@ -119,7 +125,7 @@ class DBManager:
 
                     if db_version < SCHEMA_VERSION:
                         print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 마이그레이션 시작.")
-                        self._run_migrations(connection)
+                        self._run_migrations()
                         # 새 버전으로 업데이트
                         connection.execute(text("DELETE FROM _schema_version"))
                         connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
@@ -128,7 +134,6 @@ class DBManager:
 
     def create_default_admin(self):
         """기본 관리자 계정(admin)이 없으면 생성합니다."""
-        Base.metadata.create_all(self.engine)
         session = self.get_session()
         try:
             admin_user = session.query(User).filter_by(username='admin').first()

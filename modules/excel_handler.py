@@ -21,6 +21,16 @@ def get_excel_path():
         return os.path.join(os.path.expanduser('~'), 'Documents')
     return path
 
+def save_excel_path(path):
+    """선택된 경로를 config.ini에 저장합니다."""
+    config = configparser.ConfigParser()
+    config.read(CONFIG_FILE_PATH, encoding='utf-8')
+    if not config.has_section('Paths'):
+        config.add_section('Paths')
+    config.set('Paths', 'excel_dir', path)
+    with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
+        config.write(configfile)
+
 def get_timestamped_filename(default_filename):
     """파일 이름에 타임스탬프를 추가합니다 (확장자 앞)."""
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -41,6 +51,8 @@ def export_template(headers, default_filename="template.xlsx"):
     if not file_path:
         return
 
+    save_excel_path(os.path.dirname(file_path))
+
     try:
         workbook = Workbook()
         sheet = workbook.active
@@ -59,6 +71,8 @@ def import_data():
     )
     if not file_path:
         return None
+
+    save_excel_path(os.path.dirname(file_path))
 
     def clean_cell(cell):
         """
@@ -108,6 +122,8 @@ def export_multisheet_template(sheets_with_headers, default_filename="template.x
     if not file_path:
         return
 
+    save_excel_path(os.path.dirname(file_path))
+
     try:
         workbook = Workbook()
         workbook.remove(workbook.active)
@@ -129,6 +145,8 @@ def import_multisheet_data():
     )
     if not file_path:
         return None
+
+    save_excel_path(os.path.dirname(file_path))
 
     def clean_cell(cell):
         """
@@ -181,6 +199,8 @@ def export_data_to_excel(headers, data_rows, default_filename="export.xlsx"):
     if not file_path:
         return
 
+    save_excel_path(os.path.dirname(file_path))
+
     try:
         workbook = Workbook()
         sheet = workbook.active
@@ -205,6 +225,8 @@ def export_multisheet_data_to_excel(sheets_data, default_filename="export.xlsx")
     )
     if not file_path:
         return
+
+    save_excel_path(os.path.dirname(file_path))
 
     try:
         workbook = Workbook()
@@ -232,6 +254,8 @@ def export_formulation_template(formulation_data, default_filename="formulation.
     )
     if not file_path:
         return
+
+    save_excel_path(os.path.dirname(file_path))
 
     try:
         wb = Workbook()
@@ -519,6 +543,8 @@ def import_formulation_template():
     if not file_path:
         return None
 
+    save_excel_path(os.path.dirname(file_path))
+
     try:
         wb = openpyxl.load_workbook(file_path, data_only=True)
         ws = wb["처방 정보"] if "처방 정보" in wb.sheetnames else wb.active
@@ -621,6 +647,8 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
     )
     if not file_path:
         return
+
+    save_excel_path(os.path.dirname(file_path))
 
     try:
         wb = Workbook()
@@ -739,6 +767,8 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
     )
     if not file_path:
         return
+
+    save_excel_path(os.path.dirname(file_path))
 
     try:
         wb = Workbook()

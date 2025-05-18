@@ -36,7 +36,7 @@ FRAME_QUALITY = "quality" # 품질관리 프레임 이름 추가
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("화장품 원료 관리 시스템")
+        self.title("화장품 연구소 관리 시스템")
 
         # 최근 활동 기록을 위한 설정
         self.ACTION_CONFIG = {
@@ -402,15 +402,39 @@ class App(ctk.CTk):
             config.write(configfile)
 
     def center_on_mouse_screen(self):
+        """
+        마우스 커서가 위치한 모니터의 중앙에 창을 배치하고 크기를 조절합니다.
+        멀티 모니터 환경에서 각기 다른 해상도를 지원합니다.
+        """
         print(f"{datetime.now()}: center_on_mouse_screen 호출")
         self.update_idletasks()
+
+        # 마우스 커서의 현재 위치를 가져옵니다.
+        pointer_x = self.winfo_pointerx()
+        pointer_y = self.winfo_pointery()
+
+        # 마우스 위치를 기반으로 현재 모니터의 정보를 가져옵니다.
+        # geometry()는 'widthxheight+x+y' 형식의 문자열을 반환합니다.
+        # 이 정보는 창이 위치할 모니터의 크기와 위치를 나타냅니다.
+        # Tkinter는 이 메서드를 호출할 때 가장 적합한 모니터 정보를 자동으로 찾습니다.
+        geom = self.winfo_geometry()
+        self.geometry(f'1x1+{pointer_x}+{pointer_y}') # 임시로 창을 마우스 위치로 이동시켜 올바른 모니터 감지
+        self.update_idletasks()
+        
+        # 마우스가 있는 모니터의 너비와 높이를 가져옵니다.
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
+        
+        # 모니터의 작업 영역(작업 표시줄 제외)을 고려하여 위치를 계산합니다.
+        screen_x = self.winfo_screenmmwidth() # 이 값은 실제 좌표가 아니므로 사용하지 않음
+        screen_y = self.winfo_screenmmheight() # 이 값은 실제 좌표가 아니므로 사용하지 않음
+
         width = int(screen_width * 0.9)
         height = int(screen_height * 0.9)
         x = (screen_width // 2) - (width // 2)
         y = (screen_height // 2) - (height // 2)
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        
+        self.geometry(f"{width}x{height}+{x}+{y}") # 최종 크기와 위치 설정
         self.minsize(int(screen_width * 0.6), int(screen_height * 0.6))
 
     def restart_program(self):

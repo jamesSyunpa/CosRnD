@@ -161,13 +161,14 @@ class DataManagementFrame(ctk.CTkFrame):
 
         list_header_frame = ctk.CTkFrame(user_list_frame, fg_color="transparent")
         list_header_frame.grid(row=0, column=0, pady=10, sticky="ew")
-        ctk.CTkLabel(list_header_frame, text="사용자 목록", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        list_header_frame.grid_columnconfigure(2, weight=1) # 오른쪽 정렬을 위한 빈 공간
 
-        ctk.CTkButton(list_header_frame, text="전체 이력 조회", command=self.show_all_user_history).pack(side="left", padx=(20, 0))
+        ctk.CTkLabel(list_header_frame, text="사용자 목록", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(list_header_frame, text="전체 이력 조회", command=self.show_all_user_history).grid(row=0, column=1, padx=(20, 0), sticky="w")
 
-
+        # pack 대신 grid를 사용하여 오른쪽 정렬
         user_excel_frame = ctk.CTkFrame(list_header_frame, fg_color="transparent")
-        user_excel_frame.pack(side="right")
+        user_excel_frame.grid(row=0, column=3, sticky="e")
         ctk.CTkButton(user_excel_frame, text="데이터 내보내기", command=self.export_user_data).pack(side="left", padx=5)
         self.user_import_button = ctk.CTkButton(user_excel_frame, text="데이터 가져오기", command=self.import_user_data)
         self.user_import_button.pack(side="left", padx=5)
@@ -260,12 +261,14 @@ class DataManagementFrame(ctk.CTkFrame):
 
         client_list_header_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
         client_list_header_frame.grid(row=0, column=0, pady=10, sticky="ew")
-        ctk.CTkLabel(client_list_header_frame, text="거래처 목록", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        client_list_header_frame.grid_columnconfigure(2, weight=1) # 오른쪽 정렬을 위한 빈 공간
 
-        ctk.CTkButton(client_list_header_frame, text="전체 이력 조회", command=self.show_all_client_history).pack(side="left", padx=(20, 0))
+        ctk.CTkLabel(client_list_header_frame, text="거래처 목록", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(client_list_header_frame, text="전체 이력 조회", command=self.show_all_client_history).grid(row=0, column=1, padx=(20, 0), sticky="w")
 
+        # pack 대신 grid를 사용하여 오른쪽 정렬
         client_excel_frame = ctk.CTkFrame(client_list_header_frame, fg_color="transparent")
-        client_excel_frame.pack(side="right")
+        client_excel_frame.grid(row=0, column=3, sticky="e")
         ctk.CTkButton(client_excel_frame, text="데이터 내보내기", command=self.export_client_data).pack(side="left", padx=5)
         self.client_import_button = ctk.CTkButton(client_excel_frame, text="데이터 가져오기", command=self.import_client_data)
         self.client_import_button.pack(side="left", padx=5)
@@ -368,10 +371,10 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("정보", "내보낼 거래처 데이터가 없습니다.")
             return
 
-        headers = ["거래처코드(사업자번호)", "거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부"]
+        headers = ["거래처 유형", "거래처코드(사업자번호)", "거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부(Y/N)"]
         data_rows = [
             (
-                client.client_type,
+                client.client_type or "기타",
                 client.business_number,
                 client.name,
                 getattr(client, 'ceo_name', ''),
@@ -404,13 +407,13 @@ class DataManagementFrame(ctk.CTkFrame):
                     client = Client(business_number=str(biz_num))
                     session.add(client)
 
-                client.client_type = get_val(row, "거래처 유형", "client_type") or "기타"
+                client.client_type = get_val(row, "거래처 유형", "client_type") or "기타" # noqa
                 client.name = get_val(row, "거래처명", "name")
                 setattr(client, 'ceo_name', get_val(row, "대표자명", "ceo_name"))
                 client.manager_name = get_val(row, "담당자명", "manager_name")
                 client.phone = get_val(row, "연락처", "phone")
                 setattr(client, 'fax', get_val(row, "팩스", "fax"))
-                client.email = get_val(row, "이메일", "email")
+                client.email = get_val(row, "이메일", "email") # noqa
                 setattr(client, 'zip_code', get_val(row, "우편번호", "zip_code"))
                 client.address = get_val(row, "주소", "address")
                 is_active_val = get_val(row, "사용여부(Y/N)", "is_active(Y/N)") or "Y"

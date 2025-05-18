@@ -67,7 +67,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         # ===== 탭 전체 그리드 구조 =====
         tab_frame.grid_columnconfigure(0, weight=1, minsize=450)  # 좌측 폼
         tab_frame.grid_columnconfigure(1, weight=0)               # 가운데 조절바
-        tab_frame.grid_columnconfigure(2, weight=2, minsize=600)  # 우측 리스트
+        tab_frame.grid_columnconfigure(2, weight=2, minsize=750)  # 우측 리스트 (버튼 잘림 방지를 위해 최소 너비 증가)
         tab_frame.grid_rowconfigure(0, weight=1)
 
         # ===== 좌측: 원료 입력 폼 =====
@@ -76,7 +76,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.form_container.grid_columnconfigure(0, weight=0)
         self.form_container.grid_columnconfigure(1, weight=1)  # 입력 필드 가변
 
-        material_labels = ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "NMPA등록번호", "등록일"]
+        material_labels = ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "등록일"]
         self.material_entries = {}
         for i, text in enumerate(material_labels):
             ctk.CTkLabel(self.form_container, text=text).grid(row=i, column=0, padx=10, pady=5, sticky="w")
@@ -106,33 +106,46 @@ class MaterialManagementFrame(ctk.CTkFrame):
         ingredient_frame.grid_columnconfigure(0, weight=0)
         ingredient_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(ingredient_frame, text="전성분 목록", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, columnspan=2, pady=5
-        )
-
-        ing_tree_cols = ("id", "name_ko", "name_en", "cas_no", "ratio", "function", "hs_code", "nmpa_reg_num", "remark")
-        self.ingredient_tree = ttk.Treeview(ingredient_frame, columns=ing_tree_cols, show="headings", height=5)
-        col_settings = {
-            "id": (40, "center"), "name_ko": (100, "w"), "name_en": (100, "w"),
-            "cas_no": (80, "w"), "ratio": (60, "e"), "function": (80, "w"),
-            "hs_code": (80, "w"), "nmpa_reg_num": (100, "w"), "remark": (100, "w")
+        # 전성분 헤더 프레임 (레이블 + 열 선택 버튼)
+        ing_header_frame = ctk.CTkFrame(ingredient_frame, fg_color="transparent")
+        ing_header_frame.grid(row=0, column=0, columnspan=2, pady=5, sticky="ew")
+        ctk.CTkLabel(ing_header_frame, text="전성분 목록", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5)
+        # 전성분 트리뷰 컬럼 설정
+        self.ing_cols_config = {
+            "id": {"text": "ID", "width": 40, "anchor": "center", "visible": False},
+            "name_ko": {"text": "한글전성분", "width": 100, "anchor": "w", "visible": True},
+            "name_en": {"text": "INGREDIENT", "width": 100, "anchor": "w", "visible": True},
+            "cas_no": {"text": "CAS NO.", "width": 80, "anchor": "w", "visible": True},
+            "ratio": {"text": "조성비(%)", "width": 60, "anchor": "e", "visible": True},
+            "function": {"text": "기능", "width": 80, "anchor": "w", "visible": True},
+            "ewg_grade": {"text": "EWG등급", "width": 80, "anchor": "w", "visible": False},
+            "ewg_data": {"text": "EWG데이터", "width": 80, "anchor": "w", "visible": False},
+            "remark": {"text": "비고", "width": 100, "anchor": "w", "visible": True}
         }
-        for col, (w, anchor) in col_settings.items():
-            self.ingredient_tree.heading(col, text=col.upper() if col != "name_ko" else "한글전성분")
-            self.ingredient_tree.column(col, width=w, anchor=anchor)
 
-        self.ingredient_tree.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
+        self.ingredient_tree = ttk.Treeview(ingredient_frame, columns=list(self.ing_cols_config.keys()), show="headings", height=5)
+        self._setup_treeview_columns(self.ingredient_tree, self.ing_cols_config)
+        self.ingredient_tree.grid(row=1, column=0, columnspan=2, padx=5, pady=(5,0), sticky="nsew")
         self.ingredient_tree.bind("<<TreeviewSelect>>", self.on_ingredient_tree_select)
-        ing_labels = ["한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "HS CODE", "NMPA등록번호", "비고"]
+
+        # 전성분 트리뷰 스크롤바
+        ing_v_scroll = ttk.Scrollbar(ingredient_frame, orient="vertical", command=self.ingredient_tree.yview)
+        self.ingredient_tree.configure(yscrollcommand=ing_v_scroll.set)
+        ing_v_scroll.grid(row=1, column=2, sticky='ns', pady=(5,0))
+        ing_h_scroll = ttk.Scrollbar(ingredient_frame, orient="horizontal", command=self.ingredient_tree.xview)
+        self.ingredient_tree.configure(xscrollcommand=ing_h_scroll.set)
+        ing_h_scroll.grid(row=2, column=0, columnspan=2, sticky='ew', padx=5)
+
+        ing_labels = ["한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "비고"]
         self.ingredient_entries = {}
         for i, text in enumerate(ing_labels):
-            ctk.CTkLabel(ingredient_frame, text=text).grid(row=i+2, column=0, padx=5, pady=2, sticky="w")
+            ctk.CTkLabel(ingredient_frame, text=text).grid(row=i+3, column=0, padx=5, pady=2, sticky="w")
             entry = ctk.CTkEntry(ingredient_frame)
-            entry.grid(row=i+2, column=1, padx=5, pady=2, sticky="ew")
+            entry.grid(row=i+3, column=1, padx=5, pady=2, sticky="ew")
             self.ingredient_entries[text] = entry
 
         ing_button_frame = ctk.CTkFrame(ingredient_frame, fg_color="transparent")
-        ing_button_frame.grid(row=len(ing_labels)+2, column=1, pady=5, sticky="e")
+        ing_button_frame.grid(row=len(ing_labels)+3, column=1, pady=5, sticky="e")
         self.ing_add_button = ctk.CTkButton(ing_button_frame, text="추가", width=60, command=self.add_ingredient)
         self.ing_add_button.pack(side="left", padx=2)
         self.ing_update_button = ctk.CTkButton(ing_button_frame, text="수정", width=60, command=self.update_ingredient)
@@ -145,7 +158,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
         # 원료 저장 관련 버튼
         main_button_frame = ctk.CTkFrame(self.form_container, fg_color="transparent")
-        main_button_frame.grid(row=len(material_labels)+3, column=0, columnspan=2, pady=10)
+        main_button_frame.grid(row=len(material_labels)+4, column=0, columnspan=2, pady=10)
         self.mat_save_button = ctk.CTkButton(main_button_frame, text="원료 저장", command=self.save_material)
         self.mat_save_button.pack(side="left", padx=5)
         self.mat_new_button = ctk.CTkButton(main_button_frame, text="신규 작성", command=self.clear_material_form)
@@ -171,18 +184,19 @@ class MaterialManagementFrame(ctk.CTkFrame):
         # --- 헤더 및 검색/버튼 프레임 ---
         list_header_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
         list_header_frame.grid(row=0, column=0, columnspan=2, pady=(10, 5), padx=10, sticky="ew")
-        
-        ctk.CTkLabel(list_header_frame, text="원료 목록", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
-        
-        # 오른쪽 정렬을 위한 버튼/검색 프레임
+        list_header_frame.grid_columnconfigure(1, weight=1) # 가변 공간
+
+        # 좌측 위젯 (레이블)
+        ctk.CTkLabel(list_header_frame, text="원료 목록", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
+
+        # 우측 위젯 (버튼 및 검색창)
         right_header_frame = ctk.CTkFrame(list_header_frame, fg_color="transparent")
-        right_header_frame.pack(side="right")
+        right_header_frame.grid(row=0, column=2, sticky="e")
 
-        ctk.CTkButton(right_header_frame, text="전체 이력 조회", command=self.show_all_material_history).pack(side="left", padx=5)
-        ctk.CTkLabel(right_header_frame, text="검색:").pack(side="left", padx=(10, 5))
-
+        ctk.CTkButton(right_header_frame, text="전체 이력 조회", command=self.show_all_material_history).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(right_header_frame, text="검색:").pack(side="left", padx=(0, 5))
         self.material_search_entry = ctk.CTkEntry(right_header_frame, width=150)
-        self.material_search_entry.pack(side="left", fill="x", expand=True)
+        self.material_search_entry.pack(side="left", padx=5)
         self.material_search_entry.bind("<KeyRelease>", lambda e: self.load_materials())
         ctk.CTkButton(right_header_frame, text="초기화", width=60, command=self.reset_material_search).pack(side="left", padx=5)
         ctk.CTkButton(right_header_frame, text="데이터 내보내기", command=self.export_material_data).pack(side="left", padx=5)
@@ -207,7 +221,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
         # ===== 원료 목록 트리뷰 =====        
         # 트리뷰 생성
-        mat_tree_cols = ("id", "code", "name", "unit_price", "package_unit", "client", "manufacturer", "hs_code", "nmpa_reg_num")
+        mat_tree_cols = ("id", "code", "name", "unit_price", "package_unit", "client", "manufacturer", "hs_code", "origin", "name_en", "nmpa_reg_num")
         self.material_tree = ttk.Treeview(list_frame, columns=mat_tree_cols, show="headings", selectmode="browse")
         
         # 컬럼 설정
@@ -219,19 +233,47 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.material_tree.heading("client", text="거래처");        self.material_tree.column("client", width=150, anchor="w")
         self.material_tree.heading("manufacturer", text="제조원명"); self.material_tree.column("manufacturer", width=150, anchor="w")
         self.material_tree.heading("hs_code", text="HS CODE");      self.material_tree.column("hs_code", width=100, anchor="w")
+        self.material_tree.heading("origin", text="원산지");        self.material_tree.column("origin", width=100, anchor="w")
+        self.material_tree.heading("name_en", text="영문원료명");    self.material_tree.column("name_en", width=200, anchor="w")
         self.material_tree.heading("nmpa_reg_num", text="NMPA등록번호"); self.material_tree.column("nmpa_reg_num", width=120, anchor="w")
 
         # 배치
-        self.material_tree.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 10))
+        self.material_tree.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 5))
 
         # 스크롤바
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.material_tree.yview)
-        self.material_tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.grid(row=1, column=1, sticky="ns", pady=(0, 10))
+        v_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.material_tree.yview)
+        self.material_tree.configure(yscrollcommand=v_scrollbar.set)
+        v_scrollbar.grid(row=1, column=1, sticky="ns", pady=(0, 5))
 
+        h_scrollbar = ttk.Scrollbar(list_frame, orient="horizontal", command=self.material_tree.xview)
+        self.material_tree.configure(xscrollcommand=h_scrollbar.set)
+        h_scrollbar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(10, 0), pady=(0, 10))
+        
         # 선택 이벤트 바인딩
         self.material_tree.bind("<<TreeviewSelect>>", self.on_material_tree_select)
                                
+    def _create_column_selection_menu(self, treeview, columns_config, button_widget):
+        """열 선택 체크박스 메뉴를 생성하고 버튼에 연결합니다."""
+        column_menu = tk.Menu(button_widget, tearoff=0)
+        
+        for col_id, config in columns_config.items():
+            # ID 열은 항상 숨김 처리
+            if col_id == 'id':
+                continue
+            
+            var = tk.BooleanVar(value=config.get("visible", True))
+            column_menu.add_checkbutton(
+                label=config["text"],
+                variable=var,
+                command=lambda tv=treeview, cfg=columns_config: self._update_visible_columns(tv, cfg)
+            )
+            config["variable"] = var
+
+        button_widget.configure(command=lambda: column_menu.tk_popup(
+            button_widget.winfo_rootx(), 
+            button_widget.winfo_rooty() + button_widget.winfo_height()
+        ))
+
     def on_sash_press(self, event):
         self._sash_drag_start_x = event.x_root
         self._form_start_width = self.form_container.winfo_width()
@@ -255,13 +297,13 @@ class MaterialManagementFrame(ctk.CTkFrame):
             session.close()
             return
             
-        mat_headers = ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "NMPA등록번호", "등록일", "사용여부"]
+        mat_headers = ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "사용여부"]
         mat_rows = []
         for mat in materials:
             client_name = session.query(Client.name).filter_by(id=mat.client_id).scalar() or ""
             mat_rows.append((
-                mat.code, mat.name, mat.unit_price, mat.package_unit, client_name,
-                mat.manufacturer, mat.hs_code, mat.nmpa_reg_num, mat.reg_date, "Y" if mat.is_active else "N"
+                mat.code, mat.name, mat.unit_price, mat.package_unit,
+                client_name, mat.manufacturer, mat.hs_code, mat.origin, mat.name_en, mat.nmpa_reg_num, "Y" if mat.is_active else "N"
             ))
 
         ing_headers = ["원료코드", "한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "HS CODE", "NMPA등록번호", "비고"]
@@ -349,6 +391,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
                         # 재료 기본 정보 설정
                         material.name = get_val(mat_row, "원료명", "name") or ""
+                        material.name_en = get_val(mat_row, "영문원료명", "name_en") or ""
                         
                         # 단가 처리
                         unit_price_val = get_val(mat_row, "단가", "unit_price")
@@ -403,8 +446,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
                         
                         material.manufacturer = get_val(mat_row, "제조원명", "manufacturer") or ""
                         material.hs_code = get_val(mat_row, "HS CODE", "hs_code") or ""
+                        material.origin = get_val(mat_row, "원산지", "origin") or ""
+                        material.name_en = get_val(mat_row, "영문원료명", "name_en") or ""
                         material.nmpa_reg_num = get_val(mat_row, "NMPA등록번호", "nmpa_reg_num") or ""
-                        material.reg_date = get_val(mat_row, "등록일", "reg_date") or ""
                         
                         # 사용여부 처리
                         is_active_val = get_val(mat_row, "사용여부(Y/N)", "is_active") or "Y"
@@ -544,13 +588,15 @@ class MaterialManagementFrame(ctk.CTkFrame):
             self.material_tree.insert("", "end", tags=(tag,), values=(
                 mat.id, 
                 mat.code,
-                mat.name, 
-                mat.unit_price, 
+                mat.name,
+                f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
                 mat.package_unit, 
                 client_name, 
                 mat.manufacturer, 
                 mat.hs_code, 
-                mat.nmpa_reg_num
+                mat.origin,
+                mat.name_en or "",
+                mat.nmpa_reg_num or "",
             ))
         session.close()
 
@@ -637,10 +683,12 @@ class MaterialManagementFrame(ctk.CTkFrame):
             # 재료 기본 정보 입력
             self.material_entries["코드"].insert(0, material.code or "")
             self.material_entries["원료명"].insert(0, material.name or "")
+            self.material_entries["영문원료명"].insert(0, material.name_en or "")
             self.material_entries["단가"].insert(0, str(material.unit_price or 0.0))
             self.material_entries["포장단위"].insert(0, material.package_unit or "")
             self.material_entries["제조원명"].insert(0, material.manufacturer or "")
             self.material_entries["HS CODE"].insert(0, material.hs_code or "")
+            self.material_entries["원산지"].insert(0, material.origin or "")
             self.material_entries["NMPA등록번호"].insert(0, material.nmpa_reg_num or "")
             self.material_entries["등록일"].insert(0, material.reg_date or "")
 
@@ -687,8 +735,6 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     "function": ing.function or "", 
                     "ewg_grade": ing.ewg_grade or "",
                     "ewg_data": ing.ewg_data or "",
-                    "hs_code": ing.hs_code or "",
-                    "nmpa_reg_num": ing.nmpa_reg_num or "",
                     "remark": ing.remark or ""
                 }
                 self.temp_ingredients.append(ingredient_data)
@@ -733,6 +779,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
             # temp_ingredients의 모든 항목을 트리뷰에 추가
             for i, ing in enumerate(self.temp_ingredients):
                 tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+                # 컬럼 설정에 따라 값을 동적으로 구성
                 values = (
                     ing.get("id", f"temp_{i}"), 
                     ing.get("name_ko", ""), 
@@ -741,8 +788,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     ing.get("composition_ratio", ""),
                     ing.get("function", ""),
                     ing.get("ewg_grade", ""),
-                    ing.get("hs_code", ""),
-                    ing.get("nmpa_reg_num", ""),
+                    ing.get("ewg_data", ""),
                     ing.get("remark", "")
                 )
                 
@@ -755,6 +801,17 @@ class MaterialManagementFrame(ctk.CTkFrame):
             print(f"트리뷰 새로고침 중 오류: {e}")
             import traceback
             traceback.print_exc()
+
+    def _setup_treeview_columns(self, treeview, columns_config):
+        """Treeview의 컬럼과 헤더를 설정하고 초기 가시성을 적용합니다."""
+        treeview.configure(columns=list(columns_config.keys()))
+        for col_id, config in columns_config.items():
+            treeview.heading(col_id, text=config["text"])
+            treeview.column(col_id, width=config["width"], anchor=config.get("anchor", "w"))
+        
+        visible_columns = [col_id for col_id, config in columns_config.items() if config.get("visible", True)]
+        treeview.configure(displaycolumns=visible_columns)
+
 
     def debug_material_ingredients(self, material_id):
         """특정 재료의 전성분을 직접 DB에서 조회하여 확인"""
@@ -789,11 +846,18 @@ class MaterialManagementFrame(ctk.CTkFrame):
             self.clear_material_form()
             self.load_materials()
 
+    def _update_visible_columns(self, treeview, columns_config):
+        """체크박스 상태에 따라 Treeview의 열을 업데이트합니다."""
+        visible_columns = [col_id for col_id, config in columns_config.items() if config.get("variable") and config["variable"].get()]
+        # ID 열은 항상 숨겨져 있어야 하므로, visible_columns에 포함되지 않도록 합니다.
+        if 'id' not in visible_columns:
+            treeview.configure(displaycolumns=visible_columns)
+
     def on_ingredient_tree_select(self, event):
         selected_item = self.ingredient_tree.selection()
         if not selected_item: return
         
-        ing_id_val = self.ingredient_tree.item(selected_item[0], "values")[0]
+        ing_id_val = self.ingredient_tree.item(selected_item[0], "values")[self.get_column_index("id")]
         if str(ing_id_val).isdigit():
             ing_id = int(ing_id_val)
         else:
@@ -816,8 +880,6 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.ingredient_entries["기능"].insert(0, selected_ing.get("function", ""))
         self.ingredient_entries["EWG등급"].insert(0, selected_ing.get("ewg_grade", ""))
         self.ingredient_entries["EWG등급데이터"].insert(0, selected_ing.get("ewg_data", ""))
-        self.ingredient_entries["HS CODE"].insert(0, selected_ing.get("hs_code", ""))
-        self.ingredient_entries["NMPA등록번호"].insert(0, selected_ing.get("nmpa_reg_num", ""))
         self.ingredient_entries["비고"].insert(0, selected_ing.get("remark", ""))
 
         # 비관리자일 경우, 폼을 채운 후 다시 모든 필드를 비활성화
@@ -825,7 +887,11 @@ class MaterialManagementFrame(ctk.CTkFrame):
             for entry in self.ingredient_entries.values():
                 entry.configure(state="readonly")
 
-    
+    def get_column_index(self, col_name):
+        """설정된 컬럼 리스트에서 특정 컬럼의 인덱스를 반환합니다."""
+        return list(self.ing_cols_config.keys()).index(col_name)
+
+
 
     def clear_material_form(self):
         self._selected_material_id = None
@@ -886,8 +952,6 @@ class MaterialManagementFrame(ctk.CTkFrame):
             "function": self.ingredient_entries["기능"].get(),
             "ewg_grade": self.ingredient_entries["EWG등급"].get(),
             "ewg_data": self.ingredient_entries["EWG등급데이터"].get(),
-            "hs_code": self.ingredient_entries["HS CODE"].get(),
-            "nmpa_reg_num": self.ingredient_entries["NMPA등록번호"].get(),
             "remark": self.ingredient_entries["비고"].get()
         }
         self.temp_ingredients.append(new_ingredient)
@@ -915,8 +979,6 @@ class MaterialManagementFrame(ctk.CTkFrame):
         selected_ing["function"] = self.ingredient_entries["기능"].get()
         selected_ing["ewg_grade"] = self.ingredient_entries["EWG등급"].get()
         selected_ing["ewg_data"] = self.ingredient_entries["EWG등급데이터"].get()
-        selected_ing["hs_code"] = self.ingredient_entries["HS CODE"].get()
-        selected_ing["nmpa_reg_num"] = self.ingredient_entries["NMPA등록번호"].get()
         selected_ing["remark"] = self.ingredient_entries["비고"].get()
         
         self.refresh_ingredient_tree()
@@ -974,13 +1036,16 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 log_action = "신규 생성"
                 log_entries.append(f"코드: '{code}'")
                 log_entries.append(f"원료명: '{name}'")
+                log_entries.append(f"영문원료명: '{self.material_entries['영문원료명'].get()}'")
                 log_entries.append(f"단가: '{self.material_entries['단가'].get() or '0.0'}'")
                 log_entries.append(f"포장단위: '{self.material_entries['포장단위'].get()}'")
                 log_entries.append(f"거래처: '{client_name_input}'")
                 log_entries.append(f"제조원명: '{self.material_entries['제조원명'].get()}'")
                 log_entries.append(f"HS CODE: '{self.material_entries['HS CODE'].get()}'")
+                log_entries.append(f"원산지: '{self.material_entries['원산지'].get()}'")
+                log_entries.append(f"영문원료명: '{self.material_entries['영문원료명'].get()}'")
                 log_entries.append(f"NMPA등록번호: '{self.material_entries['NMPA등록번호'].get()}'")
-                log_entries.append(f"등록일: '{self.material_entries['등록일'].get()}'")
+                log_entries.append(f"등록일: '{self.material_entries['등록일'].get()}'") # 이 부분은 로그 기록이므로 그대로 둡니다.
                 log_entries.append(f"사용 여부: '{self.material_active_var.get() == 'on'}'")
                 for temp_ing in self.temp_ingredients:
                     log_entries.append(f"전성분 추가: {temp_ing['name_ko']} ({temp_ing['name_en']}) - {temp_ing['composition_ratio']}%")
@@ -992,6 +1057,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
                 log_change("코드", material.code or "", code)
                 log_change("원료명", material.name or "", name)
+                log_change("영문원료명", material.name_en or "", self.material_entries["영문원료명"].get())
                 log_change("단가", str(material.unit_price or 0.0), self.material_entries["단가"].get() or "0.0")
                 log_change("포장단위", material.package_unit or "", self.material_entries["포장단위"].get())
                 
@@ -1001,6 +1067,8 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
                 log_change("제조원명", material.manufacturer or "", self.material_entries["제조원명"].get())
                 log_change("HS CODE", material.hs_code or "", self.material_entries["HS CODE"].get())
+                log_change("원산지", material.origin or "", self.material_entries["원산지"].get())
+                log_change("영문원료명", material.name_en or "", self.material_entries["영문원료명"].get())
                 log_change("NMPA등록번호", material.nmpa_reg_num or "", self.material_entries["NMPA등록번호"].get())
                 log_change("등록일", material.reg_date or "", self.material_entries["등록일"].get())
                 
@@ -1030,13 +1098,16 @@ class MaterialManagementFrame(ctk.CTkFrame):
             # 공통 필드 저장
             material.code = code
             material.name = name
+            material.name_en = self.material_entries["영문원료명"].get()
             material.unit_price = float(self.material_entries["단가"].get() or 0.0)
             material.package_unit = self.material_entries["포장단위"].get()
             material.client_id = new_client_id
             material.manufacturer = self.material_entries["제조원명"].get()
             material.hs_code = self.material_entries["HS CODE"].get()
+            material.origin = self.material_entries["원산지"].get()
+            material.name_en = self.material_entries["영문원료명"].get()
             material.nmpa_reg_num = self.material_entries["NMPA등록번호"].get()
-            material.reg_date = self.material_entries["등록일"].get()
+            material.reg_date = self.material_entries["등록일"].get() or datetime.now().strftime("%Y-%m-%d") # 등록일이 비어있으면 현재 날짜로 저장
             material.is_active = new_is_active
 
             # 기존 성분 삭제 후 새로 추가
@@ -1058,8 +1129,6 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     function=ing_data["function"],
                     ewg_grade=ing_data["ewg_grade"],
                     ewg_data=ing_data.get("ewg_data"),
-                    hs_code=ing_data.get("hs_code"),
-                    nmpa_reg_num=ing_data.get("nmpa_reg_num"),
                     remark=ing_data.get("remark")
                 ))
 
