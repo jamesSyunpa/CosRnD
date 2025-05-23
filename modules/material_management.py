@@ -20,6 +20,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self._selected_ingredient_id = None
         self.is_new_mode = True
         self.bulk_importing = False
+        self.search_timer = None # 검색 디바운싱을 위한 타이머
         
         # 탭 뷰가 필요 없으므로, UI를 프레임에 직접 구성합니다.
         self.setup_data_management_tab(self)
@@ -109,7 +110,11 @@ class MaterialManagementFrame(ctk.CTkFrame):
         # 전성분 헤더 프레임 (레이블 + 열 선택 버튼)
         ing_header_frame = ctk.CTkFrame(ingredient_frame, fg_color="transparent")
         ing_header_frame.grid(row=0, column=0, columnspan=2, pady=5, sticky="ew")
+        ing_header_frame.grid_columnconfigure(1, weight=1) # 버튼을 오른쪽으로 밀기 위한 빈 공간
+
         ctk.CTkLabel(ing_header_frame, text="전성분 목록", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5)
+        self.ing_col_select_button = ctk.CTkButton(ing_header_frame, text="열 선택", width=80)
+        self.ing_col_select_button.pack(side="right", padx=5)
         # 전성분 트리뷰 컬럼 설정
         self.ing_cols_config = {
             "id": {"text": "ID", "width": 40, "anchor": "center", "visible": False},
@@ -118,13 +123,16 @@ class MaterialManagementFrame(ctk.CTkFrame):
             "cas_no": {"text": "CAS NO.", "width": 80, "anchor": "w", "visible": True},
             "ratio": {"text": "조성비(%)", "width": 60, "anchor": "e", "visible": True},
             "function": {"text": "기능", "width": 80, "anchor": "w", "visible": True},
-            "ewg_grade": {"text": "EWG등급", "width": 80, "anchor": "w", "visible": False},
-            "ewg_data": {"text": "EWG데이터", "width": 80, "anchor": "w", "visible": False},
+            "ewg_grade": {"text": "EWG등급", "width": 80, "anchor": "w", "visible": True},
+            "ewg_data": {"text": "EWG데이터", "width": 80, "anchor": "w", "visible": True},
             "remark": {"text": "비고", "width": 100, "anchor": "w", "visible": True}
         }
 
-        self.ingredient_tree = ttk.Treeview(ingredient_frame, columns=list(self.ing_cols_config.keys()), show="headings", height=5)
+        self.ingredient_tree = ttk.Treeview(ingredient_frame, columns=list(self.ing_cols_config.keys()), show="headings", height=5) # noqa
         self._setup_treeview_columns(self.ingredient_tree, self.ing_cols_config)
+        # 열 선택 메뉴 생성 및 버튼에 연결
+        self._create_column_selection_menu(self.ingredient_tree, self.ing_cols_config, self.ing_col_select_button)
+
         self.ingredient_tree.grid(row=1, column=0, columnspan=2, padx=5, pady=(5,0), sticky="nsew")
         self.ingredient_tree.bind("<<TreeviewSelect>>", self.on_ingredient_tree_select)
 
@@ -197,7 +205,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         ctk.CTkLabel(right_header_frame, text="검색:").pack(side="left", padx=(0, 5))
         self.material_search_entry = ctk.CTkEntry(right_header_frame, width=150)
         self.material_search_entry.pack(side="left", padx=5)
-        self.material_search_entry.bind("<KeyRelease>", lambda e: self.load_materials())
+        self.material_search_entry.bind("<KeyRelease>", self.on_material_search) # 디바운싱 적용
         ctk.CTkButton(right_header_frame, text="초기화", width=60, command=self.reset_material_search).pack(side="left", padx=5)
         ctk.CTkButton(right_header_frame, text="데이터 내보내기", command=self.export_material_data).pack(side="left", padx=5)
         self.excel_import_button = ctk.CTkButton(right_header_frame, text="데이터 가져오기", command=self.import_material_data)
@@ -225,6 +233,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.material_tree = ttk.Treeview(list_frame, columns=mat_tree_cols, show="headings", selectmode="browse")
         
         # 컬럼 설정
+        # 'id' 컬럼은 숨김 처리
         self.material_tree.heading("id", text="ID");                self.material_tree.column("id", width=40, anchor="center")
         self.material_tree.heading("code", text="코드");            self.material_tree.column("code", width=100, anchor="w")
         self.material_tree.heading("name", text="원료명");          self.material_tree.column("name", width=200, anchor="w")
@@ -236,6 +245,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.material_tree.heading("origin", text="원산지");        self.material_tree.column("origin", width=100, anchor="w")
         self.material_tree.heading("name_en", text="영문원료명");    self.material_tree.column("name_en", width=200, anchor="w")
         self.material_tree.heading("nmpa_reg_num", text="NMPA등록번호"); self.material_tree.column("nmpa_reg_num", width=120, anchor="w")
+
+        # 'id' 컬럼을 숨깁니다.
+        self.material_tree.configure(displaycolumns=[col for col in mat_tree_cols if col != 'id'])
 
         # 배치
         self.material_tree.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 5))
@@ -573,6 +585,13 @@ class MaterialManagementFrame(ctk.CTkFrame):
         """원료 검색창을 초기화하고 전체 목록을 다시 불러옵니다."""
         self.material_search_entry.delete(0, "end")
         self.load_materials()
+
+    def on_material_search(self, event=None):
+        """검색창 입력 시 디바운싱을 적용하여 검색을 실행합니다."""
+        if self.search_timer:
+            self.after_cancel(self.search_timer)
+        # 500ms(0.5초) 후에 load_materials 함수를 실행
+        self.search_timer = self.after(500, self.load_materials)
 
     def load_materials(self):
         """DB에서 원료 목록을 검색하여 Treeview에 표시합니다."""

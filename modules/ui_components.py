@@ -3,11 +3,13 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk, messagebox
 from database.db_manager import db_manager
+from modules.translation import get_texts
 
 class HelpPopup(ctk.CTkToplevel):
     """도움말 내용을 표시하는 스크롤 가능한 팝업 창"""
     def __init__(self, master, title, message):
         super().__init__(master)
+        self.texts = get_texts(master.language if hasattr(master, 'language') else 'korean')
         self.title(title)
         self.geometry("600x450")
         self.transient(master)
@@ -16,13 +18,13 @@ class HelpPopup(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        scrollable_frame = ctk.CTkScrollableFrame(self, label_text="도움말")
+        scrollable_frame = ctk.CTkScrollableFrame(self, label_text=self.texts['help'])
         scrollable_frame.grid(row=0, column=0, padx=15, pady=15, sticky="nsew")
 
         label = ctk.CTkLabel(scrollable_frame, text=message, justify="left", anchor="nw")
         label.pack(padx=10, pady=10, fill="both", expand=True)
 
-        close_button = ctk.CTkButton(self, text="닫기", command=self.destroy)
+        close_button = ctk.CTkButton(self, text=self.texts['close'], command=self.destroy)
         close_button.grid(row=1, column=0, padx=15, pady=(0, 15))
 
 class CustomErrorDialog(ctk.CTkToplevel):
@@ -102,6 +104,21 @@ class CustomDropdown(ctk.CTkFrame):
         scroll_frame = ctk.CTkScrollableFrame(self.dropdown_toplevel, label_text="")
         scroll_frame.pack(fill="both", expand=True)
 
+        # --- 이벤트 전파 방지 (최종 수정) ---
+        # 드롭다운 메뉴가 열려 있는 동안, 마우스 휠 이벤트가 다른 위젯으로 전파되는 것을 막습니다.
+        # bind_all을 사용하여 이벤트를 가로채고, 드롭다운이 닫힐 때 unbind_all로 해제합니다.
+        def _block_scroll(event):
+            # 이벤트가 드롭다운 메뉴 내부에서 발생했는지 확인합니다.
+            # 이벤트 위젯이 드롭다운의 자식이 아니면 이벤트를 처리하지 않습니다.
+            if event.widget.winfo_toplevel() != self.dropdown_toplevel:
+                return
+            return "break"
+        self.dropdown_toplevel.bind_all("<MouseWheel>", _block_scroll, add="+")
+        
+        # 드롭다운이 닫힐 때 bind_all로 등록한 마우스 휠 이벤트를 해제합니다.
+        # unbind_all은 특정 함수를 지정할 수 없으므로, 이벤트 타입만 전달합니다.
+        self.dropdown_toplevel.bind("<Destroy>", lambda e: self.dropdown_toplevel.unbind_all("<MouseWheel>"))
+
         for value in self.values:
             item_button = ctk.CTkButton(scroll_frame, text=value, anchor="w",
                                         command=lambda v=value: self.select_item(v))
@@ -135,38 +152,56 @@ class AddMaterialDialog(ctk.CTkToplevel):
         self.on_add_callback = on_add_callback
         self.on_line_break_callback = on_line_break_callback
 
-        self.title("원료 추가")
+        self.language = master.language
+        self.texts = get_texts(self.language)
+        self.title(self.texts['add_material_title'])
         self.geometry("600x500")
         self.transient(master)
         self.grab_set()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self.treeviews = {} # 탭별 Treeview 위젯을 저장할 딕셔너리
+        self.search_timer = None # 검색 디바운싱을 위한 타이머
 
         # --- 검색 프레임 ---
         search_frame = ctk.CTkFrame(self, fg_color="transparent")
         search_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         search_frame.grid_columnconfigure(1, weight=1)
-        
-        ctk.CTkLabel(search_frame, text="원료 검색:").grid(row=0, column=0, padx=5)
+
+        ctk.CTkLabel(search_frame, text=self.texts['material_search']).grid(row=0, column=0, padx=5)
         self.search_entry = ctk.CTkEntry(search_frame)
         self.search_entry.grid(row=0, column=1, padx=5, sticky="ew")
         self.search_entry.bind("<Return>", self.search_materials)
-        self.search_entry.bind("<KeyRelease>", self.search_materials) # 실시간 검색을 위한 바인딩
-        ctk.CTkButton(search_frame, text="검색", width=60, command=lambda: self.search_materials()).grid(row=0, column=2, padx=5)
-        ctk.CTkButton(search_frame, text="초기화", width=60, command=self.reset_search).grid(row=0, column=3, padx=5)
+        self.search_entry.bind("<KeyRelease>", self.on_material_search)
+        ctk.CTkButton(search_frame, text=self.texts['search'], width=60, command=self.search_materials).grid(row=0, column=2, padx=5)
+        ctk.CTkButton(search_frame, text=self.texts['reset'], width=60, command=self.reset_search).grid(row=0, column=3, padx=5)
 
-        # --- 원료 목록 탭 뷰 ---
-        self.tab_view = ctk.CTkTabview(self, border_width=1)
-        self.tab_view.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        # --- 원료 목록 Treeview (탭 뷰 제거) ---
+        tree_frame = ctk.CTkFrame(self, fg_color="transparent")
+        tree_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        tree_frame.grid_columnconfigure(0, weight=1)
+        tree_frame.grid_rowconfigure(0, weight=1)
+
+        tree_columns = ("code", "name", "ingredients")
+        self.material_tree = ttk.Treeview(tree_frame, columns=tree_columns, show="headings", selectmode="browse")
+        self.material_tree.heading("code", text=self.texts['code']); self.material_tree.column("code", width=120) # noqa
+        self.material_tree.heading("name", text=self.texts['material_name']); self.material_tree.column("name", width=150) # noqa
+        self.material_tree.heading("ingredients", text=self.texts['all_ingredients']); self.material_tree.column("ingredients", width=200, stretch=True) # noqa
+
+        self.material_tree.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.material_tree.yview)
+        self.material_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.material_tree.bind("<<TreeviewSelect>>", self.on_material_select)
+        self.material_tree.bind("<Double-1>", self.on_double_click_add)
 
         # --- 전성분 상세 정보 프레임 ---
         details_frame = ctk.CTkFrame(self, fg_color="transparent")
         details_frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
         details_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(details_frame, text="전성분:").grid(row=0, column=0, padx=5, sticky="nw")
+        ctk.CTkLabel(details_frame, text=f"{self.texts['all_ingredients']}:").grid(row=0, column=0, padx=5, sticky="nw")
         self.ingredient_details_textbox = ctk.CTkTextbox(details_frame, height=60, state="disabled", wrap="word")
         self.ingredient_details_textbox.grid(row=0, column=1, padx=5, sticky="ew")
 
@@ -174,9 +209,9 @@ class AddMaterialDialog(ctk.CTkToplevel):
         # --- 버튼 프레임 ---
         button_frame = ctk.CTkFrame(self, fg_color="transparent")
         button_frame.grid(row=3, column=0, pady=10)
-        ctk.CTkButton(button_frame, text="원료 추가", command=self.on_add).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text="줄 내림", command=self.on_line_break_callback).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text="닫기", fg_color="gray50", hover_color="gray35", command=self.destroy).pack(side="left", padx=10)
+        ctk.CTkButton(button_frame, text=self.texts['add_material'], command=self.on_add).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text=self.texts['line_break'], command=self.on_line_break_callback).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text=self.texts['close'], fg_color="gray50", hover_color="gray35", command=self.destroy).pack(side="left", padx=10)
 
         self.search_materials() # 초기 전체 목록 로드
 
@@ -184,6 +219,13 @@ class AddMaterialDialog(ctk.CTkToplevel):
         """검색창을 비우고 전체 목록을 다시 불러옵니다."""
         self.search_entry.delete(0, "end")
         self.search_materials()
+
+    def on_material_search(self, event=None):
+        """검색창 입력 시 디바운싱을 적용하여 검색을 실행합니다."""
+        if self.search_timer:
+            self.after_cancel(self.search_timer)
+        # 500ms(0.5초) 후에 search_materials 함수를 실행
+        self.search_timer = self.after(500, self.search_materials)
 
     def _get_numeric_part(self, code_str: str):
         """문자열에서 숫자 부분을 추출하여 정수로 반환합니다."""
@@ -194,72 +236,26 @@ class AddMaterialDialog(ctk.CTkToplevel):
         return int(match.group(0)) if match else None
 
     def search_materials(self, event=None):
-        """DB에서 원료를 검색하여 1000단위 탭으로 나누어 표시합니다."""
+        """DB에서 원료를 검색하여 단일 Treeview에 표시합니다."""
         search_term = self.search_entry.get().strip()
-        
-        # 검색 전 현재 활성화된 탭 이름 저장
-        active_tab_name = self.tab_view.get()
 
-        # 기존 탭과 트리뷰를 모두 초기화합니다.
-        for tab_name in list(self.treeviews.keys()):
-            self.tab_view.delete(tab_name)
-        self.treeviews.clear()
+        # Treeview 초기화
+        for item in self.material_tree.get_children():
+            self.material_tree.delete(item)
 
         materials = db_manager.search_materials(search_term)
-        
-        # 원료를 코드 1000단위로 그룹화
-        grouped_materials = {}
-        other_materials = [] # 숫자 코드가 없는 원료를 위한 리스트
+
         for mat in materials:
-            num_part = self._get_numeric_part(mat.code)
-            if num_part is not None:
-                group_key = (num_part // 1000) * 1000
-                if group_key not in grouped_materials:
-                    grouped_materials[group_key] = []
-                grouped_materials[group_key].append(mat)
-            else:
-                other_materials.append(mat)
-
-        created_tabs = []
-        # 그룹화된 원료를 기반으로 탭과 Treeview를 순서대로 생성합니다.
-        for group_key in sorted(grouped_materials.keys()):
-            created_tabs.append(str(group_key))
-            tab_name = str(group_key)
-            tab = self.tab_view.add(tab_name)
-            tab.grid_columnconfigure(0, weight=1)
-            tab.grid_rowconfigure(0, weight=1)
-
-            tree = ttk.Treeview(tab, columns=("id", "code", "name", "ingredients"), show="headings", selectmode="browse")
-            tree.heading("id", text="ID"); tree.column("id", width=50, anchor="center")
-            tree.heading("code", text="코드"); tree.column("code", width=120)
-            tree.heading("name", text="원료명"); tree.column("name", width=150)
-            tree.heading("ingredients", text="전성분"); tree.column("ingredients", width=200, stretch=True)
-            tree.grid(row=0, column=0, sticky="nsew")
-
-            scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
-            tree.configure(yscrollcommand=scrollbar.set)
-            scrollbar.grid(row=0, column=1, sticky="ns")
-
-            tree.bind("<<TreeviewSelect>>", self.on_material_select)
-            tree.bind("<Double-1>", self.on_double_click_add)
-            self.treeviews[tab_name] = tree
-
-            for mat in grouped_materials[group_key]:
-                # 전성분 목록을 문자열로 만듭니다 (최대 3개).
-                ing_names = [ing.name_en for ing in mat.ingredients[:3]]
-                ing_str = ", ".join(ing_names)
-                if len(mat.ingredients) > 3:
-                    ing_str += "..."
-                tree.insert("", "end", values=(mat.id, mat.code, mat.name, ing_str))
+            # 전성분 목록을 문자열로 만듭니다 (최대 3개).
+            ing_names = [ing.name_en for ing in mat.ingredients[:3]]
+            ing_str = ", ".join(ing_names)
+            if len(mat.ingredients) > 3:
+                ing_str += "..."
+            self.material_tree.insert("", "end", iid=mat.id, values=(mat.code, mat.name, ing_str))
 
     def on_material_select(self, event=None):
         """트리뷰에서 원료 선택 시 전성분 목록을 표시합니다."""
-        active_tab_name = self.tab_view.get()
-        if not active_tab_name: return
-        active_treeview = self.treeviews.get(active_tab_name)
-        if not active_treeview: return
-
-        selected_item = active_treeview.selection()
+        selected_item = self.material_tree.selection()
         # 텍스트박스 초기화
         self.ingredient_details_textbox.configure(state="normal")
         self.ingredient_details_textbox.delete("1.0", "end")
@@ -268,7 +264,7 @@ class AddMaterialDialog(ctk.CTkToplevel):
             self.ingredient_details_textbox.configure(state="disabled")
             return
 
-        material_id = active_treeview.item(selected_item[0], "values")[0]
+        material_id = selected_item[0]
 
         session = db_manager.get_session()
         try:
@@ -281,7 +277,7 @@ class AddMaterialDialog(ctk.CTkToplevel):
                 ingredient_texts = [f"{ing.name_en} ({ing.name_ko})" for ing in ingredients]
                 details_text = ", ".join(ingredient_texts)
             else:
-                details_text = "등록된 전성분이 없습니다."
+                details_text = self.texts['no_ingredients_registered']
             self.ingredient_details_textbox.insert("1.0", details_text)
         finally:
             session.close()
@@ -304,20 +300,16 @@ class AddMaterialDialog(ctk.CTkToplevel):
 
     def on_add(self):
         """'추가' 버튼 클릭 시 콜백 함수를 호출합니다."""
-        active_tab_name = self.tab_view.get()
-        active_treeview = self.treeviews.get(active_tab_name)
-        if not active_treeview: return
-
-        selected_item = active_treeview.selection()
+        selected_item = self.material_tree.selection()
         if not selected_item:
-            messagebox.showwarning("선택 오류", "목록에서 추가할 원료를 선택하세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_material_to_add'], parent=self)
             return
-        
-        material_id = active_treeview.item(selected_item[0], "values")[0]
+
+        material_id = selected_item[0]
         self.on_add_callback(material_id)
-        
+
         # 추가 후 입력 필드 초기화
-        active_treeview.selection_remove(selected_item)
+        self.material_tree.selection_remove(selected_item)
 
 def try_convert_to_float(value):
     """값을 float으로 변환 시도, 실패 시 원래 값 반환"""

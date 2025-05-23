@@ -19,6 +19,7 @@ class User(Base):
     
     # --- 사용자 상세 정보 ---
     position = Column(String(50)) # 직책
+    manager_code = Column(String(50), unique=True) # 담당번호
     contact = Column(String(20)) # 연락처
     zip_code = Column(String(10)) # 우편번호
     address = Column(String(255)) # 주소

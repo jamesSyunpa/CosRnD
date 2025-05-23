@@ -6,12 +6,13 @@ import os
 import modules.excel_handler as excel_handler
 from database.models import Formulation, FormulationItem, Material, Client, User # 모델 import 추가
 from modules.ui_components import HelpPopup # HelpPopup 클래스를 ui_components에서 가져옵니다.
+from modules.translation import get_texts
 
 class SettingsManagementFrame(ctk.CTkFrame):
-    def __init__(self, master, current_user, app, config_path, application_path):
+    def __init__(self, master, current_user, app, config_path, application_path, language="korean"):
         super().__init__(master)
         self.current_user = current_user
-        self.app = app  # 메인 App 인스턴스를 저장
+        self.app = app
         self.config_path = config_path
         self.application_path = application_path
 
@@ -29,30 +30,19 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
         # 도움말 버튼
-        self.help_button = ctk.CTkButton(top_frame, text="도움말", width=80, command=self.show_help)
+        self.texts = get_texts(self.app.language)
+        self.help_button = ctk.CTkButton(top_frame, text=self.texts['help'], width=80, command=self.show_help)
         self.help_button.place(relx=0.98, y=10, anchor="ne")
 
-        self.tab_view.add("설정")
+        self.tab_view.add(self.texts['settings_tab'])
 
         # 각 탭의 컨텐츠 구성
-        self.setup_path_settings_tab(self.tab_view.tab("설정"))
+        self.setup_path_settings_tab(self.tab_view.tab(self.texts['settings_tab']))
 
     def show_help(self):
         """설정 관리 도움말을 표시합니다."""
-        title = "설정 관리 도움말"
-        message = """
-        [설정 관리 사용법]
-        
-        이 화면에서는 프로그램의 동작 환경을 설정합니다.
-        (이 기능은 관리자만 사용할 수 있습니다)
-        
-        1. 테마 설정: 프로그램의 전체적인 디자인 테마(Light/Dark/System)를 변경합니다.
-        
-        2. 경로 설정: DB 파일과 엑셀 파일의 기본 저장/불러오기 위치를 지정합니다.
-           - DB 저장 경로는 변경 후 프로그램을 재시작해야 완전히 적용됩니다.
-           
-        3. 엑셀 폼 내보내기: 데이터 대량 입력을 위한 엑셀 템플릿 파일을 다운로드합니다.
-        """
+        title = self.texts['settings_help_title']
+        message = self.texts['settings_help_message']
         HelpPopup(self, title, message)
 
     def on_tab_change(self):
@@ -87,6 +77,25 @@ class SettingsManagementFrame(ctk.CTkFrame):
             # 파일 저장 실패 시 사용자에게 알림
             messagebox.showerror("오류", f"테마 설정 저장 중 오류가 발생했습니다: {e}")
 
+    def change_language_event(self, new_language: str):
+        """언어 변경 이벤트를 처리하고 설정을 저장합니다."""
+        lang_code = new_language.lower()
+        self.app.language = lang_code
+        
+        # config.ini 파일에 저장
+        config = configparser.ConfigParser()
+        config.read(self.config_path, encoding='utf-8')
+        if not config.has_section('Appearance'):
+            config.add_section('Appearance')
+        config.set('Appearance', 'language', lang_code)
+        
+        try:
+            with open(self.config_path, 'w', encoding='utf-8') as configfile:
+                config.write(configfile)
+            self.app.recreate_main_ui() # UI를 다시 그려서 언어 변경사항 반영
+        except Exception as e:
+            messagebox.showerror("오류", f"언어 설정 저장 중 오류가 발생했습니다: {e}")
+
     def setup_path_settings_tab(self, tab_frame):
         """경로 설정 탭의 UI를 설정하고, 관리자 전용 데이터 리셋 버튼을 추가합니다."""
         # --- 경로 설정 프레임 ---
@@ -95,7 +104,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
         path_frame.grid_columnconfigure(1, weight=1)
 
         # --- 테마 설정 ---
-        ctk.CTkLabel(path_frame, text="테마 설정").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        ctk.CTkLabel(path_frame, text=self.texts['theme_settings']).grid(row=0, column=0, padx=10, pady=10, sticky="w")
         self.theme_menu = ctk.CTkOptionMenu(
             path_frame, 
             values=["Light", "Dark", "System"],
@@ -103,24 +112,34 @@ class SettingsManagementFrame(ctk.CTkFrame):
         )
         self.theme_menu.grid(row=0, column=1, padx=10, pady=10, sticky="w")
 
-        ctk.CTkLabel(path_frame, text="DB 저장 경로").grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        # --- 언어 설정 ---
+        ctk.CTkLabel(path_frame, text=self.texts['language_settings']).grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        self.language_menu = ctk.CTkOptionMenu(
+            path_frame,
+            values=["Korean", "English"],
+            command=self.change_language_event
+        )
+        self.language_menu.grid(row=1, column=1, padx=10, pady=10, sticky="w")
+
+
+        ctk.CTkLabel(path_frame, text=self.texts['db_path']).grid(row=2, column=0, padx=10, pady=10, sticky="w")
         self.db_path_entry = ctk.CTkEntry(path_frame)
-        self.db_path_entry.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
-        db_browse_button = ctk.CTkButton(path_frame, text="찾아보기...", command=self.browse_db_path)
-        db_browse_button.grid(row=1, column=2, padx=10, pady=10)
+        self.db_path_entry.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
+        db_browse_button = ctk.CTkButton(path_frame, text=self.texts['browse'], command=self.browse_db_path)
+        db_browse_button.grid(row=2, column=2, padx=10, pady=10)
 
-        ctk.CTkLabel(path_frame, text="엑셀 기본 경로").grid(row=2, column=0, padx=10, pady=10, sticky="w")
+        ctk.CTkLabel(path_frame, text=self.texts['excel_path']).grid(row=3, column=0, padx=10, pady=10, sticky="w")
         self.excel_path_entry = ctk.CTkEntry(path_frame)
-        self.excel_path_entry.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
-        excel_browse_button = ctk.CTkButton(path_frame, text="찾아보기...", command=self.browse_excel_path)
-        excel_browse_button.grid(row=2, column=2, padx=10, pady=10)
+        self.excel_path_entry.grid(row=3, column=1, padx=10, pady=10, sticky="ew")
+        excel_browse_button = ctk.CTkButton(path_frame, text=self.texts['browse'], command=self.browse_excel_path)
+        excel_browse_button.grid(row=3, column=2, padx=10, pady=10)
 
-        save_button = ctk.CTkButton(tab_frame, text="경로 저장", command=self.save_paths)
+        save_button = ctk.CTkButton(tab_frame, text=self.texts['save_paths'], command=self.save_paths)
         save_button.pack(pady=20, padx=20, anchor="e")
         
         info_label = ctk.CTkLabel(
             tab_frame, 
-            text="* DB 저장 경로는 프로그램 재시작 시 적용됩니다.", 
+            text=self.texts['db_path_warning'],
             text_color=("#B00020", "#FF8A80")  # (라이트 모드 색상, 다크 모드 색상)
         )
         info_label.pack(pady=10, padx=20, anchor="e")
@@ -132,27 +151,27 @@ class SettingsManagementFrame(ctk.CTkFrame):
             export_frame.pack(padx=20, pady=(20, 10), fill="x")
             export_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
-            ctk.CTkLabel(export_frame, text="엑셀 폼 내보내기", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, pady=(10, 5))
+            ctk.CTkLabel(export_frame, text=self.texts['export_excel_forms'], font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, pady=(10, 5))
 
-            ctk.CTkButton(export_frame, text="성분 폼 내보내기", command=self.export_material_template).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
-            ctk.CTkButton(export_frame, text="거래처 폼 내보내기", command=self.export_client_template).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
-            ctk.CTkButton(export_frame, text="사용자 폼 내보내기", command=self.export_user_template).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
+            ctk.CTkButton(export_frame, text=self.texts['export_ingredient_form'], command=self.export_material_template).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
+            ctk.CTkButton(export_frame, text=self.texts['export_client_form'], command=self.export_client_template).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
+            ctk.CTkButton(export_frame, text=self.texts['export_user_form'], command=self.export_user_template).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
 
             # --- 데이터 리셋 프레임 ---
             reset_frame = ctk.CTkFrame(tab_frame)
             reset_frame.pack(padx=20, pady=(50, 20), fill="x", anchor="s")
             reset_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
-            ctk.CTkLabel(reset_frame, text="데이터 리셋 (주의: 되돌릴 수 없음)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
+            ctk.CTkLabel(reset_frame, text=self.texts['data_reset_warning'], font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
 
             reset_button_style = {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}
 
-            ctk.CTkButton(reset_frame, text="성분 데이터 리셋", command=lambda: self.confirm_reset("materials"), **reset_button_style).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
-            ctk.CTkButton(reset_frame, text="거래처 데이터 리셋", command=lambda: self.confirm_reset("clients"), **reset_button_style).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
-            ctk.CTkButton(reset_frame, text="사용자 데이터 리셋", command=lambda: self.confirm_reset("users"), **reset_button_style).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
+            ctk.CTkButton(reset_frame, text=self.texts['reset_ingredient_data'], command=lambda: self.confirm_reset("materials"), **reset_button_style).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
+            ctk.CTkButton(reset_frame, text=self.texts['reset_client_data'], command=lambda: self.confirm_reset("clients"), **reset_button_style).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
+            ctk.CTkButton(reset_frame, text=self.texts['reset_user_data'], command=lambda: self.confirm_reset("users"), **reset_button_style).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
             
             all_reset_style = {"fg_color": "#B71C1C", "hover_color": "#7f0000"}
-            ctk.CTkButton(reset_frame, text="전체 데이터 리셋", command=lambda: self.confirm_reset("all"), **all_reset_style).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
+            ctk.CTkButton(reset_frame, text=self.texts['reset_all_data'], command=lambda: self.confirm_reset("all"), **all_reset_style).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
 
         else:
             # 관리자가 아니면 경로 설정 비활성화
@@ -172,6 +191,10 @@ class SettingsManagementFrame(ctk.CTkFrame):
         # 테마 설정 로드
         theme = config.get('Appearance', 'theme', fallback='system').capitalize()
         self.theme_menu.set(theme)
+
+        # 언어 설정 로드
+        language = config.get('Appearance', 'language', fallback='korean').capitalize()
+        self.language_menu.set(language)
 
         # 경로 설정 로드
         db_dir = config.get('Paths', 'database_dir', fallback='data')

@@ -18,6 +18,7 @@ from modules import excel_handler
 from modules.comparison_popup import FormulationComparisonPopup
 from modules.folder_history_popup import FolderHistoryPopup
 from modules.ui_components import HelpPopup, CustomErrorDialog, CustomDropdown, AddMaterialDialog, try_convert_to_float
+from modules.translation import get_texts
 from modules.formulation_popup import FormulationEditPopup # FormulationEditPopup은 그대로 둡니다.
 
 class ClipboardErrorDialog(ctk.CTkToplevel):
@@ -63,7 +64,7 @@ class AddMaterialDialog(ctk.CTkToplevel):
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self.treeviews = {} # 탭별 Treeview 위젯을 저장할 딕셔너리
+        self.search_timer = None # 검색 디바운싱을 위한 타이머
 
         # --- 검색 프레임 ---
         search_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -74,13 +75,28 @@ class AddMaterialDialog(ctk.CTkToplevel):
         self.search_entry = ctk.CTkEntry(search_frame)
         self.search_entry.grid(row=0, column=1, padx=5, sticky="ew")
         self.search_entry.bind("<Return>", self.search_materials)
-        self.search_entry.bind("<KeyRelease>", self.search_materials) # 실시간 검색을 위한 바인딩
-        ctk.CTkButton(search_frame, text="검색", width=60, command=lambda: self.search_materials()).grid(row=0, column=2, padx=5)
+        self.search_entry.bind("<KeyRelease>", self.on_material_search) # 디바운싱 적용
+        ctk.CTkButton(search_frame, text="검색", width=60, command=self.search_materials).grid(row=0, column=2, padx=5)
         ctk.CTkButton(search_frame, text="초기화", width=60, command=self.reset_search).grid(row=0, column=3, padx=5)
 
-        # --- 원료 목록 탭 뷰 ---
-        self.tab_view = ctk.CTkTabview(self, border_width=1)
-        self.tab_view.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        # --- 원료 목록 Treeview (탭 뷰 제거) ---
+        tree_frame = ctk.CTkFrame(self, fg_color="transparent")
+        tree_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        tree_frame.grid_columnconfigure(0, weight=1)
+        tree_frame.grid_rowconfigure(0, weight=1)
+
+        self.material_tree = ttk.Treeview(tree_frame, columns=("id", "code", "name", "ingredients"), show="headings", selectmode="browse")
+        self.material_tree.heading("id", text="ID"); self.material_tree.column("id", width=50, anchor="center")
+        self.material_tree.heading("code", text="코드"); self.material_tree.column("code", width=120)
+        self.material_tree.heading("name", text="원료명"); self.material_tree.column("name", width=150)
+        self.material_tree.heading("ingredients", text="전성분"); self.material_tree.column("ingredients", width=200, stretch=True)
+        self.material_tree.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.material_tree.yview)
+        self.material_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.material_tree.bind("<<TreeviewSelect>>", self.on_material_select)
+        self.material_tree.bind("<Double-1>", self.on_double_click_add)
 
         # --- 전성분 상세 정보 프레임 ---
         details_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -106,129 +122,34 @@ class AddMaterialDialog(ctk.CTkToplevel):
         self.search_entry.delete(0, "end")
         self.search_materials()
 
-    def _get_numeric_part(self, code_str: str):
-        """문자열에서 숫자 부분을 추출하여 정수로 반환합니다."""
-        import re
-        if not isinstance(code_str, str):
-            return None
-        match = re.search(r'\d+', code_str)
-        return int(match.group(0)) if match else None
+    def on_material_search(self, event=None):
+        """검색창 입력 시 디바운싱을 적용하여 검색을 실행합니다."""
+        if self.search_timer:
+            self.after_cancel(self.search_timer)
+        # 500ms(0.5초) 후에 search_materials 함수를 실행
+        self.search_timer = self.after(500, self.search_materials)
 
     def search_materials(self, event=None):
-        """DB에서 원료를 검색하여 1000단위 탭으로 나누어 표시합니다."""
+        """DB에서 원료를 검색하여 단일 Treeview에 표시합니다."""
         search_term = self.search_entry.get().strip()
         
-        # 검색 전 현재 활성화된 탭 이름 저장
-        active_tab_name = self.tab_view.get()
-
-        # 기존 탭과 트리뷰를 모두 초기화합니다.
-        for tab_name in list(self.treeviews.keys()):
-            self.tab_view.delete(tab_name)
-        self.treeviews.clear()
+        # Treeview 초기화
+        for item in self.material_tree.get_children():
+            self.material_tree.delete(item)
 
         materials = db_manager.search_materials(search_term)
         
-        # 원료를 코드 1000단위로 그룹화
-        grouped_materials = {}
-        other_materials = [] # 숫자 코드가 없는 원료를 위한 리스트
         for mat in materials:
-            num_part = self._get_numeric_part(mat.code)
-            if num_part is not None:
-                group_key = (num_part // 1000) * 1000
-                if group_key not in grouped_materials:
-                    grouped_materials[group_key] = []
-                grouped_materials[group_key].append(mat)
-            else:
-                other_materials.append(mat)
-
-        created_tabs = []
-        # 그룹화된 원료를 기반으로 탭과 Treeview를 순서대로 생성합니다.
-        for group_key in sorted(grouped_materials.keys()):
-            created_tabs.append(str(group_key))
-            tab_name = str(group_key)
-            tab = self.tab_view.add(tab_name)
-            tab.grid_columnconfigure(0, weight=1)
-            tab.grid_rowconfigure(0, weight=1)
-
-            tree = ttk.Treeview(tab, columns=("id", "code", "name", "ingredients"), show="headings", selectmode="browse")
-            tree.heading("id", text="ID"); tree.column("id", width=50, anchor="center")
-            tree.heading("code", text="코드"); tree.column("code", width=120)
-            tree.heading("name", text="원료명"); tree.column("name", width=150)
-            tree.heading("ingredients", text="전성분"); tree.column("ingredients", width=200, stretch=True)
-            tree.grid(row=0, column=0, sticky="nsew")
-
-            scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
-            tree.configure(yscrollcommand=scrollbar.set)
-            scrollbar.grid(row=0, column=1, sticky="ns")
-
-            tree.bind("<<TreeviewSelect>>", self.on_material_select)
-            tree.bind("<Double-1>", self.on_double_click_add)
-            self.treeviews[tab_name] = tree
-
-            for mat in grouped_materials[group_key]:
-                # 전성분 목록을 문자열로 만듭니다 (최대 3개).
-                ing_names = [ing.name_en for ing in mat.ingredients[:3]]
-                ing_str = ", ".join(ing_names)
-                if len(mat.ingredients) > 3:
-                    ing_str += "..."
-                tree.insert("", "end", values=(mat.id, mat.code, mat.name, ing_str))
-
-        # 숫자 코드가 없는 원료가 있으면 'NEW' 탭을 마지막에 추가합니다.
-        if other_materials:
-            created_tabs.append("NEW")
-            tab_name = "NEW"
-            tab = self.tab_view.add(tab_name)
-            tab.grid_columnconfigure(0, weight=1)
-            tab.grid_rowconfigure(0, weight=1)
-
-            tree = ttk.Treeview(tab, columns=("id", "code", "name", "ingredients"), show="headings", selectmode="browse")
-            tree.heading("id", text="ID"); tree.column("id", width=50, anchor="center")
-            tree.heading("code", text="코드"); tree.column("code", width=120)
-            tree.heading("name", text="원료명"); tree.column("name", width=150)
-            tree.heading("ingredients", text="전성분"); tree.column("ingredients", width=200, stretch=True)
-            tree.grid(row=0, column=0, sticky="nsew")
-
-            scrollbar = ttk.Scrollbar(tab, orient="vertical", command=tree.yview)
-            tree.configure(yscrollcommand=scrollbar.set)
-            scrollbar.grid(row=0, column=1, sticky="ns")
-
-            tree.bind("<<TreeviewSelect>>", self.on_material_select)
-            tree.bind("<Double-1>", self.on_double_click_add)
-            self.treeviews[tab_name] = tree
-
-            for mat in other_materials:
-                # 전성분 목록을 문자열로 만듭니다 (최대 3개).
-                ing_names = [ing.name_en for ing in mat.ingredients[:3]]
-                ing_str = ", ".join(ing_names)
-                if len(mat.ingredients) > 3:
-                    ing_str += "..."
-                tree.insert("", "end", values=(mat.id, mat.code, mat.name, ing_str))
-        
-        # 검색 후 탭을 다시 선택하여 UI 갱신을 강제합니다.
-        if not created_tabs: # 검색 결과가 없는 경우
-            self.on_material_select() # 전성분 창 클리어
-            return
-
-        if active_tab_name not in created_tabs:
-            active_tab_name = created_tabs[0]
-        
-        # UI 갱신을 확실하게 하기 위한 수정된 로직
-        self.update_idletasks()
-        # 짧은 지연 후 탭을 다시 설정하여 화면 그리기를 강제합니다.
-        # 이때, 해당 탭이 존재하는지 확인하여 오류를 방지합니다.
-        def safe_set_tab():
-            if active_tab_name in self.tab_view._name_list:
-                self.tab_view.set(active_tab_name)
-        self.after(10, safe_set_tab)
+            # 전성분 목록을 문자열로 만듭니다 (최대 3개).
+            ing_names = [ing.name_en for ing in mat.ingredients[:3]]
+            ing_str = ", ".join(ing_names)
+            if len(mat.ingredients) > 3:
+                ing_str += "..."
+            self.material_tree.insert("", "end", values=(mat.id, mat.code, mat.name, ing_str))
 
     def on_material_select(self, event=None):
         """트리뷰에서 원료 선택 시 전성분 목록을 표시합니다."""
-        active_tab_name = self.tab_view.get()
-        if not active_tab_name: return
-        active_treeview = self.treeviews.get(active_tab_name)
-        if not active_treeview: return
-
-        selected_item = active_treeview.selection()
+        selected_item = self.material_tree.selection()
         # 텍스트박스 초기화
         self.ingredient_details_textbox.configure(state="normal")
         self.ingredient_details_textbox.delete("1.0", "end")
@@ -237,7 +158,7 @@ class AddMaterialDialog(ctk.CTkToplevel):
             self.ingredient_details_textbox.configure(state="disabled")
             return
 
-        material_id = active_treeview.item(selected_item[0], "values")[0]
+        material_id = self.material_tree.item(selected_item[0], "values")[0]
 
         session = db_manager.get_session()
         try:
@@ -273,20 +194,16 @@ class AddMaterialDialog(ctk.CTkToplevel):
 
     def on_add(self):
         """'추가' 버튼 클릭 시 콜백 함수를 호출합니다."""
-        active_tab_name = self.tab_view.get()
-        active_treeview = self.treeviews.get(active_tab_name)
-        if not active_treeview: return
-
-        selected_item = active_treeview.selection()
+        selected_item = self.material_tree.selection()
         if not selected_item:
             messagebox.showwarning("선택 오류", "목록에서 추가할 원료를 선택하세요.", parent=self)
             return
         
-        material_id = active_treeview.item(selected_item[0], "values")[0]
+        material_id = self.material_tree.item(selected_item[0], "values")[0]
         self.on_add_callback(material_id)
         
         # 추가 후 입력 필드 초기화
-        active_treeview.selection_remove(selected_item)
+        self.material_tree.selection_remove(selected_item)
 
 def try_convert_to_float(value):
     """값을 float으로 변환 시도, 실패 시 원래 값 반환"""
@@ -298,10 +215,12 @@ def try_convert_to_float(value):
         return value
 
 class DocumentManagementFrame(ctk.CTkFrame):
-    def __init__(self, master, user, app):
+    def __init__(self, master, user, app, language="korean"):
         super().__init__(master)
         self.current_user = user
         self.app = app
+        self.language = language
+        self.texts = get_texts(language)
         self.client_map = {} # 처방 목록 필터용
         self._selected_formulation_id = None
         self.current_view = "folders"  # 현재 뷰 상태 ('folders' 또는 'files')
@@ -330,17 +249,23 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
         # 도움말 버튼
-        self.help_button = ctk.CTkButton(top_frame, text="도움말", width=80, command=self.show_help)
+        self.help_button = ctk.CTkButton(top_frame, text=self.texts['help'], width=80, command=self.show_help)
         self.help_button.place(relx=0.98, y=10, anchor="ne")
 
-        # '처방 관리'와 '문서' 탭을 추가합니다.
-        self.tab_view.add("처방 관리")
-        self.tab_view.add("문서")
+        # --- 언어별 텍스트 ---
+        texts = {
+            "korean": {"formulation": "처방 관리", "document": "문서"},
+            "english": {"formulation": "Formulation Mgt.", "document": "Documents"}
+        }
+        current_texts = texts[self.language]
 
-        # '처방 관리' 탭 설정
-        self.setup_formulation_tab(self.tab_view.tab("처방 관리"))
-        # '문서' 탭에 서브 탭들 설정
-        self.setup_document_sub_tabs(self.tab_view.tab("문서"))
+        # '처방 관리'와 '문서' 탭을 추가합니다.
+        self.tab_view.add(current_texts["formulation"])
+        self.tab_view.add(current_texts["document"])
+
+        # 탭 설정
+        self.setup_formulation_tab(self.tab_view.tab(current_texts["formulation"]))
+        self.setup_document_sub_tabs(self.tab_view.tab(current_texts["document"]))
         
         self.load_formulations()
 
@@ -352,51 +277,25 @@ class DocumentManagementFrame(ctk.CTkFrame):
         doc_sub_tab_view = ctk.CTkTabview(tab_frame, border_width=1, border_color=("gray80", "gray30"))
         doc_sub_tab_view.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
+        # --- 언어별 텍스트 ---
+        texts = {
+            "korean": {"spec": "물성치/SPEC", "report": "기능성 보고/참고 자료"},
+            "english": {"spec": "Property/SPEC", "report": "Functional Report/Reference"}
+        }
+        current_texts = texts[self.language]
+
         # 요청된 하위 탭들 추가
-        doc_sub_tab_view.add("물성치/SPEC")
-        doc_sub_tab_view.add("안정도")
-        doc_sub_tab_view.add("기능성 보고/참고 자료")
+        doc_sub_tab_view.add(current_texts["spec"])
+        doc_sub_tab_view.add(current_texts["report"])
 
         # 각 탭의 UI 설정
-        self.setup_lab_journal_tab(doc_sub_tab_view.tab("물성치/SPEC"))
-        self.setup_placeholder_tab(doc_sub_tab_view.tab("안정도"), "안정도")
-        self.setup_placeholder_tab(doc_sub_tab_view.tab("기능성 보고/참고 자료"), "기능성 보고/참고 자료")
+        self.setup_lab_journal_tab(doc_sub_tab_view.tab(current_texts["spec"]))
+        self.setup_functional_report_tab(doc_sub_tab_view.tab(current_texts["report"]))
 
     def show_help(self):
         """서류 관리 도움말을 표시합니다."""
-        title = "처방 관리 도움말"
-        message = """
-        [처방 관리 사용법]
-        
-        [처방 목록 탭]
-        1. 폴더/파일 보기: 각 '실험품명'이 하나의 폴더입니다. 폴더를 클릭하면 해당 실험품명의 모든 차수(버전) 목록을 볼 수 있습니다.
-        2. 처방 생성/수정: '신규' 버튼으로 새 처방을, 목록에서 처방 선택 후 '수정' 버튼(또는 더블클릭)으로 기존 처방을 수정합니다.
-        3. 샘플 관리: 처방 선택 후 '샘플발송' 버튼으로 발송 횟수를 1 증가시킬 수 있습니다. '발송수정' 버튼으로 횟수를 직접 수정할 수 있습니다.
-        4. 거래처 필터: 특정 거래처와 관련된 처방 폴더만 필터링하여 볼 수 있습니다.
-        
-        [견적 탭]
-        1. 견적 생성: '처방 목록' 탭에서 처방을 선택한 후, '견적' 탭으로 와서 '견적 생성' 버튼을 누르면 해당 처방의 원료 목록이 불러와집니다.
-        2. 원가 계산: 기준 중량(g)을 입력하면 총 원료 원가와 VAT, 이윤이 포함된 가격이 자동으로 계산됩니다.
-        3. 원료 추가/삭제/수정: '원료 추가', '선택 삭제', '함량 수정' 버튼으로 견적 내용을 자유롭게 편집할 수 있습니다.
-        4. 내보내기: '견적서 내보내기' 버튼으로 현재 견적 내용을 엑셀 파일로 저장합니다.
-        
-        [전성분 탭]
-        1. 목록 생성: '처방 목록' 탭에서 처방을 선택한 후, '전성분' 탭으로 와서 '전체 목록 생성' 버튼을 누르면 모든 전성분 목록이 한 번에 생성됩니다.
-        2. 목록 종류:
-           - 복합 전성분 (서류용): 원료별 상세 목록과 전성분 합계 목록을 제공합니다.
-           - 단일 전성분 (함량순): 화장품 패키지 기재용으로, 모든 전성분을 최종 함량 순으로 정렬하여 표시합니다.
-           - 디자인용 전성분: 패키지 디자인에 바로 사용할 수 있도록 국문/영문 전성분 목록을 텍스트로 제공합니다.
-        3. 내보내기: '엑셀로 내보내기' 버튼으로 생성된 모든 전성분 목록을 하나의 엑셀 파일에 각각 다른 시트로 저장합니다.
-        
-        [문서 - 물성치/SPEC 탭]
-        - 저장된 모든 처방의 실험 결과를 바탕으로 실험일지를 자동으로 생성합니다.
-        - 연도와 월을 선택하여 해당 기간의 데이터만 필터링하여 볼 수 있습니다.
-        
-        [처방 생성/수정 창]
-        - 가져오기/내보내기: '가져오기'로 엑셀 파일의 처방을 불러오거나, '내보내기'로 현재 처방을 엑셀 파일로 저장할 수 있습니다.
-        - LAB NO. 자동생성: '담당번호', '실험년월일', '차수'를 모두 입력하면 'LAB NO.'가 자동으로 생성됩니다.
-        - 새 버전으로 저장: 기존 처방을 수정할 때 'LAB NO.'가 변경되면 자동으로 새로운 버전의 처방으로 저장됩니다.
-        """
+        title = self.texts['doc_mgt_help_title']
+        message = self.texts['doc_mgt_help_message']
         HelpPopup(self, title, message)
 
     def on_tab_change(self):
@@ -410,7 +309,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def refresh_formulation_filters(self):
         print("처방 필터 새로고침...")
-        all_client_types = ["- 유형 선택 -"] + db_manager.get_unique_client_types()
+        all_client_types = [self.texts['select_type']] + db_manager.get_unique_client_types()
         self.list_filter_client_type_combo.configure(values=all_client_types)
         self.list_filter_client_type_combo.set("- 유형 선택 -")
         self.update_list_filter_client_name_combo("- 유형 선택 -")
@@ -430,15 +329,22 @@ class DocumentManagementFrame(ctk.CTkFrame):
         )
         self.formulation_sub_tab_view.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-        self.formulation_sub_tab_view.add("처방 목록")
-        self.formulation_sub_tab_view.add("견적")
-        self.formulation_sub_tab_view.add("전성분")
-        self.formulation_sub_tab_view.add("생산 처방")
+        # --- 언어별 텍스트 ---
+        texts = {
+            "korean": {"list": "처방 목록", "quote": "견적", "ingredient": "전성분"},
+            "english": {"list": "Formulation List", "quote": "Quotation", "ingredient": "Ingredient List"}
+        }
+        current_texts = texts[self.language]
 
-        self.setup_formulation_list_tab(self.formulation_sub_tab_view.tab("처방 목록"))
-        self.setup_quotation_tab(self.formulation_sub_tab_view.tab("견적"))
-        self.setup_ingredient_list_tab(self.formulation_sub_tab_view.tab("전성분"))
-        self.setup_placeholder_tab(self.formulation_sub_tab_view.tab("생산 처방"), "생산 처방")
+        self.formulation_sub_tab_view.add(current_texts["list"])
+        self.formulation_sub_tab_view.add(current_texts["quote"])
+        self.formulation_sub_tab_view.add(current_texts["ingredient"])
+        # self.formulation_sub_tab_view.add("생산 처방")
+
+        self.setup_formulation_list_tab(self.formulation_sub_tab_view.tab(current_texts["list"]))
+        self.setup_quotation_tab(self.formulation_sub_tab_view.tab(current_texts["quote"]))
+        self.setup_ingredient_list_tab(self.formulation_sub_tab_view.tab(current_texts["ingredient"]))
+        # self.setup_placeholder_tab(self.formulation_sub_tab_view.tab("생산 처방"), "생산 처방")
 
     def setup_formulation_list_tab(self, parent_tab):
         """'처방 목록' 서브 탭의 UI를 설정합니다. (폴더 카드 UI)"""
@@ -450,24 +356,24 @@ class DocumentManagementFrame(ctk.CTkFrame):
         header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
         header_frame.grid_columnconfigure(1, weight=1)
 
-        self.list_header_label = ctk.CTkLabel(header_frame, text="처방 폴더", font=ctk.CTkFont(size=16, weight="bold"))
+        self.list_header_label = ctk.CTkLabel(header_frame, text=self.texts['formulation_folders'], font=ctk.CTkFont(size=16, weight="bold"))
         self.list_header_label.grid(row=0, column=0, sticky="w")
 
         filter_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
         filter_frame.grid(row=0, column=1, sticky="e")
 
         # 아이콘 크기 조절 슬라이더 추가
-        ctk.CTkLabel(filter_frame, text="아이콘 크기:").pack(side="left", padx=(10, 5))
+        ctk.CTkLabel(filter_frame, text=self.texts['icon_size']).pack(side="left", padx=(10, 5))
         self.icon_size_slider = ctk.CTkSlider(filter_frame, from_=20, to=80, number_of_steps=6, command=self.on_icon_size_change)
         self.icon_size_slider.set(40) # 기본값
         self.icon_size_slider.pack(side="left", padx=(0, 20))
 
-        ctk.CTkLabel(filter_frame, text="거래처 필터:").pack(side="left", padx=(0, 5))
-        self.list_filter_client_type_combo = CustomDropdown(filter_frame, values=["- 유형 선택 -"], width=120, command=self.update_list_filter_client_name_combo)
+        ctk.CTkLabel(filter_frame, text=self.texts['client_filter']).pack(side="left", padx=(0, 5))
+        self.list_filter_client_type_combo = CustomDropdown(filter_frame, values=[self.texts['select_type']], width=120, command=self.update_list_filter_client_name_combo)
         self.list_filter_client_type_combo.pack(side="left", padx=(0, 5))
-        self.list_filter_client_name_combo = CustomDropdown(filter_frame, values=["- 업체 선택 -"], width=250, command=self.filter_formulations_by_client)
+        self.list_filter_client_name_combo = CustomDropdown(filter_frame, values=[self.texts['select_client']], width=250, command=self.filter_formulations_by_client)
         self.list_filter_client_name_combo.pack(side="left", padx=(0, 10))
-        self.list_filter_reset_button = ctk.CTkButton(filter_frame, text="초기화", width=80, command=lambda: self.load_formulations())
+        self.list_filter_reset_button = ctk.CTkButton(filter_frame, text=self.texts['reset'], width=80, command=lambda: self.load_formulations())
         self.list_filter_reset_button.pack(side="left")
 
         # --- 컨텐츠 영역 (폴더/파일 목록) ---
@@ -487,34 +393,34 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         file_view_header = ctk.CTkFrame(self.file_view, fg_color="transparent")
         file_view_header.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        self.back_button = ctk.CTkButton(file_view_header, text="◀ 뒤로 가기", width=100, command=self.show_folder_view)
+        self.back_button = ctk.CTkButton(file_view_header, text=self.texts['back_to_folders'], width=100, command=self.show_folder_view)
         self.back_button.pack(side="left", padx=(0, 10))
 
-        self.compare_button = ctk.CTkButton(file_view_header, text="이력 비교", width=100, command=self.open_comparison_popup)
+        self.compare_button = ctk.CTkButton(file_view_header, text=self.texts['compare_history'], width=100, command=self.open_comparison_popup)
         self.compare_button.pack(side="left", padx=(0, 10))
 
-        self.folder_history_button = ctk.CTkButton(file_view_header, text="전체 이력 보기", width=120, command=self.open_folder_history_popup)
+        self.folder_history_button = ctk.CTkButton(file_view_header, text=self.texts['view_all_history'], width=120, command=self.open_folder_history_popup)
         self.folder_history_button.pack(side="left", padx=(0, 10))
 
         # 선택 초기화 버튼 추가
-        self.reset_selection_button = ctk.CTkButton(file_view_header, text="선택 초기화", width=100, command=self.reset_selection_and_tabs)
+        self.reset_selection_button = ctk.CTkButton(file_view_header, text=self.texts['reset_selection'], width=100, command=self.reset_selection_and_tabs)
         self.reset_selection_button.pack(side="left", padx=(0, 10))
 
-        self.edit_sample_button = ctk.CTkButton(file_view_header, text="발송수정", width=100, command=self.edit_sample_sent_count)
+        self.edit_sample_button = ctk.CTkButton(file_view_header, text=self.texts['edit_sample_count'], width=100, command=self.edit_sample_sent_count)
         self.edit_sample_button.pack(side="right", padx=(5, 0))
 
-        self.send_sample_button = ctk.CTkButton(file_view_header, text="샘플발송", width=100, command=self.increment_sample_sent_count)
+        self.send_sample_button = ctk.CTkButton(file_view_header, text=self.texts['send_sample'], width=100, command=self.increment_sample_sent_count)
         self.send_sample_button.pack(side="right")
 
-        formulation_cols = ("id", "revision", "manager_code", "date", "lab_no", "sample_sent", "sample_delivery_date")
-        self.formulation_tree = ttk.Treeview(self.file_view, columns=formulation_cols, show="headings", selectmode="extended")
-        self.formulation_tree.heading("id", text="ID"); self.formulation_tree.column("id", width=40, anchor="center")
-        self.formulation_tree.heading("revision", text="차수"); self.formulation_tree.column("revision", width=100, stretch=True)
-        self.formulation_tree.heading("manager_code", text="담당번호"); self.formulation_tree.column("manager_code", width=100)
-        self.formulation_tree.heading("date", text="실험일"); self.formulation_tree.column("date", width=100, anchor="center")
-        self.formulation_tree.heading("lab_no", text="LAB NO."); self.formulation_tree.column("lab_no", width=150)
-        self.formulation_tree.heading("sample_sent", text="샘플발송"); self.formulation_tree.column("sample_sent", width=80, anchor="center")
-        self.formulation_tree.heading("sample_delivery_date", text="샘플발송일"); self.formulation_tree.column("sample_delivery_date", width=100, anchor="center")
+        formulation_cols_def = self.texts['formulation_tree_columns']
+        # 'id'는 Treeview의 내부 식별자(iid)로 사용되므로 columns 리스트에서는 제외합니다.
+        formulation_col_ids = [k for k in formulation_cols_def if k != 'id']
+        self.formulation_tree = ttk.Treeview(self.file_view, columns=formulation_col_ids, show="headings", selectmode="extended")
+        for col_id in formulation_col_ids:
+            # 'id'가 아닌 컬럼에 대해서만 헤더와 너비를 설정합니다.
+            width = 100 if col_id != 'revision' else 150 # '차수' 컬럼 너비 조정
+            self.formulation_tree.heading(col_id, text=formulation_cols_def[col_id], command=lambda c=col_id: self.sort_treeview_column(self.formulation_tree, c, False))
+            self.formulation_tree.column(col_id, width=width, stretch=True if col_id == 'revision' else False)
         self.formulation_tree.grid(row=1, column=0, columnspan=2, sticky="nsew")
         self.formulation_tree.bind("<<TreeviewSelect>>", self.on_formulation_tree_select)
         self.formulation_tree.bind("<Double-1>", lambda e: self.open_formulation_popup(edit_mode=True))
@@ -531,11 +437,11 @@ class DocumentManagementFrame(ctk.CTkFrame):
         bottom_button_frame = ctk.CTkFrame(parent_tab, fg_color="transparent")
         bottom_button_frame.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="e")
 
-        self.new_button = ctk.CTkButton(bottom_button_frame, text="신규", width=100, command=lambda: self.open_formulation_popup(edit_mode=False))
+        self.new_button = ctk.CTkButton(bottom_button_frame, text=self.texts['new'], width=100, command=lambda: self.open_formulation_popup(edit_mode=False))
         self.new_button.pack(side="left", padx=5)
-        self.edit_button = ctk.CTkButton(bottom_button_frame, text="수정", width=100, command=lambda: self.open_formulation_popup(edit_mode=True))
+        self.edit_button = ctk.CTkButton(bottom_button_frame, text=self.texts['edit'], width=100, command=lambda: self.open_formulation_popup(edit_mode=True))
         self.edit_button.pack(side="left", padx=5)
-        self.delete_button = ctk.CTkButton(bottom_button_frame, text="삭제", width=100, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation)
+        self.delete_button = ctk.CTkButton(bottom_button_frame, text=self.texts['delete'], width=100, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation)
         self.delete_button.pack(side="left", padx=(5, 20)) # 오른쪽에 여백 추가
 
         if not self.current_user.is_admin:
@@ -555,31 +461,32 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # --- 좌측 버튼들 ---
         left_button_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
         left_button_frame.pack(side="left")
-        ctk.CTkButton(left_button_frame, text="견적 생성", command=self.load_formulation_for_quotation).pack(side="left")
-        ctk.CTkButton(left_button_frame, text="견적서 내보내기", command=self.export_quotation).pack(side="left", padx=(10, 0))
-        ctk.CTkButton(left_button_frame, text="선택 삭제", fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_selected_quotation_item).pack(side="left", padx=(10, 0))
+        ctk.CTkButton(left_button_frame, text=self.texts['create_quotation'], command=self.load_formulation_for_quotation).pack(side="left")
+        ctk.CTkButton(left_button_frame, text=self.texts['export_quotation'], command=self.export_quotation).pack(side="left", padx=(10, 0))
+        ctk.CTkButton(left_button_frame, text=self.texts['delete_selected'], fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_selected_quotation_item).pack(side="left", padx=(10, 0))
 
         # --- 우측 버튼 및 입력창 ---
         right_control_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
         right_control_frame.pack(side="right")
         
-        ctk.CTkLabel(right_control_frame, text="기준 중량(g):").pack(side="left", padx=(20, 5))
+        ctk.CTkLabel(right_control_frame, text=self.texts['base_weight_g']).pack(side="left", padx=(20, 5))
         self.quotation_weight_entry = ctk.CTkEntry(right_control_frame, width=100, justify="right")
         self.quotation_weight_entry.insert(0, "1000") # 기본값 1kg
         self.quotation_weight_entry.bind("<KeyRelease>", lambda e: self.recalculate_quotation())
         self.quotation_weight_entry.pack(side="left")
-        ctk.CTkButton(right_control_frame, text="원료 추가", command=self.open_add_material_for_quotation).pack(side="left", padx=(10, 5))
-        ctk.CTkButton(right_control_frame, text="함량 수정", command=self.edit_selected_quotation_item).pack(side="left", padx=5)
+        ctk.CTkButton(right_control_frame, text=self.texts['add_material'], command=self.open_add_material_for_quotation).pack(side="left", padx=(10, 5))
+        ctk.CTkButton(right_control_frame, text=self.texts['edit_ratio'], command=self.edit_selected_quotation_item).pack(side="left", padx=5)
 
         # --- 견적 내용 Treeview ---
-        quotation_cols = ("phase", "code", "name", "ratio", "unit_price", "cost")
-        self.quotation_tree = ttk.Treeview(tab_frame, columns=quotation_cols, show="headings", selectmode="browse")
-        self.quotation_tree.heading("phase", text="구분"); self.quotation_tree.column("phase", width=80, anchor="center")
-        self.quotation_tree.heading("code", text="코드"); self.quotation_tree.column("code", width=100, anchor="w")
-        self.quotation_tree.heading("name", text="원료명"); self.quotation_tree.column("name", width=250, stretch=True)
-        self.quotation_tree.heading("ratio", text="함량(%)"); self.quotation_tree.column("ratio", width=100, anchor="e")
-        self.quotation_tree.heading("unit_price", text="단가(원/kg)"); self.quotation_tree.column("unit_price", width=120, anchor="e")
-        self.quotation_tree.heading("cost", text="원가(원)"); self.quotation_tree.column("cost", width=120, anchor="e")
+        quotation_cols = self.texts['quotation_tree_columns']
+        # columns 인자에는 딕셔너리의 키 리스트를 명시적으로 전달해야 합니다.
+        self.quotation_tree = ttk.Treeview(tab_frame, columns=list(quotation_cols.keys()), show="headings", selectmode="browse")
+        self.quotation_tree.heading("phase", text=quotation_cols['phase']); self.quotation_tree.column("phase", width=80, anchor="center")
+        self.quotation_tree.heading("code", text=quotation_cols['code']); self.quotation_tree.column("code", width=100, anchor="w")
+        self.quotation_tree.heading("name", text=quotation_cols['name']); self.quotation_tree.column("name", width=250, stretch=True)
+        self.quotation_tree.heading("ratio", text=quotation_cols['ratio']); self.quotation_tree.column("ratio", width=100, anchor="e")
+        self.quotation_tree.heading("unit_price", text=quotation_cols['unit_price']); self.quotation_tree.column("unit_price", width=120, anchor="e")
+        self.quotation_tree.heading("cost", text=quotation_cols['cost']); self.quotation_tree.column("cost", width=120, anchor="e")
         self.quotation_tree.grid(row=1, column=0, columnspan=2, padx=(10,0), pady=(5,0), sticky="nsew")
         self.quotation_tree.bind("<Double-1>", self.on_quotation_tree_double_click)
 
@@ -597,29 +504,29 @@ class DocumentManagementFrame(ctk.CTkFrame):
         calculation_frame.grid_columnconfigure(1, weight=1)
 
         # 총 함량
-        ctk.CTkLabel(calculation_frame, text="총 함량:", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(calculation_frame, text=self.texts['total_ratio'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.quotation_total_ratio_label = ctk.CTkLabel(calculation_frame, text="0.0000 %", font=ctk.CTkFont(size=14), anchor="e")
         self.quotation_total_ratio_label.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
         # 총 원료 원가
-        ctk.CTkLabel(calculation_frame, text="총 원료 원가:", font=ctk.CTkFont(size=14, weight="bold")).grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(calculation_frame, text=self.texts['total_raw_cost'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.total_raw_cost_label = ctk.CTkLabel(calculation_frame, text="0 원", font=ctk.CTkFont(size=14), anchor="e")
         self.total_raw_cost_label.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
         # VAT 10% 포함가
-        ctk.CTkLabel(calculation_frame, text="VAT(10%) 포함가:", font=ctk.CTkFont(size=14, weight="bold")).grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(calculation_frame, text=self.texts['price_with_vat'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.price_with_vat_label = ctk.CTkLabel(calculation_frame, text="0 원", font=ctk.CTkFont(size=14), anchor="e")
         self.price_with_vat_label.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
         # 이윤 15% 포함가
-        ctk.CTkLabel(calculation_frame, text="이윤(15%) 포함가:", font=ctk.CTkFont(size=14, weight="bold")).grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(calculation_frame, text=self.texts['price_with_profit'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=3, column=0, padx=10, pady=5, sticky="w")
         self.price_with_profit_label = ctk.CTkLabel(calculation_frame, text="0 원", font=ctk.CTkFont(size=14), anchor="e")
         self.price_with_profit_label.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
     def load_formulation_for_quotation(self):
         """'처방 목록'에서 선택된 처방을 '견적' 탭의 Treeview로 불러옵니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 '처방 목록' 탭에서 처방을 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
             return
 
         for item in self.quotation_tree.get_children():
@@ -643,7 +550,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.recalculate_quotation()
 
         except Exception as e:
-            messagebox.showerror("견적 생성 오류", f"견적을 생성하는 중 오류가 발생했습니다: {e}", parent=self)
+            messagebox.showerror(self.texts['quotation_creation_error'], f"{self.texts['quotation_creation_error_msg']}: {e}", parent=self)
         finally:
             session.close()
 
@@ -717,7 +624,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """'함량 수정' 버튼 클릭 시 선택된 항목의 인라인 편집을 시작합니다."""
         selected_item = self.quotation_tree.selection()
         if not selected_item:
-            messagebox.showwarning("선택 오류", "함량을 수정할 항목을 목록에서 선택하세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_item_to_edit_ratio'], parent=self)
             return
         self.start_quotation_ratio_editing(selected_item[0])
 
@@ -769,7 +676,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """선택된 항목을 견적 Treeview에서 삭제합니다."""
         selected_item = self.quotation_tree.selection()
         if not selected_item:
-            messagebox.showwarning("선택 오류", "삭제할 항목을 목록에서 선택하세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_item_to_delete'], parent=self)
             return
         
         self.quotation_tree.delete(selected_item)
@@ -778,14 +685,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def generate_quotation(self):
         """선택된 처방을 기반으로 견적을 생성합니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 '처방 목록' 탭에서 처방을 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
             return
         self.load_formulation_for_quotation()
 
     def export_quotation(self):
         """현재 견적 내용을 엑셀 파일로 내보냅니다."""
         if not self.quotation_tree.get_children():
-            messagebox.showwarning("내보내기 오류", "내보낼 견적 내용이 없습니다. '견적 생성'을 먼저 실행해주세요.", parent=self)
+            messagebox.showwarning(self.texts['export_error'], self.texts['no_quotation_to_export'], parent=self)
             return
 
         # 처방 정보는 선택된 ID를 기반으로 가져옴
@@ -827,7 +734,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """폴더 뷰를 표시하고 파일 뷰를 숨깁니다."""
         self.file_view.grid_forget()
         self.folder_view.grid(row=0, column=0, sticky="nsew")
-        self.list_header_label.configure(text="처방 폴더")
+        self.list_header_label.configure(text=self.texts['formulation_folders'])
         self.current_view = "folders"
         self.current_folder_name = None
         self._selected_formulation_id = None
@@ -837,7 +744,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def export_quotation(self):
         """현재 견적 내용을 엑셀 파일로 내보냅니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 '처방 목록' 탭에서 처방을 선택하고 '견적 생성'을 실행해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_and_create_quotation'], parent=self)
             return
 
         session = db_manager.get_session()
@@ -870,7 +777,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """폴더 뷰를 표시하고 파일 뷰를 숨깁니다."""
         self.file_view.grid_forget()
         self.folder_view.grid(row=0, column=0, sticky="nsew")
-        self.list_header_label.configure(text="처방 폴더")
+        self.list_header_label.configure(text=self.texts['formulation_folders'])
         self.current_view = "folders"
         self.current_folder_name = None
         self._selected_formulation_id = None
@@ -899,7 +806,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """파일 뷰를 표시하고 폴더 뷰를 숨깁니다."""
         self.folder_view.grid_forget()
         self.file_view.grid(row=0, column=0, sticky="nsew")
-        self.list_header_label.configure(text=f"폴더: {folder_name}")
+        self.list_header_label.configure(text=f"{self.texts['folder']}: {folder_name}")
         self.current_view = "files"
         self.current_folder_name = folder_name
         self._selected_formulation_id = None
@@ -954,7 +861,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         title_label = ctk.CTkLabel(card, text=folder_name, font=ctk.CTkFont(size=title_size, weight="bold"), wraplength=wraplength)
         title_label.pack(pady=5, padx=10)
 
-        count_label = ctk.CTkLabel(card, text=f"({count}개 처방)", font=ctk.CTkFont(size=count_size), text_color="gray")
+        count_label = ctk.CTkLabel(card, text=f"({count} {self.texts['formulations']})", font=ctk.CTkFont(size=count_size), text_color="gray")
         count_label.pack(pady=(0, 15))
 
         for widget in [card, icon_label, title_label, count_label]:
@@ -975,15 +882,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         if edit_mode:
             if not selected_items:
-                messagebox.showwarning("알림", "수정할 처방을 목록에서 선택하세요.", parent=self)
+                messagebox.showwarning(self.texts['notification'], self.texts['select_formulation_to_edit'], parent=self)
                 return
             if len(selected_items) > 1:
-                messagebox.showwarning("알림", "하나의 처방만 선택하여 수정할 수 있습니다.", parent=self)
+                messagebox.showwarning(self.texts['notification'], self.texts['select_one_formulation_to_edit'], parent=self)
                 return
             
-            item_values = self.formulation_tree.item(selected_items[0], "values")
-            if item_values and str(item_values[0]).isdigit():
-                formulation_id = int(item_values[0])
+            formulation_id = int(selected_items[0])
         
         
         popup = FormulationEditPopup( # 분리된 클래스 사용
@@ -1001,7 +906,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """선택된 두 처방을 비교하는 팝업을 엽니다."""
         selected_ids = self.get_selected_formulation_ids()
         if len(selected_ids) != 2:
-            messagebox.showwarning("선택 오류", "비교할 두 개의 처방을 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_two_formulations_to_compare'], parent=self)
             return
         
         formulation_id1, formulation_id2 = selected_ids
@@ -1010,7 +915,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def open_folder_history_popup(self):
         """현재 폴더(실험품명)의 전체 변경 이력을 보여주는 팝업을 엽니다."""
         if not self.current_folder_name:
-            messagebox.showwarning("오류", "폴더를 먼저 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['error'], self.texts['select_folder_first'], parent=self)
             return
         
         FolderHistoryPopup(self, folder_name=self.current_folder_name)
@@ -1030,9 +935,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def update_list_filter_client_name_combo(self, selected_type: str):
         """선택된 유형에 따라 처방 목록 필터의 거래처 콤보박스를 업데이트합니다."""
-        if selected_type == "- 유형 선택 -":
-            self.list_filter_client_name_combo.set("- 업체 선택 -")
-            self.list_filter_client_name_combo.configure(values=["- 업체 선택 -"])
+        if selected_type == self.texts['select_type']:
+            self.list_filter_client_name_combo.set(self.texts['select_client'])
+            self.list_filter_client_name_combo.configure(values=[self.texts['select_client']])
             return
 
         session = db_manager.get_session()
@@ -1041,11 +946,11 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.client_map.update({client.name: client.id for client in clients})
             client_names = [client.name for client in clients]
             
-            values = ["- 업체 선택 -"] + client_names if client_names else ["- 해당 업체 없음 -"]
+            values = [self.texts['select_client']] + client_names if client_names else [self.texts['no_clients_found']]
             self.list_filter_client_name_combo.configure(values=values)
-            self.list_filter_client_name_combo.set("- 업체 선택 -")
+            self.list_filter_client_name_combo.set(self.texts['select_client'])
         except Exception as e:
-            messagebox.showerror("오류", f"거래처 목록 갱신 중 오류: {e}", parent=self)
+            messagebox.showerror(self.texts['error'], f"{self.texts['client_list_update_error']}: {e}", parent=self)
         finally:
             session.close()
 
@@ -1062,31 +967,19 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.complex_ingredient_sub_tab_view = sub_tab_view # 서브 탭뷰를 인스턴스 변수로 저장
         self.complex_ingredient_sub_tab_view.grid(row=0, column=0, padx=10, pady=(0, 10), sticky="nsew")
 
-        raw_material_tab = sub_tab_view.add("원료별 목록")
-        summed_list_tab = sub_tab_view.add("전성분 합계")
+        raw_material_tab = sub_tab_view.add(self.texts['by_raw_material'])
+        summed_list_tab = sub_tab_view.add(self.texts['summed_ingredients'])
 
         # --- 원료별 목록 탭 UI ---
         raw_material_tab.grid_columnconfigure(0, weight=1)
-        raw_material_tab.grid_rowconfigure(0, weight=1) # Treeview가 차지할 공간
-        raw_material_tab.grid_rowconfigure(1, weight=0) # 합계 라벨이 차지할 공간
+        raw_material_tab.grid_rowconfigure(0, weight=1)  # Treeview가 차지할 공간
+        raw_material_tab.grid_rowconfigure(1, weight=0)  # 가로 스크롤바
+        raw_material_tab.grid_rowconfigure(2, weight=0)  # 합계 프레임
         
         # 열 정의는 여기에 유지합니다.
-        self.complex_ing_cols = {
-            "no": {"text": "NO", "width": 40, "anchor": "center", "visible": True},
-            "material_name": {"text": "원료명", "width": 200, "visible": True},
-            "inci_name": {"text": "INCI Name", "width": 200, "visible": True},
-            "name_ko": {"text": "성분의 한글명", "width": 200, "visible": True},
-            "rm_ratio": {"text": "RM 함량(%)", "width": 120, "anchor": "e", "visible": True},
-            "ing_ratio": {"text": "성분 함량(%)", "width": 120, "anchor": "e", "visible": True},
-            "actual_wt": {"text": "Actual Wt (%)", "width": 120, "anchor": "e", "visible": True},
-            "cas_no": {"text": "CAS No.", "width": 120, "visible": True},
-            "function": {"text": "Ingredient function", "width": 150, "visible": True},
-            "hs_code": {"text": "HS CODE", "width": 100, "visible": False}, # HS CODE 열 추가
-            "nmpa_reg_num": {"text": "NMPA", "width": 120, "visible": False}, # NMPA 열 추가
-            "remark": {"text": "Remark", "width": 100, "visible": True},
-        }
+        self.complex_ing_cols = self.texts['complex_ingredient_tree_columns']
 
-        self.raw_material_ingredient_tree = ttk.Treeview(raw_material_tab, show="headings")
+        self.raw_material_ingredient_tree = ttk.Treeview(raw_material_tab, columns=list(self.complex_ing_cols.keys()), show="headings")
         self._setup_treeview_columns(self.raw_material_ingredient_tree, self.complex_ing_cols)
         self.raw_material_ingredient_tree.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=(10,0), pady=(0, 5))
         self.raw_material_ingredient_tree.tag_configure('material_row', font=('Malgun Gothic', 11, 'bold'))
@@ -1101,26 +994,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         # 원료별 목록 합계 프레임
         raw_material_summary_frame = ctk.CTkFrame(raw_material_tab, fg_color="transparent")
-        raw_material_summary_frame.grid(row=1, column=0, sticky="e", padx=10, pady=5)
-        ctk.CTkLabel(raw_material_summary_frame, text="RM or ingredient % in fla 합계:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
+        raw_material_summary_frame.grid(row=2, column=0, sticky="e", padx=10, pady=5)
+        ctk.CTkLabel(raw_material_summary_frame, text=self.texts['total_rm_ratio_label'], font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
         self.raw_material_rm_ratio_total_label = ctk.CTkLabel(raw_material_summary_frame, text="0.0000", font=ctk.CTkFont(weight="bold"))
         self.raw_material_rm_ratio_total_label.pack(side="left", padx=(0, 20))
-        ctk.CTkLabel(raw_material_summary_frame, text="Actual Wt (%) 합계:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(raw_material_summary_frame, text=self.texts['total_actual_wt_label'], font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
         self.raw_material_actual_wt_total_label = ctk.CTkLabel(raw_material_summary_frame, text="0.000000", font=ctk.CTkFont(weight="bold"))
         self.raw_material_actual_wt_total_label.pack(side="left")
 
         # --- 전성분 합계 탭 UI ---
         summed_list_tab.grid_columnconfigure(0, weight=1)
-        summed_list_tab.grid_rowconfigure(0, weight=1) # Treeview
-        summed_list_tab.grid_rowconfigure(1, weight=0) # 합계 라벨
+        summed_list_tab.grid_rowconfigure(0, weight=1)  # Treeview가 차지할 공간
+        summed_list_tab.grid_rowconfigure(1, weight=0)  # 가로 스크롤바
+        summed_list_tab.grid_rowconfigure(2, weight=0)  # 합계 프레임
 
-        summed_cols = ("name_ko", "name_en", "cas_no", "function", "total_ratio")
-        self.summed_ingredient_tree = ttk.Treeview(summed_list_tab, columns=summed_cols, show="headings")
-        self.summed_ingredient_tree.heading("name_ko", text="국문명"); self.summed_ingredient_tree.column("name_ko", width=200)
-        self.summed_ingredient_tree.heading("name_en", text="영문명"); self.summed_ingredient_tree.column("name_en", width=200)
-        self.summed_ingredient_tree.heading("cas_no", text="CAS No."); self.summed_ingredient_tree.column("cas_no", width=120)
-        self.summed_ingredient_tree.heading("function", text="기능"); self.summed_ingredient_tree.column("function", width=150)
-        self.summed_ingredient_tree.heading("total_ratio", text="총 함량(%)"); self.summed_ingredient_tree.column("total_ratio", width=120, anchor="e")
+        summed_cols = self.texts['summed_ingredient_tree_columns']
+        self.summed_ingredient_tree = ttk.Treeview(summed_list_tab, columns=list(summed_cols.keys()), show="headings")
+        self.summed_ingredient_tree.heading("name_ko", text=summed_cols['name_ko']); self.summed_ingredient_tree.column("name_ko", width=200)
+        self.summed_ingredient_tree.heading("name_en", text=summed_cols['name_en']); self.summed_ingredient_tree.column("name_en", width=200)
+        self.summed_ingredient_tree.heading("cas_no", text=summed_cols['cas_no']); self.summed_ingredient_tree.column("cas_no", width=120)
+        self.summed_ingredient_tree.heading("function", text=summed_cols['function']); self.summed_ingredient_tree.column("function", width=150)
+        self.summed_ingredient_tree.heading("total_ratio", text=summed_cols['total_ratio']); self.summed_ingredient_tree.column("total_ratio", width=120, anchor="e")
         self.summed_ingredient_tree.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=(10,0), pady=(0,5))
 
         # 전성분 합계 스크롤바
@@ -1133,15 +1027,15 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         # 전성분 합계 요약 프레임
         summed_summary_frame = ctk.CTkFrame(summed_list_tab, fg_color="transparent")
-        summed_summary_frame.grid(row=1, column=0, sticky="e", padx=10, pady=5)
-        ctk.CTkLabel(summed_summary_frame, text="총 함량(%) 합계:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
+        summed_summary_frame.grid(row=2, column=0, sticky="e", padx=10, pady=5)
+        ctk.CTkLabel(summed_summary_frame, text=self.texts['total_ratio_sum'], font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
         self.summed_total_ratio_label = ctk.CTkLabel(summed_summary_frame, text="0.000000", font=ctk.CTkFont(weight="bold"))
         self.summed_total_ratio_label.pack(side="left")
 
     def generate_raw_material_ingredient_list(self):
         """선택된 처방을 기반으로 원료별 전성분 목록을 생성합니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 '처방 목록' 탭에서 처방을 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
             return
         
         # Treeview 초기화
@@ -1201,7 +1095,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def generate_summed_ingredient_list(self):
         """선택된 처방의 모든 전성분 함량을 합산하여 목록을 생성합니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 '처방 목록' 탭에서 처방을 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
             return
 
         # Treeview 초기화
@@ -1287,30 +1181,22 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def copy_complex_ingredients_to_clipboard(self):
         """복합 전성분 텍스트박스의 내용을 클립보드에 복사합니다."""
         # TODO: 현재 활성화된 Treeview의 내용을 복사하도록 수정 필요
-        messagebox.showinfo("알림", "클립보드 복사 기능은 개발 예정입니다.", parent=self)
+        messagebox.showinfo(self.texts['notification'], self.texts['clipboard_copy_dev'], parent=self)
 
     def setup_single_ingredient_tab(self, tab_frame):
         """'단일 전성분 (함량순)' 탭의 UI를 설정합니다."""
-        tab_frame.grid_columnconfigure(0, weight=1); tab_frame.grid_rowconfigure(1, weight=1)
-
+        tab_frame.grid_columnconfigure(0, weight=1)
+        tab_frame.grid_rowconfigure(0, weight=1) # Treeview가 차지할 공간
+        tab_frame.grid_rowconfigure(1, weight=0) # 가로 스크롤바
+        tab_frame.grid_rowconfigure(2, weight=0) # 합계 프레임
         # --- 컨트롤 프레임 ---
         # 컨트롤 프레임이 더 이상 필요 없으므로 삭제합니다.
 
         # --- 열 선택 메뉴 ---
-        self.single_ing_cols = {
-            "no": {"text": "NO", "width": 40, "anchor": "center", "visible": True},
-            "name_en": {"text": "INGREDIENT", "width": 250, "visible": True},
-            "ci_no": {"text": "C.I NO", "width": 80, "visible": False},
-            "total_ratio": {"text": "% (W/W)", "width": 100, "anchor": "e", "visible": True},
-            "cas_no": {"text": "CAS. NO", "width": 120, "visible": True},
-            "function": {"text": "FUNCTION", "width": 150, "visible": True},
-            "hs_code": {"text": "HS CODE", "width": 100, "visible": False},
-            "nmpa_reg_num": {"text": "NMPA", "width": 120, "visible": False},
-            "remark": {"text": "비고", "width": 150, "visible": False},
-        }
+        self.single_ing_cols = self.texts['single_ingredient_tree_columns']
 
         # --- 결과 표시 Treeview ---
-        self.single_ingredient_tree = ttk.Treeview(tab_frame, show="headings")
+        self.single_ingredient_tree = ttk.Treeview(tab_frame, columns=list(self.single_ing_cols.keys()), show="headings")
         self._setup_treeview_columns(self.single_ingredient_tree, self.single_ing_cols)
         self.single_ingredient_tree.grid(row=0, column=0, columnspan=2, padx=(10,0), pady=(10,5), sticky="nsew") # Treeview를 맨 위로 이동
 
@@ -1325,14 +1211,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # 단일 전성분 합계 프레임
         single_summary_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         single_summary_frame.grid(row=2, column=0, sticky="e", padx=10, pady=5)
-        ctk.CTkLabel(single_summary_frame, text="총 함량(% (W/W)) 합계:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(single_summary_frame, text=self.texts['total_ratio_ww_sum'], font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
         self.single_total_ratio_label = ctk.CTkLabel(single_summary_frame, text="0.000000", font=ctk.CTkFont(weight="bold"))
         self.single_total_ratio_label.pack(side="left")
 
     def generate_single_ingredient_list(self):
         """선택된 처방의 모든 전성분을 합산하고 함량순으로 정렬하여 목록을 생성합니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 '처방 목록' 탭에서 처방을 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
             return
 
         # Treeview 초기화
@@ -1378,14 +1264,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def confirm_reset_all_formulations(self):
         """모든 처방 데이터를 리셋하기 전에 사용자에게 확인을 받습니다."""
-        if not messagebox.askyesno(
-            "처방 참조 초기화 확인", 
-            "모든 처방의 원료 참조를 초기화하시겠습니까?\n\n"
-            "이 작업은 처방전 자체를 삭제하지 않지만,\n"
-            "각 처방에 연결된 모든 원료 정보를 '참조 없음' 상태로 변경합니다.\n"
-            "이 작업은 되돌릴 수 없습니다.", 
-            parent=self
-        ):
+        if not messagebox.askyesno(self.texts['reset_formulation_ref_title'], self.texts['reset_formulation_ref_confirm'], parent=self):
             return
 
         session = db_manager.get_session()
@@ -1400,8 +1279,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
             session.commit()
             
             messagebox.showinfo(
-                "초기화 완료",
-                f"모든 처방의 원료 참조가 초기화되었습니다.\n(총 {num_items_updated}개 항목)",
+                self.texts['reset_complete'],
+                self.texts['reset_formulation_ref_success'].format(count=num_items_updated),
                 parent=self
             )
             
@@ -1415,7 +1294,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         except Exception as e:
             session.rollback()
-            messagebox.showerror("데이터베이스 오류", f"처방 참조 초기화 중 오류 발생: {e}", parent=self)
+            messagebox.showerror(self.texts['db_error'], f"{self.texts['reset_formulation_ref_error']}: {e}", parent=self)
         finally:
             session.close()
 
@@ -1433,7 +1312,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         ko_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         ko_frame.grid(row=1, column=0, padx=10, pady=(0, 5), sticky="nsew")
         ko_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(ko_frame, text="국문 전성분", font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(0,2))
+        ctk.CTkLabel(ko_frame, text=self.texts['korean_ingredients'], font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(0,2))
         self.design_ko_textbox = ctk.CTkTextbox(ko_frame, wrap="word", font=ctk.CTkFont(family="Malgun Gothic", size=14))
         self.design_ko_textbox.pack(fill="both", expand=True)
 
@@ -1441,14 +1320,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
         en_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         en_frame.grid(row=3, column=0, padx=10, pady=(5, 10), sticky="nsew")
         en_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(en_frame, text="영문 전성분 (INCI)", font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(0,2))
+        ctk.CTkLabel(en_frame, text=self.texts['english_ingredients_inci'], font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(0,2))
         self.design_en_textbox = ctk.CTkTextbox(en_frame, wrap="word", font=ctk.CTkFont(family="Malgun Gothic", size=14))
         self.design_en_textbox.pack(fill="both", expand=True)
 
     def generate_design_ingredient_list(self):
         """선택된 처방을 기반으로 디자인용 전성분 목록(문자열)을 생성합니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 '처방 목록' 탭에서 처방을 선택해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
             return
 
         # '전성분 합계' 로직을 재사용하여 데이터를 가져옵니다.
@@ -1493,7 +1372,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def copy_design_ingredients_to_clipboard(self):
         """디자인용 전성분 텍스트박스의 내용을 클립보드에 복사합니다."""
         # TODO: 국문/영문 중 어떤 것을 복사할지 선택하는 기능 추가 필요
-        messagebox.showinfo("알림", "클립보드 복사 기능은 개발 예정입니다.", parent=self)
+        messagebox.showinfo(self.texts['notification'], self.texts['clipboard_copy_dev'], parent=self)
 
     def setup_ingredient_list_tab(self, tab_frame):
         """'전성분' 탭의 UI를 설정합니다."""
@@ -1504,12 +1383,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
         top_control_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         top_control_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 
-        ctk.CTkButton(top_control_frame, text="전체 목록 생성", command=self.generate_all_ingredient_lists).pack(side="left")
-        ctk.CTkButton(top_control_frame, text="엑셀로 내보내기", command=self.export_all_ingredient_lists).pack(side="left", padx=(10, 0))
+        ctk.CTkButton(top_control_frame, text=self.texts['create_all_lists'], command=self.generate_all_ingredient_lists).pack(side="left")
+        ctk.CTkButton(top_control_frame, text=self.texts['export_to_excel'], command=self.export_all_ingredient_lists).pack(side="left", padx=(10, 0))
 
         # --- 열 선택 메뉴 버튼 (컨트롤 프레임에 추가) ---
         # 이 버튼은 나중에 생성될 Treeview를 참조해야 하므로, UI 구성 후 마지막에 command를 설정합니다.
-        self.column_selection_button = ctk.CTkButton(top_control_frame, text="표시할 열 선택", width=120)
+        self.column_selection_button = ctk.CTkButton(top_control_frame, text=self.texts['select_columns_to_display'], width=120)
         self.column_selection_button.pack(side="right", padx=(10, 0))
 
         # 전성분 탭 내부에 또 다른 탭 뷰를 생성합니다.
@@ -1520,17 +1399,17 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.ingredient_tab_view.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         
         # 1. 복합 전성분 탭
-        complex_tab = self.ingredient_tab_view.add("복합 전성분 (서류용)")
+        complex_tab = self.ingredient_tab_view.add(self.texts['complex_ingredients_for_docs'])
         complex_tab.grid_columnconfigure(0, weight=1); complex_tab.grid_rowconfigure(0, weight=1)
         self.setup_complex_ingredient_tab(complex_tab)
 
         # 2. 단일 전성분 탭
-        single_tab = self.ingredient_tab_view.add("단일 전성분 (함량순)")
+        single_tab = self.ingredient_tab_view.add(self.texts['single_ingredients_by_ratio'])
         single_tab.grid_columnconfigure(0, weight=1); single_tab.grid_rowconfigure(1, weight=1)
         self.setup_single_ingredient_tab(single_tab)
 
         # 3. 디자인용 전성분 탭
-        design_tab = self.ingredient_tab_view.add("디자인용 전성분")
+        design_tab = self.ingredient_tab_view.add(self.texts['ingredients_for_design'])
         self.setup_design_ingredient_tab(design_tab)
 
         # --- 열 선택 메뉴 최종 설정 ---
@@ -1546,7 +1425,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def on_ingredient_tab_change(self):
         """전성분 서브 탭 변경 시 '표시할 열 선택' 버튼의 가시성을 조절합니다."""
         selected_main_tab = self.ingredient_tab_view.get()
-        if selected_main_tab == "복합 전성분 (서류용)":
+        if selected_main_tab == self.texts['complex_ingredients_for_docs']:
             # 복합 전성분 탭이 선택된 경우, 서브탭 상태에 따라 버튼 가시성 결정
             self.on_complex_ingredient_sub_tab_change()
         else:
@@ -1556,7 +1435,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def on_complex_ingredient_sub_tab_change(self):
         """'복합 전성분' 내의 서브 탭 변경 시 버튼 가시성을 조절합니다."""
         selected_sub_tab = self.complex_ingredient_sub_tab_view.get()
-        if selected_sub_tab == "원료별 목록":
+        if selected_sub_tab == self.texts['by_raw_material']:
             self.column_selection_button.pack(side="right", padx=(10, 0))
         else:
             self.column_selection_button.pack_forget()
@@ -1583,7 +1462,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def export_all_ingredient_lists(self):
         """생성된 모든 전성분 목록을 하나의 엑셀 파일에 여러 시트로 내보냅니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "먼저 처방을 선택하고 '전체 목록 생성'을 실행해주세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_and_create_list'], parent=self)
             return
 
         sheets_data = {}
@@ -1697,30 +1576,30 @@ class DocumentManagementFrame(ctk.CTkFrame):
             ko_data = []
             for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
                 ko_data.append([i, name_ko, "", f"{data['total_ratio']:.6f}", data['cas_no'], data['function']])
-            sheets_data["단일 전성분 (국문)"] = {"type": "table", "content": {"headers": ko_headers, "data": ko_data}}
+            sheets_data[self.texts['single_ingredients_korean']] = {"type": "table", "content": {"headers": ko_headers, "data": ko_data}}
 
             # 영문 시트 데이터
             en_headers = ["NO", "INGREDIENT", "C.I NO", "% (W/W)", "CAS. NO", "FUNCTION"]
             en_data = []
             for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
                 en_data.append([i, name_en, "", f"{data['total_ratio']:.6f}", data['cas_no'], data['function']])
-            sheets_data["단일 전성분 (영문)"] = {"type": "table", "content": {"headers": en_headers, "data": en_data}}
+            sheets_data[self.texts['single_ingredients_english']] = {"type": "table", "content": {"headers": en_headers, "data": en_data}}
 
 
         # 4. 디자인용 전성분 데이터 추출
         ko_text = self.design_ko_textbox.get("1.0", "end-1c").strip()
         en_text = self.design_en_textbox.get("1.0", "end-1c").strip()
-        if ko_text and "버튼을 눌러주세요" not in ko_text:
+        if ko_text and self.texts['press_button_placeholder'] not in ko_text:
             design_headers = ["구분", "전성분 목록"]
             design_data = [
                 ("국문:", ko_text),
                 ("영문 (INCI):", en_text)
             ]
             # 'table' 형식으로 데이터를 구성하여 전달합니다.
-            sheets_data["디자인용 전성분"] = {"type": "table", "content": {"headers": design_headers, "data": design_data}}
+            sheets_data[self.texts['ingredients_for_design']] = {"type": "table", "content": {"headers": design_headers, "data": design_data}}
 
         if not sheets_data:
-            messagebox.showwarning("내보내기 오류", "내보낼 데이터가 없습니다. '전체 목록 생성'을 먼저 실행해주세요.", parent=self)
+            messagebox.showwarning(self.texts['export_error'], self.texts['no_data_to_export_create_list'], parent=self)
             return
 
         session = db_manager.get_session()
@@ -1735,38 +1614,168 @@ class DocumentManagementFrame(ctk.CTkFrame):
         tab_frame.grid_columnconfigure(0, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
         
-        label = ctk.CTkLabel(tab_frame, text=f"{tab_name}\n기능 개발 예정입니다.", font=ctk.CTkFont(size=20, weight="bold"))
+        label = ctk.CTkLabel(tab_frame, text=f"{tab_name}\n{self.texts['dev_in_progress']}", font=ctk.CTkFont(size=20, weight="bold"))
         label.grid(row=0, column=0, padx=20, pady=20)
+
+    def clear_functional_report_form(self):
+        """기능성 보고서 폼의 모든 내용을 초기화합니다."""
+        for key, widget in self.report_entries.items():
+            if key == "효능·효과":
+                for var in widget.values():
+                    var.set(False)
+            elif isinstance(widget, ctk.CTkComboBox):
+                widget.set(widget.cget("values")[0])
+            elif isinstance(widget, ctk.CTkTextbox):
+                widget.delete("1.0", "end")
+            else:
+                widget.delete(0, "end")
+        # 용법/용량 기본값 재설정
+        self.report_entries["용법·용량"].insert("1.0", self.texts['usage_default'])
+        self.report_entries["사용할 때의 주의사항"].insert("1.0", self.texts['precautions_default'])
+        self.report_entries["활성물질용량"].insert("1.0", self.texts['active_substance_default'])
+        self.report_entries["원료성분 및 배합비율"].insert("1.0", self.texts['ingredients_ratio_default'])
+
+    def export_functional_report(self):
+        """폼에 입력된 데이터를 엑셀 보고서로 내보냅니다."""
+        report_data = {}
+        for key, widget in self.report_entries.items():
+            if key == "효능·효과":
+                selected_effects = [effect for effect, var in widget.items() if var.get()]
+                report_data[key] = ", ".join(selected_effects)
+            elif isinstance(widget, ctk.CTkTextbox):
+                report_data[key] = widget.get("1.0", "end-1c")
+            else:
+                report_data[key] = widget.get()
+        excel_handler.export_functional_cosmetics_report_template(report_data)
+
+    def setup_functional_report_tab(self, tab_frame):
+        """기능성 보고/참고 자료 탭의 UI를 설정합니다."""
+        tab_frame.grid_columnconfigure(0, weight=1)
+        tab_frame.grid_rowconfigure(0, weight=1) # 스크롤 프레임
+
+        scrollable_frame = ctk.CTkScrollableFrame(tab_frame, label_text=self.texts['functional_report_title'])
+        scrollable_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        scrollable_frame.grid_columnconfigure(1, weight=1)
+
+        self.report_entries = {}
+        fields_info = [
+            ("제출유형", ["1호 (고시품목)", "2호 (심사품목)", "3호 (혼합)"], "combo"),
+            ("업체명", "", "entry"),
+            ("책임판매업자", "", "entry"),
+            ("제조원", "", "entry"),
+            ("제품명(국문)", "", "entry"),
+            ("제품명(영문)", "", "entry"),
+            ("제형", ["액제", "로션", "크림", "에센스", "쿠션", "에어로졸"], "combo"),
+            ("효능·효과", ["자외선차단", "미백", "주름개선", "탈모증상 완화", "여드름성 피부 완화"], "checkbox"),
+            ("자외선 관련 (SPF / PA)", "", "entry"),
+            ("pH (실측값)", "", "entry"),
+            ("이미 심사받은 품목", "", "entry"),
+            ("고시한 기준 및 시험방법", "", "entry"),
+            ("활성물질용량", "예시:\n총 에칠헥실트리아존으로서 4.00그램\n총 폴리실리콘-15로서 3.00그램", "textbox"),
+            ("용법·용량", "본품 적당량을 취해 피부에 골고루 펴 바른다.", "textbox"),
+            ("사용할 때의 주의사항", "1. 화장품 사용 시 또는 사용 후 직사광선에 의하여 사용부위가 붉은 반점, 부어오름 또는 가려움증 등의 이상 증상이나 부작용이 있는 경우에는 전문의 등과 상담할 것\n\n2. 상처가 있는 부위 등에는 사용을 자제할 것\n\n3. 보관 및 취급시의 주의 사항\n가. 어린이의 손이 닿지 않는 곳에 보관할 것\n나. 직사광선을 피해서 보관할 것", "textbox"),
+            ("원료성분 및 배합비율", "예시:\n나이아신아마이드: 2g\n아데노신: 0.04g", "textbox"),
+        ]
+
+        for i, (label_text, options, widget_type) in enumerate(fields_info):
+            label = ctk.CTkLabel(scrollable_frame, text=label_text)
+            label.grid(row=i, column=0, padx=10, pady=10, sticky="w")
+
+            if widget_type == "combo":
+                widget = ctk.CTkComboBox(scrollable_frame, values=options, width=250)
+                widget.set(options[0])
+            elif widget_type == "checkbox":
+                checkbox_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
+                checkbox_frame.grid(row=i, column=1, padx=10, pady=5, sticky="ew")
+                widget = {} # 체크박스 변수들을 담을 딕셔너리
+                for idx, option_text in enumerate(options):
+                    var = ctk.BooleanVar()
+                    chk = ctk.CTkCheckBox(checkbox_frame, text=option_text, variable=var)
+                    chk.pack(side="left", padx=(0, 15))
+                    widget[option_text] = var
+                self.report_entries[label_text] = widget
+                continue # 아래 로직을 건너뛰고 다음 루프로
+            elif widget_type == "textbox":
+                widget = ctk.CTkTextbox(scrollable_frame, height=80)
+                widget.insert("1.0", options)
+            else: # entry
+                widget = ctk.CTkEntry(scrollable_frame)
+
+            widget.grid(row=i, column=1, padx=10, pady=10, sticky="ew")
+            self.report_entries[label_text] = widget
+
+        # --- 하단 버튼 프레임 ---
+        button_frame = ctk.CTkFrame(tab_frame)
+        button_frame.grid(row=1, column=0, padx=10, pady=10, sticky="e")
+
+        ctk.CTkButton(button_frame, text=self.texts['export_report'], command=self.export_functional_report).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text=self.texts['reset'], command=self.clear_functional_report_form, fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
 
     def setup_lab_journal_tab(self, tab_frame):
         """물성치 및 실험일지 탭의 UI를 설정합니다."""
         tab_frame.grid_columnconfigure(0, weight=1)
         tab_frame.grid_rowconfigure(1, weight=1)
-
+        
         # --- 필터 프레임 ---
         filter_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         filter_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-
+        filter_frame.grid_columnconfigure(6, weight=1) # 오른쪽 정렬을 위한 빈 공간
+        
         current_year = datetime.now().year
         years = [str(y) for y in range(current_year - 5, current_year + 2)]
         months = [f"{m:02d}" for m in range(1, 13)]
+        
+        # --- 조회 기간 필터 ---
+        self.journal_use_date_filter_var = ctk.BooleanVar()
+        self.journal_date_filter_checkbox = ctk.CTkCheckBox(
+            filter_frame, text=self.texts['use_date_filter'], 
+            variable=self.journal_use_date_filter_var,
+            command=self.on_toggle_date_filter
+        )
+        self.journal_date_filter_checkbox.grid(row=0, column=0, padx=(0, 10))
 
-        ctk.CTkLabel(filter_frame, text="조회 기간:").pack(side="left")
         self.journal_year_combo = ctk.CTkComboBox(filter_frame, values=years, width=100, command=self.load_lab_journal)
         self.journal_year_combo.set(str(current_year))
-        self.journal_year_combo.pack(side="left", padx=5)
-        ctk.CTkLabel(filter_frame, text="년").pack(side="left")
-
+        self.journal_year_combo.grid(row=0, column=1, padx=5)
+        ctk.CTkLabel(filter_frame, text=self.texts['year']).grid(row=0, column=2)
+        
         self.journal_month_combo = ctk.CTkComboBox(filter_frame, values=months, width=80, command=self.load_lab_journal)
         self.journal_month_combo.set(f"{datetime.now().month:02d}")
-        self.journal_month_combo.pack(side="left", padx=5)
-        ctk.CTkLabel(filter_frame, text="월").pack(side="left")
+        self.journal_month_combo.grid(row=0, column=3, padx=5)
+        ctk.CTkLabel(filter_frame, text=self.texts['month']).grid(row=0, column=4)
+        
+        # --- 상세 검색 프레임 ---
+        search_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        search_frame.grid(row=0, column=5, padx=(20, 0))
 
-        ctk.CTkButton(filter_frame, text="새로고침", width=80, command=self.load_lab_journal).pack(side="left", padx=10)
+        ctk.CTkLabel(search_frame, text=self.texts['detailed_search']).pack(side="left")
+        
+        self.journal_search_field_combo = ctk.CTkComboBox(
+            search_frame, 
+            values=self.texts['journal_search_fields'],
+            width=100
+        )
+        self.journal_search_field_combo.set(self.texts['journal_search_fields'][0])
+        self.journal_search_field_combo.pack(side="left", padx=5)
+
+        self.journal_search_entry = ctk.CTkEntry(search_frame, placeholder_text=self.texts['enter_search_term'])
+        self.journal_search_entry.pack(side="left", padx=5, fill="x", expand=True)
+        self.journal_search_entry.bind("<Return>", self.load_lab_journal)
+
+        ctk.CTkButton(search_frame, text=self.texts['search'], width=60, command=self.load_lab_journal).pack(side="left", padx=5)
+
+        # --- 우측 버튼 프레임 ---
+        right_button_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        right_button_frame.grid(row=0, column=7, sticky="e")
+        ctk.CTkButton(right_button_frame, text=self.texts['export_data'], command=self.export_lab_journal_data).pack(side="left", padx=5)
+        self.journal_import_button = ctk.CTkButton(right_button_frame, text=self.texts['import_data'], command=self.import_lab_journal_data)
+        self.journal_import_button.pack(side="left", padx=5)
+        if not self.current_user.is_admin:
+            self.journal_import_button.configure(state="disabled")
 
         # --- 실험일지 Treeview ---
-        journal_cols = ("date", "name", "ph", "viscosity", "gravity", "pin", "lab_no", "client", "sample_delivery", "comment")
-        self.journal_tree = ttk.Treeview(tab_frame, columns=journal_cols, show="headings", selectmode="browse")
+        journal_cols = self.texts['journal_tree_columns']
+        self.journal_tree = ttk.Treeview(tab_frame, columns=list(journal_cols.keys()), show="headings", selectmode="browse")
         
         self.journal_tree.heading("date", text="실험 날짜"); self.journal_tree.column("date", width=100, anchor="center")
         self.journal_tree.heading("name", text="품명"); self.journal_tree.column("name", width=200)
@@ -1791,6 +1800,139 @@ class DocumentManagementFrame(ctk.CTkFrame):
         h_scroll.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
 
         self.load_lab_journal() # 초기 데이터 로드
+        self.load_journal_settings() # 저장된 설정 불러오기
+
+    def on_toggle_date_filter(self):
+        """조회 기간 체크박스 상태에 따라 연/월 콤보박스를 활성화/비활성화합니다."""
+        if self.journal_use_date_filter_var.get():
+            self.journal_year_combo.configure(state="normal")
+            self.journal_month_combo.configure(state="normal")
+        else:
+            self.journal_year_combo.configure(state="disabled")
+            self.journal_month_combo.configure(state="disabled")
+        self.load_lab_journal()
+
+    def load_journal_settings(self):
+        """config.ini에서 실험일지 탭의 필터 설정을 불러옵니다."""
+        section = f"JournalFilter_{self.current_user.username}"
+        use_date_filter = self.app.get_config_value(section, 'use_date_filter', 'true').lower() == 'true'
+        self.journal_use_date_filter_var.set(use_date_filter)
+
+        year = self.app.get_config_value(section, 'year', str(datetime.now().year))
+        month = self.app.get_config_value(section, 'month', f"{datetime.now().month:02d}")
+        self.journal_year_combo.set(year)
+        self.journal_month_combo.set(month)
+
+        search_field = self.app.get_config_value(section, 'search_field', '전체')
+        search_term = self.app.get_config_value(section, 'search_term', '')
+        self.journal_search_field_combo.set(search_field)
+        self.journal_search_entry.delete(0, "end"); self.journal_search_entry.insert(0, search_term)
+
+        self.on_toggle_date_filter() # UI 상태 업데이트 및 데이터 로드
+
+    def save_journal_settings(self, config):
+        """현재 실험일지 탭의 필터 설정을 config.ini에 저장합니다."""
+        section = f"JournalFilter_{self.current_user.username}"
+        if not config.has_section(section): config.add_section(section)
+        config.set(section, 'use_date_filter', str(self.journal_use_date_filter_var.get()))
+        config.set(section, 'year', self.journal_year_combo.get())
+        config.set(section, 'month', self.journal_month_combo.get())
+        config.set(section, 'search_field', self.journal_search_field_combo.get())
+        config.set(section, 'search_term', self.journal_search_entry.get())
+        
+    def export_lab_journal_data(self):
+        """현재 실험일지 목록을 서식이 적용된 엑셀 파일로 내보냅니다."""
+        if not self.journal_tree.get_children():
+            messagebox.showwarning("내보내기 오류", "내보낼 데이터가 없습니다.", parent=self)
+            return
+
+        year = self.journal_year_combo.get()
+        month = self.journal_month_combo.get()
+
+        # export_formulation_template 함수 형식에 맞게 데이터 구조화
+        journal_data = {
+            "details": {
+                "실험품명": f"{year}년 {month}월 실험일지",
+                "실험년월일": datetime.now().strftime('%Y-%m-%d'),
+                "담당자": self.current_user.username,
+                "LAB NO.": "", # 실험일지는 특정 LAB NO.가 아니므로 비워둠
+            },
+            "items": [
+                {
+                    "실험 날짜": values[0],
+                    "품명": values[1],
+                    "pH": values[2],
+                    "점도": values[3],
+                    "비중": values[4],
+                    "Pin": values[5],
+                    "실험번호": values[6],
+                    "업체": values[7],
+                    "샘플 전달": values[8],
+                    "기타": values[9]
+                }
+                for values in (self.journal_tree.item(item, "values") for item in self.journal_tree.get_children())
+            ]
+        }
+        
+        default_filename = "실험일지.xlsx"
+        # 기존의 서식 적용 함수(export_formulation_template)를 재사용하여 내보냅니다.
+        # is_lab_journal 플래그를 추가하여 실험일지용 헤더를 사용하도록 합니다.
+        excel_handler.export_formulation_template(journal_data, default_filename, is_lab_journal=True)
+
+    def import_lab_journal_data(self):
+        """엑셀 파일에서 실험일지 데이터를 가져와 DB에 업데이트/추가합니다."""
+        if not messagebox.askyesno(self.texts['import_confirm'], self.texts['import_journal_confirm_msg'], parent=self):
+            return
+
+        data = excel_handler.import_data()
+        if not data:
+            return
+
+        session = db_manager.get_session()
+        try:
+            updated_count = 0
+            added_count = 0
+            for row in data:
+                lab_no = row.get("실험번호") or row.get("lab_no")
+                if not lab_no:
+                    continue
+
+                formulation = session.query(Formulation).filter_by(lab_no=lab_no).first()
+                if not formulation:
+                    formulation = Formulation(lab_no=lab_no)
+                    session.add(formulation)
+                    added_count += 1
+                else:
+                    updated_count += 1
+
+                # 데이터 매핑
+                date_str = row.get("실험 날짜") or row.get("date")
+                if date_str:
+                    try:
+                        formulation.experiment_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                    except (ValueError, TypeError):
+                        pass # 날짜 형식이 잘못된 경우 무시
+                
+                formulation.experiment_name = row.get("품명") or row.get("name")
+                formulation.experiment_comment = row.get("기타") or row.get("comment")
+                
+                # pH, 점도 값 파싱 (예: "8.5/8.4" -> initial/next_day)
+                ph_val = row.get("pH") or row.get("ph", "")
+                if '/' in ph_val:
+                    formulation.experiment_ph_initial, formulation.experiment_ph_next_day = ph_val.split('/', 1)
+                
+                viscosity_val = row.get("점도") or row.get("viscosity", "")
+                if '/' in viscosity_val:
+                    formulation.experiment_viscosity_initial, formulation.experiment_viscosity_next_day = viscosity_val.split('/', 1)
+
+            session.commit()
+            messagebox.showinfo(self.texts['success'], self.texts['import_journal_success_msg'].format(added=added_count, updated=updated_count), parent=self)
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror(self.texts['db_error'], f"{self.texts['import_error_msg']}: {e}", parent=self)
+        finally:
+            session.close()
+            self.load_lab_journal() # 목록 새로고침
 
     def load_lab_journal(self, event=None):
         """선택된 연/월에 해당하는 실험일지 데이터를 불러옵니다."""
@@ -1802,12 +1944,48 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         session = db_manager.get_session()
         try:
-            from sqlalchemy import extract
-            journals = session.query(Formulation).filter(
-                extract('year', Formulation.experiment_date) == year,
-                extract('month', Formulation.experiment_date) == month
-            ).order_by(Formulation.experiment_date).all()
+            from sqlalchemy import or_
+            query = session.query(Formulation)
 
+            # '조회 기간 사용'이 체크된 경우에만 날짜 필터 적용
+            if self.journal_use_date_filter_var.get():
+                date_pattern = f"{year}-{month:02d}-%"
+                query = query.filter(Formulation.experiment_date.like(date_pattern))
+
+            # 상세 검색 조건 추가
+            search_field = self.journal_search_field_combo.get()
+            search_term = self.journal_search_entry.get().strip()
+
+            if search_term:
+                search_pattern = f"%{search_term}%"
+                if search_field == "전체":
+                    query = query.join(Formulation.oem_odm_client, isouter=True).filter(
+                        or_(
+                            Formulation.experiment_name.ilike(search_pattern),
+                            Formulation.experiment_ph_initial.ilike(search_pattern),
+                            Formulation.experiment_ph_next_day.ilike(search_pattern),
+                            Formulation.experiment_viscosity_initial.ilike(search_pattern),
+                            Formulation.experiment_viscosity_next_day.ilike(search_pattern),
+                            Formulation.experiment_machine.ilike(search_pattern),
+                            Formulation.lab_no.ilike(search_pattern),
+                            Client.name.ilike(search_pattern)
+                        )
+                    )
+                elif search_field == "품명":
+                    query = query.filter(Formulation.experiment_name.ilike(search_pattern))
+                elif search_field == "pH":
+                    query = query.filter(or_(Formulation.experiment_ph_initial.ilike(search_pattern), Formulation.experiment_ph_next_day.ilike(search_pattern)))
+                elif search_field == "점도":
+                    query = query.filter(or_(Formulation.experiment_viscosity_initial.ilike(search_pattern), Formulation.experiment_viscosity_next_day.ilike(search_pattern)))
+                elif search_field == "Pin":
+                    query = query.filter(Formulation.experiment_machine.ilike(search_pattern))
+                elif search_field == "실험번호":
+                    query = query.filter(Formulation.lab_no.ilike(search_pattern))
+                elif search_field == "업체":
+                    query = query.join(Formulation.oem_odm_client).filter(Client.name.ilike(search_pattern))
+
+            journals = query.order_by(Formulation.experiment_date).all()
+            
             for i, form in enumerate(journals):
                 ph = f"{form.experiment_ph_initial or '-'}/{form.experiment_ph_next_day or '-'}"
                 viscosity = f"{form.experiment_viscosity_initial or '-'}/{form.experiment_viscosity_next_day or '-'}"
@@ -1818,7 +1996,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 if form.sample_sent_count > 0:
                     # sample_delivery_date 속성이 존재하고, 값이 None이 아닌지 확인
                     delivery_date = getattr(form, 'sample_delivery_date', None)
-                    date_part = delivery_date.strftime('%Y-%m-%d') if delivery_date else "날짜 없음"
+                    date_part = delivery_date.strftime('%Y-%m-%d') if delivery_date else self.texts['no_date']
                     sample_delivery = f"{form.sample_sent_count}회 / {date_part}"
 
                 # experiment_date가 문자열로 저장된 경우를 대비한 방어 코드
@@ -1857,8 +2035,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         current_comment = self.journal_tree.item(selected_item_id, "values")[9]
 
         dialog = ctk.CTkInputDialog(
-            text="수정할 내용을 입력하세요:",
-            title="기타 사항 수정"
+            text=self.texts['enter_comment_to_edit'],
+            title=self.texts['edit_comment_title']
         )
         dialog.entry.insert(0, current_comment)
         new_comment = dialog.get_input()
@@ -1871,9 +2049,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 current_values = list(self.journal_tree.item(selected_item_id, "values"))
                 current_values[9] = new_comment
                 self.journal_tree.item(selected_item_id, values=tuple(current_values))
-                messagebox.showinfo("성공", "기타 사항이 업데이트되었습니다.", parent=self)
+                messagebox.showinfo(self.texts['success'], self.texts['comment_updated_success'], parent=self)
             else:
-                messagebox.showerror("오류", "데이터 업데이트에 실패했습니다.", parent=self)
+                messagebox.showerror(self.texts['error'], self.texts['data_update_failed'], parent=self)
 
     def load_formulations(self, client_id=None):
         """DB에서 처방 목록을 불러와 현재 뷰에 맞게 표시합니다."""
@@ -1890,7 +2068,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # 거래처 필터 목록과 맵을 새로고침합니다.
         session = db_manager.get_session()
         self.client_map = {c.name: c.id for c in session.query(Client).all()}
-        all_client_types = ["- 유형 선택 -"] + db_manager.get_unique_client_types()
+        all_client_types = [self.texts['select_type']] + db_manager.get_unique_client_types()
         self.list_filter_client_type_combo.configure(values=all_client_types)
         
         if client_id is None:
@@ -1913,7 +2091,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             grouped_data = query.group_by(Formulation.experiment_name).order_by(Formulation.experiment_name).all()
 
             if not grouped_data:
-                ctk.CTkLabel(self.folder_view, text="처방 데이터가 없습니다.\n'신규' 버튼을 눌러 새 처방을 작성하세요.", font=ctk.CTkFont(size=16)).pack(pady=50)
+                ctk.CTkLabel(self.folder_view, text=self.texts['no_formulation_data'], font=ctk.CTkFont(size=16)).pack(pady=50)
                 return
 
             row, col = 0, 0
@@ -1942,9 +2120,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             date_format = '%Y-%m-%d'
             for i, form in enumerate(formulations):
-                tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-                self.formulation_tree.insert("", "end", tags=(tag,), values=(
-                    form.id,
+                tag = 'oddrow' if i % 2 == 0 else 'evenrow' # 이 부분은 이전 수정에서 반영되었어야 하나 누락된 것 같습니다.
+                self.formulation_tree.insert("", "end", iid=form.id, tags=(tag,), values=(
                     form.revision or "N/A",
                     form.manager_code or "",
                     form.experiment_date.strftime(date_format) if isinstance(form.experiment_date, (datetime, date)) else form.experiment_date or "",
@@ -1960,9 +2137,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
         selected_items = self.formulation_tree.selection()
         if selected_items:
             # 여러 개가 선택되어도, 단일 선택 기반 기능(수정, 견적 등)을 위해 첫 번째 항목의 ID를 저장합니다.
-            first_item_values = self.formulation_tree.item(selected_items[0], "values")
-            if first_item_values and str(first_item_values[0]).isdigit():
-                self._selected_formulation_id = int(first_item_values[0])
+            first_item_id = selected_items[0]
+            if str(first_item_id).isdigit():
+                self._selected_formulation_id = int(first_item_id)
             else:
                 self._selected_formulation_id = None
         else:
@@ -1973,20 +2150,19 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """Treeview에서 선택된 모든 처방의 ID 목록을 반환합니다."""
         selected_ids = []
         selected_items = self.formulation_tree.selection()
-        for item_id in selected_items:
-            item_values = self.formulation_tree.item(item_id, "values")
-            if item_values and str(item_values[0]).isdigit():
-                selected_ids.append(int(item_values[0]))
+        for iid in selected_items:
+            if str(iid).isdigit():
+                selected_ids.append(int(iid))
         return selected_ids
 
     def delete_formulation(self):
         """선택된 처방을 삭제합니다."""
         selected_ids = self.get_selected_formulation_ids()
         if not selected_ids:
-            messagebox.showwarning("선택 오류", "삭제할 처방을 목록에서 선택하세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_to_delete'], parent=self)
             return
         
-        if not messagebox.askyesno("삭제 확인", f"정말로 선택한 {len(selected_ids)}개의 처방을 삭제하시겠습니까?", parent=self):
+        if not messagebox.askyesno(self.texts['delete_confirm'], self.texts['delete_formulation_confirm_msg'].format(count=len(selected_ids)), parent=self):
             return
 
         session = db_manager.get_session()
@@ -1997,24 +2173,24 @@ class DocumentManagementFrame(ctk.CTkFrame):
             
             session.commit()
             
-            messagebox.showinfo("성공", f"{deleted_count}개의 처방이 삭제되었습니다.", parent=self)
+            messagebox.showinfo(self.texts['success'], self.texts['delete_formulation_success_msg'].format(count=deleted_count), parent=self)
             self._selected_formulation_id = None # ID 초기화
             self.update_button_states() # 버튼 상태 업데이트
             self.load_formulations()
 
         except Exception as e:
             session.rollback()
-            messagebox.showerror("데이터베이스 오류", f"삭제 중 오류 발생: {e}", parent=self)
+            messagebox.showerror(self.texts['db_error'], f"{self.texts['delete_error_msg']}: {e}", parent=self)
         finally:
             session.close()
 
     def increment_sample_sent_count(self):
         """선택된 처방의 샘플 발송 횟수를 1 증가시킵니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "샘플 발송 처리할 처방을 목록에서 선택하세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_for_sample'], parent=self)
             return
 
-        if not messagebox.askyesno("샘플 발송 확인", "선택한 처방의 샘플 발송 횟수를 1 증가시키겠습니까?", parent=self):
+        if not messagebox.askyesno(self.texts['send_sample_confirm'], self.texts['send_sample_confirm_msg'], parent=self):
             return
 
         session = db_manager.get_session()
@@ -2024,36 +2200,36 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 formulation.sample_sent_count = (formulation.sample_sent_count or 0) + 1
                 formulation.sample_delivery_date = datetime.now().date() # 오늘 날짜로 발송일 업데이트
                 session.commit()
-                messagebox.showinfo("성공", f"샘플 발송 횟수가 {formulation.sample_sent_count}로 업데이트되었습니다.", parent=self)
+                messagebox.showinfo(self.texts['success'], self.texts['sample_count_updated_msg'].format(count=formulation.sample_sent_count), parent=self)
                 # 목록을 다시 로드하여 화면에 즉시 반영
                 # 선택을 초기화하여 다른 탭의 내용이 지워지는 것을 방지
                 self._selected_formulation_id = None
                 self.update_button_states()
                 self.load_files_in_folder(self.current_folder_name)
             else:
-                messagebox.showerror("오류", "선택된 처방을 찾을 수 없습니다.", parent=self)
+                messagebox.showerror(self.texts['error'], self.texts['formulation_not_found'], parent=self)
         except Exception as e:
             session.rollback()
-            messagebox.showerror("데이터베이스 오류", f"샘플 발송 횟수 업데이트 중 오류 발생: {e}", parent=self)
+            messagebox.showerror(self.texts['db_error'], f"{self.texts['sample_count_update_error']}: {e}", parent=self)
         finally:
             session.close()
 
     def edit_sample_sent_count(self):
         """선택된 처방의 샘플 발송 횟수를 사용자가 입력한 값으로 수정합니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning("선택 오류", "수정할 처방을 목록에서 선택하세요.", parent=self)
+            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_to_edit'], parent=self)
             return
 
         session = db_manager.get_session()
         try:
             formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
             if not formulation:
-                messagebox.showerror("오류", "선택된 처방을 찾을 수 없습니다.", parent=self)
+                messagebox.showerror(self.texts['error'], self.texts['formulation_not_found'], parent=self)
                 return
 
             # --- 입력 다이얼로그 UI 구성 ---
             dialog = ctk.CTkToplevel(self)
-            dialog.title("샘플 발송 정보 수정")
+            dialog.title(self.texts['edit_sample_info_title'])
             dialog.transient(self)
             dialog.grab_set()
 
@@ -2062,12 +2238,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             ctk.CTkLabel(main_frame, text=f"'{formulation.experiment_name}' ({formulation.lab_no})").pack(pady=(0, 10))
 
-            ctk.CTkLabel(main_frame, text="발송 횟수:").pack(anchor="w", padx=10)
+            ctk.CTkLabel(main_frame, text=self.texts['sent_count']).pack(anchor="w", padx=10)
             count_entry = ctk.CTkEntry(main_frame)
             count_entry.insert(0, str(formulation.sample_sent_count or 0))
             count_entry.pack(padx=10, pady=(0, 10), fill="x")
 
-            ctk.CTkLabel(main_frame, text="마지막 발송일 (YYYY-MM-DD):").pack(anchor="w", padx=10)
+            ctk.CTkLabel(main_frame, text=self.texts['last_sent_date']).pack(anchor="w", padx=10)
             date_entry = ctk.CTkEntry(main_frame)
             if formulation.sample_delivery_date:
                 date_entry.insert(0, formulation.sample_delivery_date.strftime('%Y-%m-%d'))
@@ -2083,17 +2259,17 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     formulation.sample_sent_count = new_count
                     formulation.sample_delivery_date = new_date
                     session.commit()
-                    messagebox.showinfo("성공", "샘플 발송 정보가 업데이트되었습니다.", parent=self)
+                    messagebox.showinfo(self.texts['success'], self.texts['sample_info_updated_success'], parent=self)
                     result["saved"] = True
                     dialog.destroy()
                 except ValueError:
-                    messagebox.showwarning("입력 오류", "올바른 숫자와 날짜 형식(YYYY-MM-DD)을 입력해주세요.", parent=dialog)
+                    messagebox.showwarning(self.texts['input_error'], self.texts['invalid_number_date_format'], parent=dialog)
                 except Exception as ex:
                     session.rollback()
-                    messagebox.showerror("데이터베이스 오류", f"업데이트 중 오류 발생: {ex}", parent=dialog)
+                    messagebox.showerror(self.texts['db_error'], f"{self.texts['update_error_msg']}: {ex}", parent=dialog)
 
-            ctk.CTkButton(main_frame, text="저장", command=save_and_close).pack(side="left", padx=10, expand=True)
-            ctk.CTkButton(main_frame, text="취소", fg_color="gray", command=dialog.destroy).pack(side="right", padx=10, expand=True)
+            ctk.CTkButton(main_frame, text=self.texts['save'], command=save_and_close).pack(side="left", padx=10, expand=True)
+            ctk.CTkButton(main_frame, text=self.texts['cancel'], fg_color="gray", command=dialog.destroy).pack(side="right", padx=10, expand=True)
 
             self.wait_window(dialog) # 다이얼로그가 닫힐 때까지 대기
 
@@ -2102,6 +2278,6 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         except Exception as e:
             session.rollback()
-            messagebox.showerror("데이터베이스 오류", f"샘플 발송 횟수 수정 중 오류 발생: {e}", parent=self)
+            messagebox.showerror(self.texts['db_error'], f"{self.texts['sample_count_edit_error']}: {e}", parent=self)
         finally:
             session.close()
