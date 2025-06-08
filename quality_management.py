@@ -67,7 +67,7 @@ class QualityManagementFrame(ctk.CTkFrame):
         report_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         
         # 그리드 설정 (문서 양식에 맞게)
-        report_frame.grid_columnconfigure((0, 1, 2, 3, 4, 5, 6), weight=1, uniform="a")
+        report_frame.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=1, uniform="a")
         
         self.semi_product_entries = {}
 
@@ -87,61 +87,58 @@ class QualityManagementFrame(ctk.CTkFrame):
                 return label
 
         # --- 문서 헤더 ---
-        # 제목도 테두리 안으로 이동
-        create_cell(report_frame, 0, 0, "반제품 시험성적서", colspan=7, is_header=True)
+        title_label = ctk.CTkLabel(report_frame, text="반제품 시험성적서", font=ctk.CTkFont(size=16, weight="bold"))
+        title_label.grid(row=0, column=0, columnspan=6, pady=(10, 20))
 
         # --- 기본 정보 ---
         create_cell(report_frame, 1, 0, "제 품 명", is_header=True)
-        create_cell(report_frame, 1, 1, "", colspan=3, is_input=True, key="제품명")
-        create_cell(report_frame, 1, 4, "제품코드명", is_header=True)
+        create_cell(report_frame, 1, 1, "", colspan=2, is_input=True, key="제품명")
+        create_cell(report_frame, 1, 3, "제품코드명", is_header=True)
+        create_cell(report_frame, 1, 4, "", is_input=True, key="제품코드명")
         create_cell(report_frame, 1, 5, "LOT", is_header=True)
         create_cell(report_frame, 1, 6, "", is_input=True, key="LOT")
 
         create_cell(report_frame, 2, 0, "반제품 제조일", is_header=True)
         create_cell(report_frame, 2, 1, "", colspan=2, is_input=True, key="제조일자")
         create_cell(report_frame, 2, 3, "시험 일자", is_header=True)
-        create_cell(report_frame, 2, 4, "", colspan=3, is_input=True, key="시험일자")
+        create_cell(report_frame, 2, 4, "", colspan=2, is_input=True, key="시험일자")
 
         # --- 시험 항목 테이블 헤더 ---
-        headers = self.texts['semi_product_table_headers']
+        headers = ["구분", "시험항목", "시험기준", "시험결과", "비고"]
         for i, h in enumerate(headers):
             create_cell(report_frame, 3, i, h, is_header=True)
 
         # --- 시험 항목 행 ---
         test_items = [
-            ("1", "성상", "표준품과 일치", "성상", "판정_성상"),
-            ("2", "향취", "표준품과 일치", "향취", "판정_향취"),
-            ("3", "사용감", "표준품과 일치", "사용감", "판정_사용감"),
-            ("4", "pH (30℃)", "6.50 ± 1.00", "pH(30℃)", "판정_pH"),
-            ("5", "점도(30℃)", "33,000 ± 5,000", "점도(30℃)", "판정_점도"),
-            ("6", "비중(25℃)", "0.980 ± 0.02", "비중(25℃)", "판정_비중"),
-            ("7", "미생물(일반세균)", "100 cfu/ml 이하", "일반세균", "판정_일반세균"),
-            ("", "미생물(효모/곰팡이)", "10 cfu/ml 이하", "효모/곰팡이", "판정_효모곰팡이"),
-            ("", "미생물(대장균)", "불검출", "대장균", "판정_대장균"),
+            ("1", "성상", "표준품과 일치", "성상"),
+            ("2", "향취", "표준품과 일치", "향취"),
+            ("3", "사용감", "표준품과 일치", "사용감"),
+            ("4", "pH (30℃)", "6.50 ± 1.00", "pH(30℃)"),
+            ("5", "점도(30℃)", "33,000 ± 5,000", "점도(30℃)"),
+            ("6", "비중(25℃)", "0.980 ± 0.02", "비중(25℃)"),
+            ("7", "일반세균", "100cfu/ml 이하", "일반세균"),
+            ("8", "효모/곰팡이", "10cfu/ml 이하", "효모/곰팡이"),
+            ("9", "대장균", "불검출", "대장균"),
         ]
 
         current_row = 4
         for item in test_items:
             create_cell(report_frame, current_row, 0, item[0])
             create_cell(report_frame, current_row, 1, item[1])
-            # 시험기준과 시험결과는 입력 가능하도록 변경
-            create_cell(report_frame, current_row, 2, item[2], is_input=True, key=f"기준_{item[3]}")
-            create_cell(report_frame, current_row, 3, "", is_input=True, key=f"결과_{item[3]}")
-            create_cell(report_frame, current_row, 4, "", is_input=True, key=item[4])
-            current_row += 1 # noqa
-        
-        # 미생물 '구분' 셀 병합
-        merge_frame = ctk.CTkFrame(report_frame, corner_radius=0, border_width=1, border_color=("gray70", "gray40"))
-        merge_frame.grid(row=10, column=0, rowspan=2, sticky="nsew")
-        ctk.CTkLabel(merge_frame, text="").pack()
+            create_cell(report_frame, current_row, 2, item[2])
+            create_cell(report_frame, current_row, 3, "", is_input=True, key=item[3])
+            # 비고란은 모든 행에 걸쳐 병합
+            if current_row == 4:
+                create_cell(report_frame, current_row, 4, "", rowspan=len(test_items), is_input=True, key="판정")
+            current_row += 1
 
         # --- 판정 정보 ---
         create_cell(report_frame, current_row, 0, "시험자", is_header=True)
         create_cell(report_frame, current_row, 1, "", is_input=True, key="시험자")
         create_cell(report_frame, current_row, 2, "일자", is_header=True)
         create_cell(report_frame, current_row, 3, "", is_input=True, key="일자")
-        create_cell(report_frame, current_row, 4, "종합판정", is_header=True, colspan=1)
-        create_cell(report_frame, current_row, 5, "", is_input=True, key="종합판정", colspan=2)
+        create_cell(report_frame, current_row, 4, "종합판정", is_header=True)
+        create_cell(report_frame, current_row, 5, "", is_input=True, key="종합판정")
 
         # --- 하단 버튼 프레임 ---
         button_frame = ctk.CTkFrame(tab_frame)
@@ -163,7 +160,7 @@ class QualityManagementFrame(ctk.CTkFrame):
             kor_data = {key: entry.get() for key, entry in self.semi_product_entries.items()}
             
             # 필수 입력 필드 검사
-            if not all(kor_data.get(key) for key in ["제품명", "LOT", "종합판정"]):
+            if not all(kor_data.get(key) for key in ["제품명", "LOT", "판정"]):
                 messagebox.showwarning(self.texts['input_error'], self.texts['required_fields_missing'], parent=self)
                 return
 
@@ -171,13 +168,13 @@ class QualityManagementFrame(ctk.CTkFrame):
             eng_data = {
                 "Product Name": kor_data.get("제품명"), "Product Code": kor_data.get("제품코드명"),
                 "Lot No.": kor_data.get("LOT"), "Manufacturing Date": kor_data.get("제조일자"),
-                "Testing Date": kor_data.get("시험일자"), "Appearance": kor_data.get("결과_성상", "Cream"), "Color": "Milky White",
-                "Odor": "Corresponds with standard sample", "pH (30℃)": kor_data.get("결과_pH(30℃)"),
-                "Viscosity (30℃)": f'{kor_data.get("결과_점도(30℃)")} (LV, 12rpm, Spindle-4, 1min)',
-                "Relative Density (25℃)": kor_data.get("결과_비중(25℃)"),
-                "Microbial test": f'Total Bacteria ≤{kor_data.get("결과_일반세균")}, Yeast&Mold ≤{kor_data.get("결과_효모/곰팡이")}, E.Coli {kor_data.get("결과_대장균")}',
+                "Testing Date": kor_data.get("시험일자"), "Appearance": "Cream", "Color": "Milky White",
+                "Odor": "Corresponds with standard sample", "pH (30℃)": kor_data.get("pH(30℃)"),
+                "Viscosity (30℃)": f'{kor_data.get("점도(30℃)")} (LV, 12rpm, Spindle-4, 1min)',
+                "Relative Density (25℃)": kor_data.get("비중(25℃)"),
+                "Microbial test": f'Total Bacteria ≤{kor_data.get("일반세균")}, Yeast&Mold ≤{kor_data.get("효모/곰팡이")}, E.Coli {kor_data.get("대장균")}',
                 "Analyst": kor_data.get("시험자"), "Date": kor_data.get("일자"),
-                "Conclusion": "PASS" if kor_data.get("종합판정") == "적합" else "FAIL"
+                "Conclusion": "PASS" if kor_data.get("판정") == "적합" else "FAIL"
             }
 
             # --- Excel 서식 생성 ---
@@ -191,121 +188,74 @@ class QualityManagementFrame(ctk.CTkFrame):
             ws1 = wb.active
             ws1.title = "반제품 시험성적서"
 
-            # --- 스타일 정의 ---
-            left_align = Alignment(horizontal='left', vertical='center', indent=1)
-            
-            # --- 문서 제목 및 결재란 ---
-            ws1.merge_cells('A1:C2')
+            ws1.merge_cells("A1:G1")
             ws1["A1"] = "반제품 시험성적서"
             ws1["A1"].font = Font(size=14, bold=True)
             ws1["A1"].alignment = center
-            
-            approval_labels = ["작성", "검토", "승인"]
-            for i, label in enumerate(approval_labels):
-                col_char = chr(ord('D') + i)
-                ws1[f'{col_char}1'] = label
-                ws1.row_dimensions[2].height = 40
 
-            # --- 기본 정보 ---
-            # 레이아웃 균형을 위해 제품코드와 LOT번호를 다음 줄로 내림
-            ws1['A4'] = "제 품 명"; ws1.merge_cells('B4:F4'); ws1['B4'] = kor_data.get("제품명")
-            
-            ws1['A5'] = "제품코드명"; ws1['B5'] = kor_data.get("제품코드명")
-            ws1['C5'] = "LOT"; ws1['D5'] = kor_data.get("LOT")
-            ws1['E5'] = ""; ws1['F5'] = "" # 빈 칸으로 자리 맞춤
+            # --- 기본 정보 (양식에 맞게 재구성) ---
+            ws1.merge_cells("B2:C2"); ws1.merge_cells("E2:G2")
+            ws1.append(["제 품 명", kor_data["제품명"], "", "제품코드명", kor_data["제품코드명"], "LOT", kor_data["LOT"]])
+            ws1.merge_cells("B3:C3"); ws1.merge_cells("E3:G3")
+            ws1.append(["반제품 제조일", kor_data["제조일자"], "", "시험 일자", kor_data["시험일자"], "", ""])
 
-            ws1['A6'] = "반제품 제조일"; ws1['B6'] = kor_data.get("제조일자")
-            ws1['C6'] = "시험일"; ws1['D6'] = kor_data.get("시험일자")
-            ws1['E6'] = ""; ws1['F6'] = "" # 빈 칸으로 자리 맞춤
-
-            # 기본 정보 셀 스타일
-            for row in ws1['A4':'F6']:
-                for cell in row:
-                    if cell.column_letter in ('A', 'C', 'E'):
-                        cell.font = bold
-                        cell.alignment = center
-                    else:
-                        cell.alignment = left_align
-
-            # --- 표 헤더 ---
-            ws1.append([]) # 빈 줄
-            table_headers = ["구분", "시험항목", "시험기준", "시험결과", "비고", ""] # 비고 열을 2칸으로 확장
-            ws1.append(table_headers)
-            for cell in ws1[ws1.max_row]: cell.font = bold
-
-            # --- 본문 (시험 항목) ---
             rows = [
-                ["1", "성상", kor_data.get("기준_성상"), kor_data.get("결과_성상"), kor_data.get("판정_성상")],
-                ["2", "향취", kor_data.get("기준_향취"), kor_data.get("결과_향취"), kor_data.get("판정_향취")],
-                ["3", "사용감", kor_data.get("기준_사용감"), kor_data.get("결과_사용감"), kor_data.get("판정_사용감")],
-                ["4", "pH (30℃)", kor_data.get("기준_pH(30℃)"), kor_data.get("결과_pH(30℃)"), kor_data.get("판정_pH")],
-                ["5", "점도(30℃)", kor_data.get("기준_점도(30℃)"), kor_data.get("결과_점도(30℃)"), kor_data.get("판정_점도")],
-                ["6", "비중(25℃)", kor_data.get("기준_비중(25℃)"), kor_data.get("결과_비중(25℃)"), kor_data.get("판정_비중")],
-                ["7", "미생물(일반세균)", kor_data.get("기준_일반세균"), kor_data.get("결과_일반세균"), kor_data.get("판정_일반세균")],
-                ["", "미생물(효모/곰팡이)", kor_data.get("기준_효모/곰팡이"), kor_data.get("결과_효모/곰팡이"), kor_data.get("판정_효모곰팡이")],
-                ["", "미생물(대장균)", kor_data.get("기준_대장균"), kor_data.get("결과_대장균"), kor_data.get("판정_대장균")],
+                ["구분", "시험항목", "시험기준", "시험결과", "비고", "", ""],
+                ["1", "성상", "표준품과 일치", kor_data["성상"], kor_data["판정"], "", ""],
+                ["2", "향취", "표준품과 일치", kor_data["향취"], kor_data["판정"], "", ""],
+                ["3", "사용감", "표준품과 일치", kor_data["사용감"], kor_data["판정"], "", ""],
+                ["4", "pH (30℃)", "6.50 ± 1.00", kor_data["pH(30℃)"], kor_data["판정"], "", ""],
+                ["5", "점도(30℃)", "33,000 ± 5,000", kor_data["점도(30℃)"], kor_data["판정"], "", ""],
+                ["6", "비중(25℃)", "0.980 ± 0.02", kor_data["비중(25℃)"], kor_data["판정"], "", ""],
+                ["7", "일반세균", "100cfu/ml 이하", kor_data["일반세균"], kor_data["판정"], "", ""],
+                ["8", "효모/곰팡이", "10cfu/ml 이하", kor_data["효모/곰팡이"], kor_data["판정"], "", ""],
+                ["9", "대장균", "불검출", kor_data["대장균"], kor_data["판정"], "", ""],
             ]
             for r in rows: ws1.append(r)
 
-            # 미생물 '구분' 셀 병합
-            start_merge_row = ws1.max_row - 2
-            ws1.merge_cells(start_row=start_merge_row, start_column=1, end_row=ws1.max_row, end_column=1)
-            ws1.cell(row=start_merge_row, column=1).alignment = center
-
-            # --- 하단 판정/서명란 ---
-            ws1.append([]) # 빈 줄
-            last_row = ws1.max_row
-            ws1.cell(row=last_row + 1, column=1, value="시험자").font = bold
-            ws1.cell(row=last_row + 1, column=2, value=kor_data.get("시험자"))
-            ws1.cell(row=last_row + 1, column=3, value="판정일").font = bold
-            ws1.cell(row=last_row + 1, column=4, value=kor_data.get("일자"))
-            ws1.cell(row=last_row + 1, column=5, value="종합판정").font = bold
-            ws1.cell(row=last_row + 1, column=6, value=kor_data.get("종합판정"))
-            
-            ws1.cell(row=last_row + 2, column=1, value="승인").font = bold
-            ws1.merge_cells(f'B{last_row + 2}:F{last_row + 2}')
-            ws1.cell(row=last_row + 2, column=2, value="(주)한국피부과학연구소")
+            # --- 판정 정보 (양식에 맞게 재구성) ---
+            ws1.merge_cells("B15:C15"); ws1.merge_cells("E15:G15")
+            ws1.append(["시험자", kor_data["시험자"], "", "일자", kor_data["일자"], "", ""])
+            ws1.merge_cells("B16:C16"); ws1.merge_cells("E16:G16")
+            ws1.append(["종합판정", kor_data["판정"], "", "", "", "", ""])
 
             # --- 서식 적용 ---
-            for row in ws1.iter_rows(min_row=1, max_row=ws1.max_row):
+            # 전체 셀에 기본 서식 적용
+            for row in ws1.iter_rows(min_row=1, max_row=ws1.max_row, min_col=1, max_col=7):
                 for cell in row:
                     cell.border = border
+                    cell.alignment = center
+            
+            # 특정 셀 서식 재정의
+            for row_idx in [2, 3, 15, 16]:
+                ws1[f'B{row_idx}'].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+                ws1[f'E{row_idx}'].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+            for row_idx in range(5, 15):
+                ws1[f'D{row_idx}'].alignment = Alignment(horizontal="left", vertical="center", indent=1)
 
-            # --- 열 너비 조정 ---
-            ws1.column_dimensions["A"].width = 6
-            ws1.column_dimensions["B"].width = 18
-            ws1.column_dimensions["C"].width = 20
-            ws1.column_dimensions["D"].width = 20
-            ws1.column_dimensions["E"].width = 10
-            ws1.column_dimensions["F"].width = 18
+            # 컬럼 너비 자동 조절
+            for col in ws1.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except: pass
+                adjusted_width = (max_length + 2) * 1.2
+                ws1.column_dimensions[column].width = adjusted_width
 
             # === [2] 영어 COA 시트 ===
             ws2 = wb.create_sheet("COA (EN)")
-            ws2.merge_cells('A1:C2')
+            ws2.merge_cells("A1:G1")
             ws2["A1"] = "Certificate of Analysis"
             ws2["A1"].font = Font(size=14, bold=True)
             ws2["A1"].alignment = center
 
-            for i, label in enumerate(approval_labels):
-                col_char = chr(ord('D') + i)
-                ws2[f'{col_char}1'] = label
-                ws2.row_dimensions[2].height = 40
-            
-            # 기본 정보 (영문)
-            ws2['A4'] = "Product Name"; ws2.merge_cells('B4:F4'); ws2['B4'] = eng_data.get("Product Name")
-            ws2['A5'] = "Product Code"; ws2['B5'] = eng_data.get("Product Code")
-            ws2['C5'] = "Lot No."; ws2['D5'] = eng_data.get("Lot No.")
-            ws2['E5'] = ""; ws2['F5'] = ""
-            ws2['A6'] = "Manufacturing Date"; ws2['B6'] = eng_data.get("Manufacturing Date")
-            ws2['C6'] = "Testing Date"; ws2['D6'] = eng_data.get("Testing Date")
-            ws2['E6'] = ""; ws2['F6'] = ""
-
-            for row in ws2['A4':'F6']:
-                for cell in row:
-                    if cell.column_letter in ('A', 'C', 'E'): 
-                        cell.font = bold
-                        cell.alignment = center
-                    else: cell.alignment = left_align
+            ws2.merge_cells("B2:C2"); ws2.merge_cells("E2:G2")
+            ws2.append(["Product Name", eng_data["Product Name"], "", "Product Code", eng_data["Product Code"], "Lot No.", eng_data["Lot No."]])
+            ws2.merge_cells("B3:C3"); ws2.merge_cells("E3:G3")
+            ws2.append(["Manufacturing Date", eng_data["Manufacturing Date"], "", "Testing Date", eng_data["Testing Date"], "", ""])
 
             rows_en = [
                 ["Field", "Specification", "Result", "Method", "Conclusion"],
@@ -317,42 +267,29 @@ class QualityManagementFrame(ctk.CTkFrame):
                 ["Relative Density (25℃)", "0.980 ± 0.02", eng_data["Relative Density (25℃)"], "Pycnometer", "Pass"],
                 ["Microbial test", "Total Bacteria: ≤100cfu/ml\nYeast&Mold: ≤10cfu/ml\nE.Coli: Absent", eng_data["Microbial test"], "3M™ Petrifilm", "Pass"],
             ]
-            ws2.append([]) # 빈 줄
-            
-            # 표 헤더 (영문)
-            ws2.append(rows_en[0])
-            for cell in ws2[ws2.max_row]: cell.font = bold
+            for r in rows_en: ws2.append(r)
 
-            # 데이터 행 (헤더 제외)
-            for r in rows_en[1:]: 
-                ws2.append(r)
-                # 결과 셀 왼쪽 정렬
-                ws2.cell(row=ws2.max_row, column=3).alignment = left_align
-
-            ws2.append([]) # 빈 줄
-            last_row_en = ws2.max_row
-            ws2.cell(row=last_row_en + 1, column=1, value="Analyst").font = bold
-            ws2.cell(row=last_row_en + 1, column=2, value=eng_data.get("Analyst"))
-            ws2.cell(row=last_row_en + 1, column=3, value="Date").font = bold
-            ws2.cell(row=last_row_en + 1, column=4, value=eng_data.get("Date"))
-            ws2.cell(row=last_row_en + 2, column=1, value="Conclusion").font = bold
-            ws2.cell(row=last_row_en + 2, column=2, value=eng_data.get("Conclusion"))
+            # --- 판정 정보 (양식에 맞게 재구성) ---
+            ws2.merge_cells("B13:C13"); ws2.merge_cells("E13:G13")
+            ws2.append(["Analyst", eng_data["Analyst"], "", "Date", eng_data["Date"], "", ""])
+            ws2.merge_cells("B14:C14"); ws2.merge_cells("E14:G14")
+            ws2.append(["Conclusion", eng_data["Conclusion"], "", "", "", "", ""])
 
             # --- 서식 적용 ---
-            for row in ws2.iter_rows(min_row=1, max_row=ws2.max_row):
+            for row in ws2.iter_rows(min_row=1, max_row=ws2.max_row, min_col=1, max_col=7):
                 for cell in row:
                     cell.border = border
-                    if not cell.alignment.horizontal: cell.alignment = center
+                    cell.alignment = center
+            
+            for row_idx in [2, 3, 13, 14]:
+                ws2[f'B{row_idx}'].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+                ws2[f'E{row_idx}'].alignment = Alignment(horizontal="left", vertical="center", indent=1)
             
             # 컬럼 너비 자동 조절
             for col in ws2.columns:
                 max_length = 0
                 column = col[0].column_letter
                 for cell in col:
-                    # 셀 내용의 줄바꿈을 고려하여 너비 계산
-                    if cell.value:
-                        lines = str(cell.value).split('\n')
-                        max_length = max(max_length, max(len(line) for line in lines))
                     try:
                         if len(str(cell.value)) > max_length:
                             max_length = len(str(cell.value))

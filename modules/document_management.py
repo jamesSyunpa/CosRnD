@@ -12,14 +12,15 @@ if PROJECT_ROOT not in sys.path:
 
 from tkcalendar import DateEntry
 from database.db_manager import db_manager
-from database.models import Client, Formulation, FormulationItem, Material
+from database.models import Client, Formulation, FormulationItem, Material, User
 from datetime import datetime, date
 from modules import excel_handler
 from modules.comparison_popup import FormulationComparisonPopup
 from modules.folder_history_popup import FolderHistoryPopup
 from modules.ui_components import HelpPopup, CustomErrorDialog, CustomDropdown, AddMaterialDialog, try_convert_to_float
 from modules.translation import get_texts
-from modules.formulation_popup import FormulationEditPopup # FormulationEditPopup은 그대로 둡니다.
+from modules.formulation_popup import FormulationEditPopup, to_decimal, decimal_to_str_full # FormulationEditPopup은 그대로 둡니다.
+from decimal import Decimal
 
 class ClipboardErrorDialog(ctk.CTkToplevel):
     """오류 메시지를 표시하고 클립보드에 자동으로 복사하는 대화상자"""
@@ -137,7 +138,9 @@ class AddMaterialDialog(ctk.CTkToplevel):
         for item in self.material_tree.get_children():
             self.material_tree.delete(item)
 
-        materials = db_manager.search_materials(search_term)
+        # 전성분 이름으로도 검색하고, Treeview에 표시할 전성분 정보를 함께 로드하도록
+        # load_ingredients와 search_ingredients 옵션을 모두 True로 설정합니다.
+        materials = db_manager.search_materials(search_term, load_ingredients=True, search_ingredients=True)
         
         for mat in materials:
             # 전성분 목록을 문자열로 만듭니다 (최대 3개).
@@ -279,17 +282,17 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         # --- 언어별 텍스트 ---
         texts = {
-            "korean": {"spec": "물성치/SPEC", "report": "기능성 보고/참고 자료"},
-            "english": {"spec": "Property/SPEC", "report": "Functional Report/Reference"}
+            "korean": {"property_spec": "물성치/SPEC", "report": "기능성 보고/참고 자료"},
+            "english": {"property_spec": "Property/SPEC", "report": "Functional Report/Reference"}
         }
         current_texts = texts[self.language]
 
         # 요청된 하위 탭들 추가
-        doc_sub_tab_view.add(current_texts["spec"])
+        doc_sub_tab_view.add(current_texts["property_spec"])
         doc_sub_tab_view.add(current_texts["report"])
 
         # 각 탭의 UI 설정
-        self.setup_lab_journal_tab(doc_sub_tab_view.tab(current_texts["spec"]))
+        self.setup_lab_journal_tab(doc_sub_tab_view.tab(current_texts["property_spec"]))
         self.setup_functional_report_tab(doc_sub_tab_view.tab(current_texts["report"]))
 
     def show_help(self):
@@ -414,13 +417,25 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         formulation_cols_def = self.texts['formulation_tree_columns']
         # 'id'는 Treeview의 내부 식별자(iid)로 사용되므로 columns 리스트에서는 제외합니다.
-        formulation_col_ids = [k for k in formulation_cols_def if k != 'id']
+        # 사용자가 요청한 순서대로 컬럼 ID를 정의합니다. ('id'는 iid로 사용되므로 제외)
+        # 컬럼 순서를 'date', 'experiment_name', 'lab_no', 'revision', 'sample_sent', 'sample_delivery_date'로 변경
+        formulation_col_ids = ['date', 'experiment_name', 'lab_no', 'revision', 'sample_sent', 'sample_delivery_date']
         self.formulation_tree = ttk.Treeview(self.file_view, columns=formulation_col_ids, show="headings", selectmode="extended")
         for col_id in formulation_col_ids:
             # 'id'가 아닌 컬럼에 대해서만 헤더와 너비를 설정합니다.
-            width = 100 if col_id != 'revision' else 150 # '차수' 컬럼 너비 조정
-            self.formulation_tree.heading(col_id, text=formulation_cols_def[col_id], command=lambda c=col_id: self.sort_treeview_column(self.formulation_tree, c, False))
-            self.formulation_tree.column(col_id, width=width, stretch=True if col_id == 'revision' else False)
+            # 'revision'과 'experiment_name' 컬럼은 넓게 표시하도록 조정합니다.
+            # 샘플 발송 컬럼의 기본 너비를 120으로 보고, 차수(revision)는 샘플 발송과 동일하게 설정
+            if col_id == 'experiment_name':
+                width = 260  # 제품명은 가장 크게 표시
+            elif col_id == 'revision' or col_id == 'sample_sent':
+                width = 120  # 샘플 발송과 차수는 동일 너비
+            else:
+                width = 120
+
+            # 제품명만 확장 가능하도록 설정(가로 공간이 남을 때 늘어남)
+            stretch = True if col_id == 'experiment_name' else False
+            self.formulation_tree.heading(col_id, text=formulation_cols_def.get(col_id, col_id), command=lambda c=col_id: self.sort_treeview_column(self.formulation_tree, c, False))
+            self.formulation_tree.column(col_id, width=width, stretch=stretch)
         self.formulation_tree.grid(row=1, column=0, columnspan=2, sticky="nsew")
         self.formulation_tree.bind("<<TreeviewSelect>>", self.on_formulation_tree_select)
         self.formulation_tree.bind("<Double-1>", lambda e: self.open_formulation_popup(edit_mode=True))
@@ -443,9 +458,21 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.edit_button.pack(side="left", padx=5)
         self.delete_button = ctk.CTkButton(bottom_button_frame, text=self.texts['delete'], width=100, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation)
         self.delete_button.pack(side="left", padx=(5, 20)) # 오른쪽에 여백 추가
+        # 관리자 전용: 모든 처방 내보내기 버튼
+        self.export_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 내보내기", width=140, command=self.export_all_formulations)
+        self.export_all_button.pack(side="left", padx=(5, 20))
+        # 관리자 전용: 전체 이력 내보내기 버튼
+        self.export_logs_button = ctk.CTkButton(bottom_button_frame, text="이력 내보내기", width=120, command=self.export_change_logs)
+        self.export_logs_button.pack(side="left", padx=(5, 20))
+        # 관리자 전용: 모든 처방 가져오기 버튼 (레이블 변경: 전체 가져오기)
+        self.import_all_button = ctk.CTkButton(bottom_button_frame, text="전체 가져오기", width=120, command=self.import_all_formulations)
+        self.import_all_button.pack(side="left", padx=(5, 20))
 
         if not self.current_user.is_admin:
             self.delete_button.configure(state="disabled")
+            self.export_all_button.configure(state="disabled")
+            self.import_all_button.configure(state="disabled")
+            self.export_logs_button.configure(state="disabled")
         
         self.show_folder_view() # 초기 화면은 폴더 뷰
 
@@ -785,6 +812,56 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # 폴더 뷰로 전환될 때, 저장된 아이콘 크기를 불러와서 표시합니다.
         self.load_folders(client_id=client_id_to_load, is_initial_load=True)
 
+    def export_all_formulations(self):
+        """
+        관리자 기능: DB에 저장된 모든 처방과 그 구성 원료를 엑셀 파일로 내보냅니다.
+        시트 구성: 각 처방 정보를 행 단위로 정리한 '처방 목록' 시트와,
+        원료별 상세(필요시) 시트를 추가합니다.
+        """
+        if not self.current_user.is_admin:
+            messagebox.showwarning("권한 오류", "관리자만 전체 처방을 내보낼 수 있습니다.", parent=self)
+            return
+
+        session = db_manager.get_session()
+        try:
+            formulations = session.query(Formulation).order_by(Formulation.id).all()
+            if not formulations:
+                messagebox.showinfo("정보", "내보낼 처방 데이터가 없습니다.", parent=self)
+                return
+
+            # '처방 목록' 시트: 헤더 및 행 구성
+            headers = [
+                "ID", "실험일", "제품명", "LAB NO.", "차수", "샘플 발송 횟수", "샘플 발송일", "담당자", "비고"
+            ]
+            data_rows = []
+            # 또한 원료별 시트(간단)를 위한 매핑도 생성
+            raw_rows = []
+            for f in formulations:
+                exp_date = f.experiment_date or ""
+                sample_date = f.sample_delivery_date.isoformat() if getattr(f, 'sample_delivery_date', None) else ""
+                data_rows.append([
+                    f.id, exp_date, f.experiment_name or "", f.lab_no or "", f.revision or "", f.sample_sent_count or 0, sample_date, f.manager_name or "", f.experiment_comment or ""
+                ])
+
+                # 각 처방의 원료들을 원료별 목록 시트용으로 확장
+                for item in f.items:
+                    raw_rows.append([
+                        f.id, f.experiment_name or "", item.order or "", item.phase or "", item.material_code or "", item.material_name or "", f"{(item.ratio or 0):.4f}", item.amount or ""
+                    ])
+
+            sheets_data = {
+                "처방 목록": {"type": "table", "content": {"headers": headers, "data": data_rows}},
+                "처방별 원료 목록": {"type": "table", "content": {"headers": ["처방ID", "제품명", "순번", "구분", "원료코드", "원료명", "함량(%)", "중량"], "data": raw_rows}}
+            }
+
+            # 기존 excel_handler의 범용 엑셀 내보내기 사용
+            excel_handler.export_ingredient_lists_to_excel(sheets_data, default_filename="전체_처방_내보내기.xlsx")
+
+        except Exception as e:
+            messagebox.showerror("내보내기 오류", f"전체 처방 내보내기 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
+
     def reset_selection_and_tabs(self):
         """
         현재 선택된 처방을 해제하고, 견적 및 전성분 탭의 내용을 모두 초기화합니다.
@@ -1042,53 +1119,105 @@ class DocumentManagementFrame(ctk.CTkFrame):
         for item in self.raw_material_ingredient_tree.get_children():
             self.raw_material_ingredient_tree.delete(item)
 
+        # 데이터를 먼저 수집하고, 최대 소수점 자릿수를 계산한 후 포맷팅합니다.
+        tree_data_to_process = []
         session = db_manager.get_session()
         try:
             # 처방에 포함된 원료 아이템들을 가져옵니다.
-            formulation_items = session.query(FormulationItem).filter_by(formulation_id=self._selected_formulation_id).order_by(desc(FormulationItem.ratio)).all()
-            total_rm_ratio = 0.0
-            total_actual_wt = 0.0
+            formulation_items = session.query(FormulationItem).filter_by(formulation_id=self._selected_formulation_id).order_by(FormulationItem.order).all()
+            total_rm_ratio = Decimal('0')
+            total_actual_wt = Decimal('0')
             material_no = 1
+
+            # UI 표시를 위해 RM 함량(ratio) 기준으로 내림차순 정렬
+            formulation_items.sort(key=lambda x: (to_decimal(x.ratio) if x.ratio is not None else Decimal('-1')), reverse=True)
+
             for item in formulation_items:
                 # 구분선(---)은 건너뜁니다.
                 if not item.material_code or item.material_code == "---": continue
 
                 # 원료 정보와 전성분 정보를 함께 가져옵니다.
                 material = session.query(Material).filter_by(code=item.material_code).first()
+                group_tag = 'group_odd' if (material_no - 1) % 2 != 0 else 'group_even'
+
                 if not material or not material.ingredients:
-                    # 전성분이 없는 원료 처리
-                    actual_wt = item.ratio
-                    total_rm_ratio += item.ratio
-                    total_actual_wt += actual_wt
-                    group_tag = 'group_odd' if (material_no -1) % 2 != 0 else 'group_even'
-                    self.raw_material_ingredient_tree.insert("", "end", values=(
-                        material_no, material.name if material else item.material_name, "", item.material_name,
-                        f"{item.ratio:.4f}", "100.0000", f"{actual_wt:.6f}", "", "", "", "", "" # hs_code, nmpa_reg_num 자리에 빈 문자열 추가
-                    ), tags=('material_row', group_tag))
+                    # 전성분이 없는 원료 처리 (100% 단일 성분으로 간주)
+                    rm_ratio_dec = to_decimal(item.ratio)
+                    ing_ratio_dec = Decimal('100')
+                    actual_wt_dec = rm_ratio_dec # 100%이므로 RM 함량과 동일
+
+                    total_rm_ratio += rm_ratio_dec
+                    total_actual_wt += actual_wt_dec
+
+                    tree_data_to_process.append({
+                        "is_first": True, "is_separator": False, "group_tag": group_tag,
+                        "values": [
+                            material_no, material.name if material else item.material_name, "", item.material_name,
+                            rm_ratio_dec, ing_ratio_dec, actual_wt_dec, "", "", "", "", ""
+                        ]
+                    })
                     material_no += 1
                     continue
 
                 # 전성분이 있는 원료 처리
-                group_tag = 'group_odd' if (material_no - 1) % 2 != 0 else 'group_even' # noqa
+                item_ratio_dec = to_decimal(item.ratio)
+                total_rm_ratio += item_ratio_dec
+
                 for i, ing in enumerate(sorted(material.ingredients, key=lambda x: x.id)):
-                    actual_wt = item.ratio * (ing.composition_ratio / 100.0)
+                    ing_comp_ratio_dec = to_decimal(ing.composition_ratio)
+                    actual_wt = item_ratio_dec * (ing_comp_ratio_dec / Decimal('100'))
                     total_actual_wt += actual_wt
-                    if i == 0: # 첫 번째 전성분 행
-                        total_rm_ratio += item.ratio
-                        self.raw_material_ingredient_tree.insert("", "end", values=(
-                            material_no, material.name, ing.name_en or "", ing.name_ko, f"{item.ratio:.4f}", f"{ing.composition_ratio:.4f}", f"{actual_wt:.6f}", ing.cas_no, ing.function, "",
-                            ing.hs_code or "", ing.nmpa_reg_num or "", ing.remark or ""
-                        ), tags=('material_row', group_tag))
-                    else: # 두 번째 이후 전성분 행
-                        self.raw_material_ingredient_tree.insert("", "end", values=(
-                            "", "", ing.name_en or "", ing.name_ko, "", f"{ing.composition_ratio:.4f}", f"{actual_wt:.6f}", ing.cas_no, ing.function, "",
-                            ing.hs_code or "", ing.nmpa_reg_num or "", ing.remark or ""
-                        ), tags=(group_tag,))
+                    
+                    is_first = (i == 0)
+                    values = [
+                        material_no if is_first else "",
+                        material.name if is_first else "",
+                        ing.name_en or "", ing.name_ko,
+                        item_ratio_dec if is_first else None, # RM 함량은 첫 행에만
+                        ing_comp_ratio_dec, # 성분 함량
+                        actual_wt, # 실제 함량
+                        ing.cas_no, ing.function, "",
+                        ing.hs_code or "", ing.nmpa_reg_num or "", ing.remark or ""
+                    ]
+                    tree_data_to_process.append({
+                        "is_first": is_first, "is_separator": False, "group_tag": group_tag,
+                        "values": values
+                    })
                 material_no += 1
             
+            # 최대 소수점 자릿수 계산
+            max_dp_rm = 0
+            max_dp_ing = 0
+            max_dp_actual = 0
+            for row in tree_data_to_process:
+                vals = row["values"]
+                # vals[4]: RM 함량, vals[5]: 성분 함량, vals[6]: 실제 함량
+                if isinstance(vals[4], Decimal):
+                    max_dp_rm = max(max_dp_rm, -vals[4].as_tuple().exponent)
+                if isinstance(vals[5], Decimal):
+                    max_dp_ing = max(max_dp_ing, -vals[5].as_tuple().exponent)
+                if isinstance(vals[6], Decimal):
+                    max_dp_actual = max(max_dp_actual, -vals[6].as_tuple().exponent)
+
+            # 포맷팅하여 Treeview에 삽입
+            for row_data in tree_data_to_process:
+                vals = row_data["values"]
+                
+                # Decimal 값을 포맷팅된 문자열로 변환
+                vals[4] = f"{vals[4]:.{max_dp_rm}f}" if isinstance(vals[4], Decimal) else ""
+                vals[5] = f"{vals[5]:.{max_dp_ing}f}" if isinstance(vals[5], Decimal) else ""
+                vals[6] = f"{vals[6]:.{max_dp_actual}f}" if isinstance(vals[6], Decimal) else ""
+
+                tags = [row_data["group_tag"]]
+                if row_data["is_first"]:
+                    tags.append('material_row')
+
+                self.raw_material_ingredient_tree.insert("", "end", values=tuple(vals), tags=tuple(tags))
+
             # 합계 업데이트
-            self.raw_material_rm_ratio_total_label.configure(text=f"{total_rm_ratio:.4f}")
-            self.raw_material_actual_wt_total_label.configure(text=f"{total_actual_wt:.6f}")
+            self.raw_material_rm_ratio_total_label.configure(text=f"{total_rm_ratio:.{max_dp_rm}f}")
+            self.raw_material_actual_wt_total_label.configure(text=f"{total_actual_wt:.{max_dp_actual}f}")
+
         finally:
             session.close()
 
@@ -1102,7 +1231,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         for item in self.summed_ingredient_tree.get_children():
             self.summed_ingredient_tree.delete(item)
 
-        total_summed_ratio = 0.0 # { (name_ko, name_en): {data} }
+        tree_data_to_process = []
+        total_summed_ratio = Decimal('0') # { (name_ko, name_en): {data} }
         summed_ingredients = {} 
         session = db_manager.get_session()
         try:
@@ -1116,8 +1246,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 if material:
                     if material.ingredients: # 전성분이 있는 원료
                         for ing in material.ingredients:
+                            item_ratio_dec = to_decimal(item.ratio)
+                            ing_comp_ratio_dec = to_decimal(ing.composition_ratio)
                             # 원료 내 전성분의 실제 함량 계산 (원료 함량 * (전성분 함량 / 100))
-                            actual_ratio = item.ratio * (ing.composition_ratio / 100.0)
+                            actual_ratio = item_ratio_dec * (ing_comp_ratio_dec / Decimal('100'))
                             
                             key = (ing.name_ko or "", ing.name_en or "")
                             if key not in summed_ingredients:
@@ -1129,17 +1261,29 @@ class DocumentManagementFrame(ctk.CTkFrame):
             # 함량이 높은 순으로 정렬
             sorted_ingredients = sorted(summed_ingredients.items(), key=lambda x: x[1]['total_ratio'], reverse=True)
 
+            # 데이터 수집
             for (name_ko, name_en), data in sorted_ingredients:
                 total_ratio = data['total_ratio']
                 cas_no = data['cas_no']
                 function = data['function']
                 total_summed_ratio += data['total_ratio']
-                self.summed_ingredient_tree.insert("", "end", values=(
-                    name_ko, name_en, cas_no, function, f"{total_ratio:.6f}"
-                ))
+                tree_data_to_process.append([name_ko, name_en, cas_no, function, total_ratio])
+
+            # 최대 소수점 자릿수 계산
+            max_dp_total_ratio = 0
+            for row in tree_data_to_process:
+                ratio_val = row[4]
+                if isinstance(ratio_val, Decimal):
+                    max_dp_total_ratio = max(max_dp_total_ratio, -ratio_val.as_tuple().exponent)
+
+            # 포맷팅하여 Treeview에 삽입
+            for row_data in tree_data_to_process:
+                # Decimal 값을 포맷팅된 문자열로 변환
+                row_data[4] = f"{row_data[4]:.{max_dp_total_ratio}f}"
+                self.summed_ingredient_tree.insert("", "end", values=tuple(row_data))
             
             # 합계 업데이트
-            self.summed_total_ratio_label.configure(text=f"{total_summed_ratio:.6f}")
+            self.summed_total_ratio_label.configure(text=f"{total_summed_ratio:.{max_dp_total_ratio}f}")
         finally:
             session.close()
 
@@ -1165,6 +1309,29 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def _update_visible_columns(self, treeview, columns_config):
         """체크박스 상태에 따라 Treeview의 열을 업데이트합니다."""
+        # 특정 Treeview(복합 전성분)의 경우, 일부 열은 다른 열과 함께 활성화되어야 합니다.
+        # 예: 'hs_code'가 선택되면 'origin'도 함께 선택, 'nmpa_reg_num'이 선택되면 'material_name_en'도 함께 선택.
+        try:
+            # 안전하게 BooleanVar 접근
+            if columns_config is getattr(self, 'complex_ing_cols', None):
+                # HS CODE -> origin
+                hs_cfg = columns_config.get('hs_code')
+                origin_cfg = columns_config.get('origin')
+                if hs_cfg and origin_cfg and hs_cfg.get('variable') and origin_cfg.get('variable'):
+                    if hs_cfg['variable'].get():
+                        origin_cfg['variable'].set(True)
+
+                # NMPA -> material_name_en
+                nmpa_cfg = columns_config.get('nmpa_reg_num')
+                name_en_cfg = columns_config.get('material_name_en')
+                if nmpa_cfg and name_en_cfg and nmpa_cfg.get('variable') and name_en_cfg.get('variable'):
+                    if nmpa_cfg['variable'].get():
+                        name_en_cfg['variable'].set(True)
+
+        except Exception:
+            # 실패하더라도 기본 동작 계속
+            pass
+
         visible_columns = [col_id for col_id, config in columns_config.items() if config["variable"].get()]
         treeview.configure(displaycolumns=visible_columns)
 
@@ -1225,7 +1392,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         for item in self.single_ingredient_tree.get_children():
             self.single_ingredient_tree.delete(item)
 
-        total_summed_ratio = 0.0
+        tree_data_to_process = []
+        total_summed_ratio = Decimal('0')
         summed_ingredients = {} # { (name_ko, name_en): {data} }
         session = db_manager.get_session()
         try:
@@ -1234,8 +1402,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 if not item.material_code or item.material_code == "---" or item.ratio is None: continue
                 material = session.query(Material).filter_by(code=item.material_code).first()
                 if material and material.ingredients: # 전성분이 있는 원료
+                    item_ratio_dec = to_decimal(item.ratio)
                     for ing in material.ingredients:
-                        actual_ratio = item.ratio * (ing.composition_ratio / 100.0)
+                        ing_comp_ratio_dec = to_decimal(ing.composition_ratio)
+                        actual_ratio = item_ratio_dec * (ing_comp_ratio_dec / Decimal('100'))
                         key = (ing.name_ko or "", ing.name_en or "")
                         if key not in summed_ingredients:
                             summed_ingredients[key] = {
@@ -1247,18 +1417,30 @@ class DocumentManagementFrame(ctk.CTkFrame):
             # 함량이 높은 순으로 정렬
             sorted_ingredients = sorted(summed_ingredients.items(), key=lambda x: x[1]['total_ratio'], reverse=True)
 
+            # 데이터 수집
             for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
                 total_summed_ratio += data['total_ratio']
                 # TODO: C.I. No. 파싱 로직 추가 필요
-
-                self.single_ingredient_tree.insert("", "end", values=(
-                    i, name_en, "", f"{data['total_ratio']:.6f}",
+                tree_data_to_process.append([
+                    i, name_en, "", data['total_ratio'],
                     data['cas_no'], data['function'], data['hs_code'], 
                     data['nmpa_reg_num'], data['remark']
-                ))
+                ])
+
+            # 최대 소수점 자릿수 계산
+            max_dp_total_ratio = 0
+            for row in tree_data_to_process:
+                ratio_val = row[3]
+                if isinstance(ratio_val, Decimal):
+                    max_dp_total_ratio = max(max_dp_total_ratio, -ratio_val.as_tuple().exponent)
+
+            # 포맷팅하여 Treeview에 삽입
+            for row_data in tree_data_to_process:
+                row_data[3] = f"{row_data[3]:.{max_dp_total_ratio}f}"
+                self.single_ingredient_tree.insert("", "end", values=tuple(row_data))
 
             # 합계 업데이트
-            self.single_total_ratio_label.configure(text=f"{total_summed_ratio:.6f}")
+            self.single_total_ratio_label.configure(text=f"{total_summed_ratio:.{max_dp_total_ratio}f}")
         finally:
             session.close()
 
@@ -1339,8 +1521,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 if not item.material_code or item.material_code == "---" or item.ratio is None: continue
                 material = session.query(Material).filter_by(code=item.material_code).first()
                 if material and material.ingredients:
+                    item_ratio_dec = to_decimal(item.ratio)
                     for ing in material.ingredients:
-                        actual_ratio = item.ratio * (ing.composition_ratio / 100.0)
+                        ing_comp_ratio_dec = to_decimal(ing.composition_ratio)
+                        actual_ratio = item_ratio_dec * (ing_comp_ratio_dec / Decimal('100'))
                         # 디자인용은 이름만 중요하므로 이름으로 그룹화
                         key = (ing.name_ko or "", ing.name_en or "")
                         summed_ingredients[key] = summed_ingredients.get(key, 0) + actual_ratio
@@ -1349,8 +1533,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
             sorted_ingredients = sorted(summed_ingredients.items(), key=lambda x: x[1], reverse=True)
 
             # 1% 초과 성분과 1% 이하 성분 분리
-            above_1_percent = [item for item in sorted_ingredients if item[1] > 1.0]
-            at_or_below_1_percent = [item for item in sorted_ingredients if item[1] <= 1.0]
+            above_1_percent = [item for item in sorted_ingredients if item[1] > Decimal('1.0')]
+            at_or_below_1_percent = [item for item in sorted_ingredients if item[1] <= Decimal('1.0')]
 
             # 국문 리스트와 영문 리스트를 각각 생성
             final_ko_list = [item[0][0] for item in above_1_percent] + [item[0][0] for item in at_or_below_1_percent]
@@ -1453,9 +1637,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
             for tree in [self.raw_material_ingredient_tree, self.summed_ingredient_tree, self.single_ingredient_tree]:
                 tree.delete(*tree.get_children())
             self.raw_material_rm_ratio_total_label.configure(text="0.0000")
-            self.raw_material_actual_wt_total_label.configure(text="0.000000")
-            self.summed_total_ratio_label.configure(text="0.000000")
-            self.single_total_ratio_label.configure(text="0.000000")
+            self.raw_material_actual_wt_total_label.configure(text="0")
+            self.summed_total_ratio_label.configure(text="0")
+            self.single_total_ratio_label.configure(text="0")
             self.design_ko_textbox.delete("1.0", "end")
             self.design_en_textbox.delete("1.0", "end")
 
@@ -1508,42 +1692,156 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # RM 함량으로 정렬하기 위해 데이터를 다시 생성
         session = db_manager.get_session()
         try:
-            formulation_items = session.query(FormulationItem).filter_by(formulation_id=self._selected_formulation_id).order_by(FormulationItem.ratio.desc()).all()
+            formulation_items = session.query(FormulationItem).filter_by(formulation_id=self._selected_formulation_id).order_by(FormulationItem.order).all()
             
-            raw_material_data = []
+            # UI와 동일하게 RM 함량(ratio) 기준으로 내림차순 정렬
+            formulation_items.sort(key=lambda x: (to_decimal(x.ratio) if x.ratio is not None else Decimal('-1')), reverse=True)
+            
+            # Build raw material data as dict rows keyed by complex_ing_cols keys.
+            col_order = [
+                'no', 'material_name', 'inci_name', 'name_ko', 'rm_ratio', 'ing_ratio', 'actual_wt',
+                'cas_no', 'function', 'hs_code', 'origin', 'material_name_en', 'nmpa_reg_num', 'remark'
+            ]
+
+            raw_rows = []
+            raw_rows_decimal = [] # Decimal 객체를 그대로 저장할 리스트
             material_no = 1
             for item in formulation_items:
                 if not item.material_code or item.material_code == "---":
                     continue
 
                 material = session.query(Material).filter_by(code=item.material_code).first()
-                actual_wt_total_for_item = 0
+                item_ratio_dec = to_decimal(item.ratio)
 
                 if not material or not material.ingredients:
-                    actual_wt = item.ratio or 0
-                    raw_material_data.append([
-                        material_no, material.name if material else item.material_name, "", item.material_name,
-                        f"{item.ratio or 0:.4f}", "100.0000", f"{actual_wt:.6f}", "", "", "", "", ""
-                    ])
+                    actual_wt = item_ratio_dec
+                    row = {
+                        'no': material_no,
+                        'material_name': material.name if material else item.material_name,
+                        'inci_name': "",
+                        'name_ko': item.material_name,
+                        'rm_ratio': actual_wt,
+                        'ing_ratio': Decimal('100'),
+                        'actual_wt': actual_wt,
+                        'cas_no': "",
+                        'function': "",
+                        'hs_code': "",
+                        'origin': material.origin if material else "",
+                        'material_name_en': material.name_en if material else "",
+                        'nmpa_reg_num': "",
+                        'remark': ""
+                    }
+                    raw_rows_decimal.append(row)
                     material_no += 1
                 else:
                     for i, ing in enumerate(sorted(material.ingredients, key=lambda x: x.id)):
-                        actual_wt = (item.ratio or 0) * ((ing.composition_ratio or 0) / 100.0)
-                        actual_wt_total_for_item += actual_wt
+                        ing_comp_ratio_dec = to_decimal(ing.composition_ratio)
+                        actual_wt = item_ratio_dec * (ing_comp_ratio_dec / Decimal('100'))
                         if i == 0:
-                            raw_material_data.append([
-                                material_no, material.name, ing.name_en or "", ing.name_ko, f"{item.ratio or 0:.4f}", f"{ing.composition_ratio or 0:.4f}", f"{actual_wt:.6f}", ing.cas_no, ing.function, ing.hs_code or "", ing.nmpa_reg_num or "", ing.remark or ""
-                            ])
+                            row = {
+                                'no': material_no,
+                                'material_name': material.name,
+                                'inci_name': ing.name_en or "",
+                                'name_ko': ing.name_ko,
+                                'rm_ratio': item_ratio_dec,
+                                'ing_ratio': ing_comp_ratio_dec,
+                                'actual_wt': actual_wt,
+                                'cas_no': ing.cas_no,
+                                'function': ing.function,
+                                'hs_code': ing.hs_code or "",
+                                'origin': material.origin if material else "",
+                                'material_name_en': material.name_en if material else "",
+                                'nmpa_reg_num': ing.nmpa_reg_num or "",
+                                'remark': ing.remark or ""
+                            }
                         else:
-                            raw_material_data.append([
-                                "", "", ing.name_en or "", ing.name_ko, "", f"{ing.composition_ratio or 0:.4f}", f"{actual_wt:.6f}", ing.cas_no, ing.function, ing.hs_code or "", ing.nmpa_reg_num or "", ing.remark or ""
-                            ])
+                            row = {
+                                'no': "",
+                                'material_name': "",
+                                'inci_name': ing.name_en or "",
+                                'name_ko': ing.name_ko,
+                                'rm_ratio': "",
+                                'ing_ratio': ing_comp_ratio_dec,
+                                'actual_wt': actual_wt,
+                                'cas_no': ing.cas_no,
+                                'function': ing.function,
+                                'hs_code': ing.hs_code or "",
+                                'origin': material.origin if material else "",
+                                'material_name_en': material.name_en if material else "",
+                                'nmpa_reg_num': ing.nmpa_reg_num or "",
+                                'remark': ing.remark or ""
+                            }
+                        raw_rows_decimal.append(row)
                     material_no += 1
-            raw_headers = ["NO", "원료명", "INCI Name", "성분의 한글명", "RM 함량(%)", "성분 함량(%)", "Actual Wt (%)", "CAS No.", "Ingredient function", "HS CODE", "NMPA", "Remark"]
-            sheets_data["원료별 목록"] = {"type": "table", "content": {"headers": raw_headers, "data": raw_material_data}}
+
+            # 최대 소수점 자릿수 계산
+            max_dp_rm = 0
+            max_dp_ing = 0
+            max_dp_actual = 0
+            for row in raw_rows_decimal:
+                if isinstance(row['rm_ratio'], Decimal):
+                    max_dp_rm = max(max_dp_rm, -row['rm_ratio'].as_tuple().exponent)
+                if isinstance(row['ing_ratio'], Decimal):
+                    max_dp_ing = max(max_dp_ing, -row['ing_ratio'].as_tuple().exponent)
+                if isinstance(row['actual_wt'], Decimal):
+                    max_dp_actual = max(max_dp_actual, -row['actual_wt'].as_tuple().exponent)
+
+            # 포맷팅하여 최종 raw_rows 생성
+            for row in raw_rows_decimal:
+                row['rm_ratio'] = f"{row['rm_ratio']:.{max_dp_rm}f}" if isinstance(row['rm_ratio'], Decimal) else ""
+                row['ing_ratio'] = f"{row['ing_ratio']:.{max_dp_ing}f}" if isinstance(row['ing_ratio'], Decimal) else ""
+                row['actual_wt'] = f"{row['actual_wt']:.{max_dp_actual}f}" if isinstance(row['actual_wt'], Decimal) else ""
+                raw_rows.append(row)
+
+            # raw_rows는 이제 포맷팅된 문자열을 가진 딕셔너리 리스트입니다.
+            # 이후 로직은 이 raw_rows를 사용합니다.
+
+            # Decide which columns are visible according to complex_ing_cols variables
+            visible_cols = []
+            cols_config = getattr(self, 'complex_ing_cols', None) or {}
+            for col in col_order:
+                cfg = cols_config.get(col)
+                if cfg is None:
+                    # default to visible
+                    visible = True
+                else:
+                    var = cfg.get('variable')
+                    if var is None:
+                        visible = cfg.get('visible', True)
+                    else:
+                        visible = var.get()
+                if visible:
+                    visible_cols.append(col)
+
+            # Map visible_cols to header labels using the columns config when available
+            visible_headers = []
+            for col in visible_cols:
+                if col in cols_config and isinstance(cols_config[col], dict):
+                    visible_headers.append(cols_config[col].get('text', col))
+                else:
+                    # fallback labels
+                    label_map = {
+                        'no': 'NO', 'material_name': '원료명', 'inci_name': 'INCI Name', 'name_ko': '성분의 한글명',
+                        'rm_ratio': 'RM 함량(%)', 'ing_ratio': '성분 함량(%)', 'actual_wt': 'Actual Wt (%)',
+                        'cas_no': 'CAS No.', 'function': 'Ingredient function', 'hs_code': 'HS CODE',
+                        'origin': '원산지', 'material_name_en': '영문원료명', 'nmpa_reg_num': 'NMPA', 'remark': 'Remark'
+                    }
+                    visible_headers.append(label_map.get(col, col))
+
+            # Build final data rows in order of visible_cols
+            final_data = []
+            for row in raw_rows:
+                final_data.append([row.get(col, "") for col in visible_cols])
+
+            if final_data:
+                sheets_data["원료별 목록"] = {"type": "table", "content": {"headers": visible_headers, "data": final_data}}
+            else:
+                # 빈 데이터일 때에도 headers를 채워 넣어 엑셀 시트 구조 유지
+                sheets_data["원료별 목록"] = {"type": "table", "content": {"headers": visible_headers, "data": []}}
         finally:
             session.close()
 
+        tree_data_to_process = []
         # 2. 전성분 합계 데이터 추출
         extract_tree_data(self.summed_ingredient_tree, "전성분 합계")
 
@@ -1556,8 +1854,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 if not item.material_code or item.material_code == "---" or item.ratio is None: continue
                 material = session.query(Material).filter_by(code=item.material_code).first()
                 if material and material.ingredients:
+                    item_ratio_dec = to_decimal(item.ratio)
                     for ing in material.ingredients:
-                        actual_ratio = item.ratio * (ing.composition_ratio / 100.0)
+                        ing_comp_ratio_dec = to_decimal(ing.composition_ratio)
+                        actual_ratio = item_ratio_dec * (ing_comp_ratio_dec / Decimal('100'))
                         key = (ing.name_ko or "", ing.name_en or "")
                         if key not in summed_ingredients:
                             summed_ingredients[key] = {
@@ -1571,18 +1871,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
         if summed_ingredients:
             sorted_ingredients = sorted(summed_ingredients.items(), key=lambda x: x[1]['total_ratio'], reverse=True)
             
+            # 최대 소수점 자릿수 계산
+            max_dp_total_ratio = 0
+            for (name_ko, name_en), data in sorted_ingredients:
+                ratio_val = data['total_ratio']
+                if isinstance(ratio_val, Decimal):
+                    max_dp_total_ratio = max(max_dp_total_ratio, -ratio_val.as_tuple().exponent)
+
             # 국문 시트 데이터
             ko_headers = ["NO", "성분명", "C.I NO", "% (W/W)", "CAS. NO", "FUNCTION"]
             ko_data = []
             for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
-                ko_data.append([i, name_ko, "", f"{data['total_ratio']:.6f}", data['cas_no'], data['function']])
+                formatted_ratio = f"{data['total_ratio']:.{max_dp_total_ratio}f}"
+                ko_data.append([i, name_ko, "", formatted_ratio, data['cas_no'], data['function']])
             sheets_data[self.texts['single_ingredients_korean']] = {"type": "table", "content": {"headers": ko_headers, "data": ko_data}}
 
             # 영문 시트 데이터
             en_headers = ["NO", "INGREDIENT", "C.I NO", "% (W/W)", "CAS. NO", "FUNCTION"]
             en_data = []
             for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
-                en_data.append([i, name_en, "", f"{data['total_ratio']:.6f}", data['cas_no'], data['function']])
+                formatted_ratio = f"{data['total_ratio']:.{max_dp_total_ratio}f}"
+                en_data.append([i, name_en, "", formatted_ratio, data['cas_no'], data['function']])
             sheets_data[self.texts['single_ingredients_english']] = {"type": "table", "content": {"headers": en_headers, "data": en_data}}
 
 
@@ -2120,14 +2429,22 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             date_format = '%Y-%m-%d'
             for i, form in enumerate(formulations):
-                tag = 'oddrow' if i % 2 == 0 else 'evenrow' # 이 부분은 이전 수정에서 반영되었어야 하나 누락된 것 같습니다.
+                tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+                # Treeview의 컬럼 순서(date, experiment_name, lab_no, revision, sample_sent, sample_delivery_date)에 맞춰 값 배치
+                date_str = form.experiment_date.strftime(date_format) if isinstance(form.experiment_date, (datetime, date)) else form.experiment_date or ""
+                exp_name = form.experiment_name or ""
+                lab_no = form.lab_no or ""
+                revision = form.revision or "N/A"
+                sample_sent = f"{form.sample_sent_count:02d}" if (form.sample_sent_count and form.sample_sent_count > 0) else ""
+                sample_delivery = form.sample_delivery_date.strftime(date_format) if getattr(form, 'sample_delivery_date', None) else ""
+
                 self.formulation_tree.insert("", "end", iid=form.id, tags=(tag,), values=(
-                    form.revision or "N/A",
-                    form.manager_code or "",
-                    form.experiment_date.strftime(date_format) if isinstance(form.experiment_date, (datetime, date)) else form.experiment_date or "",
-                    form.lab_no or "",
-                    f"{form.sample_sent_count:02d}" if form.sample_sent_count > 0 else "",
-                    form.sample_delivery_date.strftime(date_format) if form.sample_delivery_date else ""
+                    date_str,
+                    exp_name,
+                    lab_no,
+                    revision,
+                    sample_sent,
+                    sample_delivery
                 ))
         finally:
             session.close()
@@ -2279,5 +2596,271 @@ class DocumentManagementFrame(ctk.CTkFrame):
         except Exception as e:
             session.rollback()
             messagebox.showerror(self.texts['db_error'], f"{self.texts['sample_count_edit_error']}: {e}", parent=self)
+        finally:
+            session.close()
+
+    def import_all_formulations(self):
+        """
+        관리자 전용: 엑셀(다중 시트) 파일에서 처방들을 가져와 DB에 저장합니다.
+        - 기존 데이터와 충돌 시 간단한 중복 방지(예: 동일 LAB NO. 또는 실험일+제품명)가 적용됩니다.
+        - 가져온 처방은 experiment_name을 기준으로 폴더로 분류되어 보여집니다.
+        """
+        if not self.current_user.is_admin:
+            messagebox.showwarning("권한 오류", "관리자만 가져오기 기능을 사용할 수 있습니다.", parent=self)
+            return
+
+        from modules import excel_handler
+        imported = excel_handler.import_multisheet_data()
+        if not imported:
+            return
+
+        # 우선적으로 export에서 생성한 시트 포맷을 찾습니다:
+        # - '처방 목록' 시트: 처방별 한 행(헤더에 'ID','제품명' 포함)
+        # - '처방별 원료 목록' 시트: 각 처방의 원료들이 처방ID로 참조됨
+        forms_sheet = None
+        items_sheet = None
+        for sname, rows in imported.items():
+            if not rows:
+                continue
+            keys = set()
+            # rows는 dict 리스트이므로 keys를 합칩니다.
+            for r in rows[:3]:
+                keys.update(r.keys())
+            keys_norm = {str(k).strip() for k in keys}
+            if {'ID', '제품명'} <= keys_norm or {'ID', 'Experiment Name'} <= keys_norm or {'ID', '실험품명'} <= keys_norm:
+                forms_sheet = (sname, rows)
+            if {'처방ID', '원료명'} <= keys_norm or {'처방ID', '원료코드'} <= keys_norm:
+                items_sheet = (sname, rows)
+
+        # 만약 위 표준 포맷이 아니라면 기존 generic 파싱으로 fallback (기존 동작 유지)
+        session = db_manager.get_session()
+        try:
+            if forms_sheet and items_sheet:
+                form_rows = forms_sheet[1]
+                item_rows = items_sheet[1]
+
+                orig_to_new = {}
+                added = 0
+                # 먼저 처방 생성
+                for row in form_rows:
+                    try:
+                        orig_id = row.get('ID') or row.get('id')
+                        exp_name = row.get('제품명') or row.get('실험품명') or row.get('Experiment Name') or ''
+                        lab_no = row.get('LAB NO.') or row.get('Lab No') or row.get('LAB_NO') or row.get('LAB') or None
+                        date_str = row.get('실험일') or row.get('Date') or None
+                        sample_sent = row.get('샘플 발송 횟수') or row.get('sample_sent_count') or None
+                        sample_delivery = row.get('샘플 발송일') or row.get('sample_delivery_date') or None
+                        manager = row.get('담당자') or row.get('manager') or None
+                        # 담당번호(manager_code) 매핑: 다양한 헤더 이름을 시도
+                        manager_code_val = row.get('담당번호') or row.get('담당 번호') or row.get('manager_code') or row.get('Manager Code') or row.get('문서 번호') or None
+                        comment = row.get('비고') or row.get('remark') or None
+                        # 차수(revision) 필드 매핑: 다양한 헤더 이름을 시도
+                        revision = row.get('차수') or row.get('revision') or row.get('Revision') or row.get('rev') or None
+
+                        f = Formulation(
+                            experiment_name=exp_name or f'Imported_{orig_id}',
+                            experiment_date=date_str,
+                            lab_no=str(lab_no) if lab_no is not None else None,
+                            manager_name=manager,
+                            manager_code=str(manager_code_val).strip().upper() if manager_code_val is not None else None,
+                            revision=str(revision) if revision is not None else None,
+                            experiment_comment=comment,
+                        )
+                        if sample_sent is not None:
+                            try:
+                                f.sample_sent_count = int(sample_sent)
+                            except Exception:
+                                pass
+                        # sample_delivery may be ISO date string
+                        if sample_delivery:
+                            try:
+                                from datetime import date as _date
+                                f.sample_delivery_date = _date.fromisoformat(sample_delivery)
+                            except Exception:
+                                pass
+
+                        session.add(f)
+                        session.flush()
+                        orig_to_new[str(orig_id)] = f.id
+                        added += 1
+                    except Exception:
+                        session.rollback()
+                        continue
+
+                # 다음으로 원료 항목들을 원래 처방ID에 매핑하여 생성
+                for irow in item_rows:
+                    try:
+                        parent_orig = irow.get('처방ID') or irow.get('처방 Id') or irow.get('FormulationID') or irow.get('Formulation Id') or irow.get('처방 Id')
+                        if parent_orig is None:
+                            continue
+                        parent_new_id = orig_to_new.get(str(parent_orig))
+                        if not parent_new_id:
+                            continue
+
+                        order = irow.get('순번') or irow.get('order') or None
+                        # order가 문자열로 들어올 수 있으므로 int로 변환 시도
+                        if order is not None:
+                            try:
+                                order = int(float(order))
+                            except Exception:
+                                # 변환 불가 시 None으로 두어 정렬 시 뒤로 오게 함
+                                order = None
+                        phase = irow.get('구분') or irow.get('phase') or None
+                        mat_code = irow.get('원료코드') or irow.get('원료 코드') or irow.get('원료코드') or irow.get('코드') or None
+                        mat_name = irow.get('원료명') or irow.get('원료 명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명')
+                        mat_name = mat_name or irow.get('원료명') or irow.get('material_name') or irow.get('name') or None
+                        ratio = try_convert_to_float(irow.get('함량(%)') or irow.get('함량') or irow.get('%') or irow.get('ratio') or 0) or 0
+                        amount = try_convert_to_float(irow.get('중량') or irow.get('실험량(g)') or irow.get('amount') or 0) or 0
+
+                        fi = FormulationItem(
+                            formulation_id=parent_new_id,
+                            order=order,
+                            phase=phase,
+                            material_code=mat_code,
+                            material_name=mat_name,
+                            ratio=ratio,
+                            amount=amount
+                        )
+                        session.add(fi)
+                    except Exception:
+                        continue
+
+                session.commit()
+                messagebox.showinfo(self.texts['success'], f"{added}개의 처방을 가져왔습니다.")
+                self.load_folders(is_initial_load=True)
+                return
+            else:
+                # 표준 포맷을 찾지 못하면 기존 generic 동작 (한 행 당 처방)로 처리
+                added = 0
+                updated = 0
+                for sheet_name, rows in imported.items():
+                    for row in rows:
+                        exp_name = row.get('제품명') or row.get('실험품명') or row.get('Experiment Name') or sheet_name
+                        lab_no = row.get('LAB NO.') or row.get('Lab No') or None
+                        date_str = row.get('실험일') or row.get('Date') or None
+
+                        existing = None
+                        if lab_no:
+                            existing = session.query(Formulation).filter_by(lab_no=str(lab_no)).first()
+
+                        if existing:
+                            existing.experiment_name = exp_name
+                            existing.experiment_date = date_str
+                            existing.manager_name = row.get('담당자') or existing.manager_name
+                            # 기존 레코드에 담당번호가 있다면 업데이트
+                            manager_code_val = row.get('담당번호') or row.get('담당 번호') or row.get('manager_code') or row.get('문서 번호') or None
+                            if manager_code_val is not None:
+                                existing.manager_code = str(manager_code_val).strip().upper()
+                            updated += 1
+                        else:
+                            manager_code_val = row.get('담당번호') or row.get('담당 번호') or row.get('manager_code') or row.get('문서 번호') or None
+                            newf = Formulation(
+                                experiment_name=exp_name or 'Imported',
+                                experiment_date=date_str,
+                                lab_no=lab_no,
+                                manager_name=row.get('담당자') or None,
+                                manager_code=str(manager_code_val).strip().upper() if manager_code_val is not None else None,
+                                experiment_comment=row.get('비고') or None
+                            )
+                            session.add(newf)
+                            session.flush()
+                            added += 1
+                            if any(k in row for k in ('원료코드', '원료명', '함량(%)', '코드', 'name', 'ratio')):
+                                try:
+                                    fi = FormulationItem(
+                                        formulation_id=newf.id,
+                                        material_code=row.get('원료코드') or row.get('코드') or None,
+                                        material_name=row.get('원료명') or row.get('name') or None,
+                                        ratio=try_convert_to_float(row.get('함량(%)') or row.get('ratio') or 0) or 0,
+                                        amount=try_convert_to_float(row.get('실험량(g)') or row.get('amount') or 0) or 0,
+                                        phase=row.get('구분') or row.get('phase') or None,
+                                        order=row.get('순번') or None
+                                    )
+                                    session.add(fi)
+                                except Exception:
+                                    pass
+
+                session.commit()
+                messagebox.showinfo(self.texts['success'], f"가져오기 완료: 추가 {added}개, 업데이트 {updated}개")
+                self.load_folders(is_initial_load=True)
+                return
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror(self.texts['db_error'], f"가져오기 중 오류: {e}", parent=self)
+        finally:
+            session.close()
+
+    def export_change_logs(self):
+        """
+        전체 이력을 엑셀로 내보냅니다. 엔티티별로 시트를 생성하고, 각 시트에는 (Entity, ID, Identifier, Changed At, User, Summary, Full Log) 열을 둡니다.
+        """
+        if not self.current_user.is_admin:
+            messagebox.showwarning("권한 오류", "관리자만 이력 내보내기를 사용할 수 있습니다.", parent=self)
+            return
+
+        session = db_manager.get_session()
+        try:
+            # 수집 대상 엔티티: Formulation, FormulationItem, Material, Client, User
+            sheets = {}
+
+            # Helper: split change_log into blocks and extract first line timestamp if present
+            def summarize_log(log_text):
+                if not log_text:
+                    return ("", "", "")
+                blocks = [b.strip() for b in str(log_text).split('\n\n') if b.strip()]
+                full = "\n\n".join(blocks)
+                summary = blocks[0] if blocks else ""
+                # try to parse leading [YYYY-MM-DD HH:MM] pattern
+                import re
+                m = re.match(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s*(.*)$', summary)
+                if m:
+                    changed_at = m.group(1)
+                    summary_text = m.group(2)
+                else:
+                    changed_at = ""
+                    summary_text = summary
+                return (changed_at, summary_text, full)
+
+            # Formulations
+            form_rows = []
+            forms = session.query(Formulation).order_by(Formulation.created_at).all()
+            for f in forms:
+                changed_at, summary_text, full = summarize_log(f.change_log)
+                identifier = f.lab_no or f.experiment_name
+                form_rows.append(("처방", f.id, identifier, changed_at, f.manager_name or "", summary_text, full))
+            sheets['처방'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': form_rows}
+
+            # Materials
+            mat_rows = []
+            mats = session.query(Material).order_by(Material.id).all()
+            for m in mats:
+                changed_at, summary_text, full = summarize_log(m.change_log)
+                identifier = m.code or m.name
+                mat_rows.append(("원료", m.id, identifier, changed_at, "", summary_text, full))
+            sheets['원료'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': mat_rows}
+
+            # Clients
+            client_rows = []
+            clients = session.query(Client).order_by(Client.id).all()
+            for c in clients:
+                changed_at, summary_text, full = summarize_log(c.change_log)
+                identifier = c.name
+                client_rows.append(("거래처", c.id, identifier, changed_at, c.manager_name or "", summary_text, full))
+            sheets['거래처'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': client_rows}
+
+            # Users
+            user_rows = []
+            users = session.query(User).order_by(User.id).all()
+            for u in users:
+                changed_at, summary_text, full = summarize_log(u.change_log)
+                identifier = u.username
+                user_rows.append(("사용자", u.id, identifier, changed_at, u.username or "", summary_text, full))
+            sheets['사용자'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': user_rows}
+
+            # 호출하여 엑셀로 저장
+            excel_handler.export_multisheet_data_to_excel(sheets, default_filename="이력_내보내기.xlsx")
+
+        except Exception as e:
+            messagebox.showerror(self.texts['error'], f"이력 내보내기 중 오류: {e}", parent=self)
         finally:
             session.close()

@@ -241,6 +241,15 @@ def export_multisheet_data_to_excel(sheets_data, default_filename="export.xlsx")
     except Exception as e:
         messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
 
+
+def export_all_change_logs(sheets, default_filename="change_logs.xlsx"):
+    """
+    이미 준비된 sheets 구조(엔티티별 headers/data)를 받아서 멀티시트 엑셀로 저장합니다.
+    호출자는 DB에서 change_log를 모아 sheets dict를 만들어 전달하면 됩니다.
+    """
+    # 단순히 기존 export_multisheet_data_to_excel과 동일한 동작을 수행
+    return export_multisheet_data_to_excel(sheets, default_filename=default_filename)
+
 def export_formulation_template(formulation_data, default_filename="formulation.xlsx", is_lab_journal=False):
     """처방 정보를 특정 템플릿 형식의 엑셀 파일로 내보냅니다."""
     initial_dir = get_excel_path()
@@ -837,14 +846,30 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
                 data_rows = content.get('data', [])
                 
                 # 헤더 쓰기
-                for col_idx, header_text in enumerate(headers, 1):
+                for col_idx, header_text in enumerate(headers, 1): # noqa
                     cell = sheet.cell(row=1, column=col_idx, value=header_text.replace('\n', ' '))
                     cell.font = header_font
                     cell.fill = header_fill
                     cell.alignment = center_align
                 
                 # 데이터 쓰기
-                for row_idx, row_data in enumerate(data_rows, 2):
+                # 먼저 'NO' 또는 '구분'이 포함된 첫 번째 열을 찾아, 그 열부터 모두 중앙 정렬합니다.
+                # '함량' 또는 '%'가 포함된 열은 숫자이므로 오른쪽 정렬을 유지합니다.
+                special_indices = []
+                for idx, h in enumerate(headers, 1):
+                    ht = str(h)
+                    if ht.strip().upper() == 'NO' or '구분' in ht or '함량' in ht or '%' in ht:
+                        special_indices.append(idx)
+                last_special_idx = max(special_indices) if special_indices else 0
+
+                # 'NO' 또는 '구분'이 포함된 첫 번째 열의 인덱스를 찾습니다.
+                center_align_start_col = -1
+                for idx, h in enumerate(headers, 1):
+                    if str(h).strip().upper() == 'NO' or '구분' in str(h):
+                        center_align_start_col = idx
+                        break
+
+                for row_idx, row_data in enumerate(data_rows, 2): # noqa
                     for col_idx, cell_value in enumerate(row_data, 1): # 1-based index
                         cell = sheet.cell(row=row_idx, column=col_idx)
                         header_text = headers[col_idx - 1] # 0-based index for headers
@@ -856,6 +881,16 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
                         else:
                             cell.value = cell_value
                         cell.font = default_font
+
+                        # 'NO' 또는 '구분' 열부터 시작하여 중앙 정렬 적용
+                        if center_align_start_col != -1 and col_idx >= center_align_start_col:
+                            cell.alignment = center_align
+                        else:
+                            # 숫자이면 오른쪽 정렬, 아니면 왼쪽 정렬을 기본으로 둡니다.
+                            if isinstance(cell.value, (int, float)):
+                                cell.alignment = right_align
+                            else: # noqa
+                                cell.alignment = left_align
                 
                 # --- 셀 병합 로직 추가 (원료별 목록 시트에만 적용) ---
                 if sheet_name == "원료별 목록":

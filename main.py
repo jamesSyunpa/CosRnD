@@ -20,6 +20,7 @@ CONFIG_FILE_PATH = os.path.join(application_path, 'config.ini')
 
 from database.db_manager import db_manager
 from modules.translation import get_texts
+import modules.translation as _translation
 from modules.login import LoginWindow
 from modules.settings_management import SettingsManagementFrame
 from modules.quality_management import QualityManagementFrame # 품질관리 프레임 import
@@ -105,16 +106,23 @@ class App(ctk.CTk):
     def load_app_settings(self):
         """config.ini에서 앱 설정을 로드합니다 (테마, 언어 등)."""
         config = configparser.ConfigParser()
-        config.read(CONFIG_FILE_PATH, encoding='utf-8')
-        
-        # 테마 설정 로드 및 적용
-        theme = config.get('Appearance', 'theme', fallback='system')
-        ctk.set_appearance_mode(theme)
-        
-        # 언어 설정 로드
-        lang_setting = config.get('Appearance', 'language', fallback='korean').lower()
-        self.language = 'english' if lang_setting == 'english' else 'korean'
-        print(f"로드된 언어 설정: {self.language}")
+        try:
+            if os.path.exists(CONFIG_FILE_PATH):
+                config.read(CONFIG_FILE_PATH, encoding='utf-8')
+            
+            # 테마 설정 로드 및 적용
+            theme = config.get('Appearance', 'theme', fallback='system')
+            ctk.set_appearance_mode(theme)
+            
+            # 언어 설정 로드
+            lang_setting = config.get('Appearance', 'language', fallback='korean').lower()
+            self.language = 'english' if lang_setting == 'english' else 'korean'
+            print(f"로드된 언어 설정: {self.language}")
+        except Exception as e:
+            print(f"[경고] config.ini 파일 로드 실패: {e}. 기본 설정으로 계속합니다.")
+            # 오류 발생 시 기본값으로 안전하게 진행
+            ctk.set_appearance_mode("System")
+            self.language = "korean"
 
     def setup_main_ui(self):
         print(f"{datetime.now()}: setup_main_ui 호출")
@@ -144,6 +152,15 @@ class App(ctk.CTk):
             f"quality/{current_texts['prod_standard']}": {"icon": "🔬", "title": current_texts['prod_standard']},
             f"quality/{current_texts['mfg_record']}": {"icon": "🔬", "title": current_texts['mfg_record']},
         }
+
+        # --- 변경: recent_actions에 들어있는 항목이 ACTION_CONFIG에 없으면 표시용 플레이스홀더 추가 ---
+        # (삭제된 거래처 등으로 인해 ACTION_CONFIG에서 사라졌더라도 홈 화면에서 항목이 사라지지 않도록 함)
+        for act in list(self.recent_actions):
+            if act not in self.ACTION_CONFIG:
+                # act 형식: "scope/name" 이라고 가정. 마지막 부분을 제목으로 사용
+                title = act.split('/', 1)[-1] if '/' in act else act
+                # 번역 키가 있을 경우 그대로 사용, 없으면 제목으로 표시
+                self.ACTION_CONFIG[act] = {"icon": "❓", "title": title}
 
         # 프로그램 제목 설정
         self.title("R&D Management System" if self.language == "english" else "화장품 연구소 관리 시스템")
@@ -293,19 +310,38 @@ class App(ctk.CTk):
 
     def record_action(self, action_name: str):
         """사용자 활동을 기록하고, 홈 화면을 업데이트합니다."""
-        # 유효한 활동인지 확인하고, 홈 화면 자체는 기록하지 않음
-        if action_name in self.ACTION_CONFIG and action_name != FRAME_HOME:
-            if action_name in self.recent_actions:
-                self.recent_actions.remove(action_name)
-            self.recent_actions.appendleft(action_name)
-            
-            # HomeFrame의 recent_actions를 직접 업데이트하고 카드를 새로고침합니다.
-            home_frame = self.frames.get(FRAME_HOME)
-            if home_frame:
-                home_frame.recent_actions = self.recent_actions
+        # 유효한 활동인지 검사: ACTION_CONFIG에 있어야 하는 기존 규칙을 완화.
+        # data/, document/, quality/, settings/ 등 주요 스코프는 ACTION_CONFIG에 없어도 허용.
+        if action_name == FRAME_HOME:
+            return
+
+        allowed_prefixes = ("data/", "document/", "quality/", "settings/")
+        is_allowed = (action_name in self.ACTION_CONFIG) or any(action_name.startswith(p) for p in allowed_prefixes)
+        if not is_allowed:
+            # 허용되지 않는 형식이면 무시
+            return
+
+        # 중복 제거 후 맨 앞에 추가
+        if action_name in self.recent_actions:
+            self.recent_actions.remove(action_name)
+        self.recent_actions.appendleft(action_name)
+
+        # ACTION_CONFIG에 없는 항목이면 표시용 플레이스홀더 등록 (홈 화면에서 보이도록)
+        if action_name not in self.ACTION_CONFIG:
+            title = action_name.split('/', 1)[-1] if '/' in action_name else action_name
+            self.ACTION_CONFIG[action_name] = {"icon": "❓", "title": title}
+
+        # HomeFrame의 recent_actions를 직접 업데이트하고 카드를 새로고침합니다.
+        home_frame = self.frames.get(FRAME_HOME)
+        if home_frame:
+            home_frame.recent_actions = self.recent_actions
+            try:
                 self.frames[FRAME_HOME].refresh_cards()
-            
-            print(f"활동 기록: {action_name}. 현재 목록: {list(self.recent_actions)}")
+            except Exception:
+                # HomeFrame이 아직 초기화되지 않았거나 refresh 실패 시 무시
+                pass
+
+        print(f"활동 기록: {action_name}. 현재 목록: {list(self.recent_actions)}")
 
     def load_recent_actions(self):
         """config.ini에서 현재 사용자의 최근 활동을 불러옵니다."""
@@ -492,10 +528,45 @@ class App(ctk.CTk):
         # 새 프로세스로 현재 스크립트 다시 실행
         os.execv(sys.executable, ['python'] + sys.argv)
 
+# --- 변경: get_texts에 안전한 기본값 주입용 래퍼 추가 ---
+# 기존 get_texts를 보존한 뒤, 누락된 키가 있으면 언어에 맞는 기본 문자열을 삽입합니다.
+_old_get_texts = get_texts
+def safe_get_texts(lang):
+    try:
+        texts = _old_get_texts(lang) or {}
+    except Exception:
+        texts = {}
+
+    # 기본 메시지 (한국어 / 영어)
+    defaults_korean = {
+        'export_formulation_name_empty': '내보낼 제형명을 입력해주세요.',
+        'warning': '경고',
+    }
+    defaults_english = {
+        'export_formulation_name_empty': 'Please enter a name for the formulation to export.',
+        'warning': 'Warning',
+    }
+
+    lang_key = (lang or '').lower()
+    defaults = defaults_english if 'eng' in lang_key or lang_key.startswith('en') else defaults_korean
+
+    # 누락된 키를 채움
+    for k, v in defaults.items():
+        if k not in texts:
+            texts[k] = v
+
+    return texts
+
+# 모듈 전체에 적용 (다른 모듈들이 import할 때도 안전한 버전 사용)
+try:
+    _translation.get_texts = safe_get_texts
+    get_texts = safe_get_texts  # 로컬 참조도 교체
+except Exception as e:
+    print(f"[경고] 번역 래퍼 적용 실패: {e}")
+
 if __name__ == "__main__":
     # App 생성자에서 설정을 로드하므로 여기서 미리 적용할 필요 없음
     ctk.set_default_color_theme("blue")
     
     app = App()
     app.mainloop()
-    

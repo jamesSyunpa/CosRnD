@@ -4,7 +4,7 @@ from sqlalchemy.orm import joinedload
 from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 from database.db_manager import db_manager
-from database.models import Client, Formulation, FormulationItem, Material
+from database.models import Client, Formulation, FormulationItem, Material, User
 from datetime import datetime
 from modules import excel_handler
 from modules.ui_components import CustomErrorDialog
@@ -13,6 +13,98 @@ from modules.ui_components import CustomErrorDialog
 from modules.document_management import CustomDropdown, AddMaterialDialog
 from modules.ui_components import try_convert_to_float, HelpPopup
 from modules.translation import get_texts
+from decimal import Decimal, InvalidOperation, getcontext
+
+# 충분히 큰 정밀도 설정 (필요시 더 증가 가능)
+getcontext().prec = 80
+
+def to_decimal(value):
+    """안전하게 Decimal로 변환. 숫자/문자/None 모두 처리."""
+    try:
+        if value is None:
+            return Decimal('0')
+        if isinstance(value, Decimal):
+            return value
+        # float는 str로 감싸서 부동소수 오차 회피
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal('0')
+
+def decimal_to_str_full(d):
+    """
+    Decimal을 지수표기 없이 가능한 모든 유효 숫자(내부 digits 및 exponent 포함)로 변환.
+    - Decimal.as_tuple()을 이용해 정확한 자릿수까지 출력 (작은 값도 0.000013 등으로 표시)
+    - 연산 결과에 따라 trailing zeros가 필요하면 그대로 보여줌.
+    """
+    d = to_decimal(d)
+    # 0 특별 처리
+    if d == 0:
+        return "0"
+    sign, digits, exp = d.as_tuple()
+    digits_str = ''.join(str(x) for x in digits) if digits else '0'
+    if exp >= 0:
+        # 정수(혹은 소수점 오른쪽으로 0 채움)
+        s = digits_str + ('0' * exp)
+        if sign:
+            s = '-' + s
+        return s
+    # exp < 0: 소수점 위치 계산
+    point_index = len(digits_str) + exp  # exp는 음수
+    if point_index > 0:
+        int_part = digits_str[:point_index]
+        frac_part = digits_str[point_index:]
+        s = int_part + '.' + frac_part
+    else:
+        s = '0.' + ('0' * (-point_index)) + digits_str
+    if sign:
+        s = '-' + s
+    return s
+
+def format_decimal_full_with_pct(d):
+    """Decimal을 문자열로 변환하고 뒤에 % 붙임 (퍼센트 표현용 유틸)."""
+    return decimal_to_str_full(d) + '%'
+
+def compute_actual_wt(ingredient_pct, total_weight, rm_pct=None):
+    """
+    ingredient_pct: 성분 퍼센트 값(예: 0.001 을 '0.001%'로 취급하는 입력)
+    rm_pct: 해당 성분 내 RM 퍼센트 값(없으면 None)
+    total_weight: 전체 무게 (예: g)
+
+    반환: (actual_pct_decimal, actual_wt_decimal)
+      - actual_pct_decimal: 퍼센트 단위로 계산된 Decimal (사용자 요구대로 퍼센트끼리 곱하면 100으로 나누지 않음)
+      - actual_wt_decimal: total_weight * (actual_pct / 100)
+    예) ingredient_pct=Decimal('0.001'), rm_pct=Decimal('0.01') => actual_pct=0.00001 (퍼센트), actual_wt = total_weight * 0.00001 / 100
+    """
+    ing = to_decimal(ingredient_pct)
+    tw = to_decimal(total_weight)
+    if rm_pct is not None:
+        rm = to_decimal(rm_pct)
+        actual_pct = ing * rm  # 퍼센트 단위끼리의 곱
+    else:
+        actual_pct = ing
+
+    # 실제 무게는 퍼센트를 분수로 바꿔 곱함
+    actual_wt = tw * (actual_pct / Decimal('100'))
+    return actual_pct, actual_wt
+
+# --- 적용 예시 지시 ---
+# 아래와 같은 기존 코드 조각들을 찾아 치환하세요.
+# 기존 예시 (문제 원인):
+# actual_wt = float(total_weight) * (float(ing_pct) / 100.0)
+# display_pct = f"{actual_pct:.6f}%"
+# display_wt = f"{actual_wt:.6f}"
+#
+# 변경 예시(치환):
+# actual_pct, actual_wt = compute_actual_wt(row['ing_pct'], total_weight_value, row.get('rm_pct'))
+# row['ACTUAL_PCT_DISPLAY'] = format_decimal_full_with_pct(actual_pct)    # 예: "0.000013%"
+# row['ACTUAL_WT_DISPLAY'] = decimal_to_str_full(actual_wt)               # 예: "0.000013"
+#
+# 엑셀/CSV/Treeview에 쓸 때도 반드시 decimal_to_str_full 또는 format_decimal_full_with_pct 사용.
+#
+# 예: worksheet.write(row, col_pct, decimal_to_str_full(actual_pct) + '%')
+#     treeview.set(item, 'ACTUAL_WT', decimal_to_str_full(actual_wt))
+#
+# 또한 기존에 "{:.6f}".format(...) 또는 f"{val:.6f}" 형태로 포맷한 모든 곳을 찾아 위 유틸로 대체해야 합니다.
 
 class FormulationEditPopup(ctk.CTkToplevel):
     """처방 생성 및 수정 팝업 창"""
@@ -406,8 +498,39 @@ class FormulationEditPopup(ctk.CTkToplevel):
             # 본 실험 정보
             self.exp_name_entry.delete(0, "end"); self.exp_name_entry.insert(0, form.experiment_name or "")            
             if form.experiment_date: self.exp_date_entry.set_date(form.experiment_date)
+            # 담당자명/담당번호 표시
             self.exp_manager_entry.delete(0, "end"); self.exp_manager_entry.insert(0, form.manager_name or "")
-            self.exp_code_entry.delete(0, "end"); self.exp_code_entry.insert(0, form.manager_code or "")
+            self.exp_code_entry.delete(0, "end")
+            # 우선 DB에 저장된 manager_code를 표시
+            if form.manager_code:
+                self.exp_code_entry.insert(0, form.manager_code)
+            else:
+                # DB에 manager_code가 없으면 LAB NO.에서 접두부(영문) 추출 시도
+                lab = (form.lab_no or "").strip()
+                if lab:
+                    import re
+                    m = re.match(r'^([A-Za-z]+)', lab)
+                    if m:
+                        parsed_code = m.group(1).upper()
+                        self.exp_code_entry.insert(0, parsed_code)
+                        # 사용자 테이블에서 해당 담당번호가 등록되어 있으면 담당자명으로 채움
+                        try:
+                            user = session.query(User).filter_by(manager_code=parsed_code).first()
+                            if user and not (form.manager_name):
+                                self.exp_manager_entry.delete(0, "end")
+                                # User에는 full name 필드가 없을 수 있어서 username을 기본으로 표시
+                                self.exp_manager_entry.insert(0, user.username or "")
+                        except Exception:
+                            pass
+            # 만약 form에는 manager_code가 있지만 manager_name이 비어있고, 등록된 사용자가 있다면 이름 보완
+            if form.manager_code and not form.manager_name:
+                try:
+                    user = session.query(User).filter_by(manager_code=form.manager_code).first()
+                    if user:
+                        self.exp_manager_entry.delete(0, "end")
+                        self.exp_manager_entry.insert(0, user.username or "")
+                except Exception:
+                    pass
 
             self.revision_entry.delete(0, "end"); self.revision_entry.insert(0, form.revision or "")
 
@@ -440,24 +563,38 @@ class FormulationEditPopup(ctk.CTkToplevel):
             for item in self.formulation_item_tree.get_children():
                 self.formulation_item_tree.delete(item)
             
-            total_amount = 0.0
-            for item in sorted(form.items, key=lambda x: x.order):
+            total_amount = Decimal('0')
+            # 정렬할 때 order가 None인 항목이 섞여 있어 TypeError가 발생할 수 있음
+            # None은 마지막에 오도록 튜플 키로 안전하게 정렬합니다.
+            for item in sorted(form.items, key=lambda x: (x.order is None, x.order if x.order is not None else 0)):
                 self.formulation_item_tree.insert("", "end", values=(
                     item.phase or "",
                     item.material_code or "---",
                     item.material_name or "---",
-                    f"{item.ratio:.4f}" if item.ratio is not None else "---",
-                    f"{item.amount:.4f}" if item.amount is not None else "---"
+                    decimal_to_str_full(to_decimal(item.ratio)) if item.ratio is not None else "---",
+                    decimal_to_str_full(to_decimal(item.amount)) if item.amount is not None else "---"
                 ))
                 if item.amount is not None:
-                    total_amount += item.amount
+                    total_amount += to_decimal(item.amount)
             
             # 총 실험량 필드 업데이트
             self.main_total_amount_entry.delete(0, "end")
-            self.main_total_amount_entry.insert(0, f"{total_amount:.4f}")
+            self.main_total_amount_entry.insert(0, decimal_to_str_full(total_amount))
 
             self.update_formulation_summary()
-            self.update_lab_no() # 데이터 로드 후 LAB NO. 업데이트
+            # DB에 저장된 lab_no가 있으면 그것을 우선 표시합니다.
+            if form.lab_no:
+                try:
+                    self.lab_no_entry.configure(state="normal")
+                    self.lab_no_entry.delete(0, "end")
+                    self.lab_no_entry.insert(0, form.lab_no)
+                    self.lab_no_entry.configure(state="disabled")
+                except Exception:
+                    # 실패 시 기존 동작(생성)으로 폴백
+                    self.update_lab_no()
+            else:
+                # 저장된 값이 없으면 기존 로직대로 자동 생성
+                self.update_lab_no()
         finally:
             session.close()
 
@@ -479,7 +616,10 @@ class FormulationEditPopup(ctk.CTkToplevel):
                 form = session.query(Formulation).options(joinedload(Formulation.items)).filter_by(id=self.formulation_id).first()
                 # --- 'LAB NO.' 변경 감지 ---
                 # DB의 LAB NO.와 현재 폼의 LAB NO.가 다르면 '새 버전으로 저장'으로 간주합니다.
-                if form and form.lab_no != self.lab_no_entry.get().strip():
+                # 정규화: DB와 입력값을 모두 strip 및 대문자화하여 비교
+                current_lab_no_input = self.lab_no_entry.get().strip().upper()
+                stored_lab_no = (form.lab_no or "").strip().upper()
+                if form and stored_lab_no != current_lab_no_input:
                     is_new_revision = True
                     old_form_items = {item.material_code: item.ratio for item in form.items}
                     self.formulation_id = None # ID를 None으로 만들어 신규 저장 모드로 전환
@@ -487,7 +627,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     session.add(form)
                     # 디버깅을 위해 담당번호와 LAB NO.를 함께 출력
                     current_code = self.exp_code_entry.get().strip()
-                    print(f"LAB NO. 변경 감지: '새 버전으로 저장'을 시작합니다. (담당번호: '{current_code}', LAB NO: '{self.lab_no_entry.get().strip()}')")
+                    print(f"LAB NO. 변경 감지: '새 버전으로 저장'을 시작합니다. (담당번호: '{current_code}', LAB NO: '{current_lab_no_input}')")
             else: # 신규
                 form = Formulation()
                 session.add(form)
@@ -628,12 +768,12 @@ class FormulationEditPopup(ctk.CTkToplevel):
             from database.models import Material
             material = session.query(Material).filter_by(id=material_id).first()
             if material:
-                ratio = 0.0
-                amount = 0.0 
+                ratio = Decimal('0')
+                amount = Decimal('0')
                 # 태그 추가
                 tag = 'oddrow' if len(self.formulation_item_tree.get_children()) % 2 == 0 else 'evenrow'
                 self.formulation_item_tree.insert("", "end", tags=(tag,), values=(
-                    "", material.code, material.name, f"{ratio:.4f}", f"{amount:.4f}"
+                    "", material.code, material.name, decimal_to_str_full(ratio), decimal_to_str_full(amount)
                 ))
                 self.update_phase_numbers()
         finally:
@@ -687,12 +827,15 @@ class FormulationEditPopup(ctk.CTkToplevel):
     def on_edit_entry_commit(self, item_id):
         if not self.edit_entry: return
         try:
-            new_ratio = float(self.edit_entry.get())
+            # Decimal로 안전하게 변환
+            new_ratio_dec = to_decimal(self.edit_entry.get())
             current_values = list(self.formulation_item_tree.item(item_id, "values"))
-            current_values[3] = f"{new_ratio:.4f}"
-            current_values[4] = self.calculate_single_amount(new_ratio)
+            current_values[3] = decimal_to_str_full(new_ratio_dec)
+            # amount 재계산 (총량을 Decimal로)
+            current_values[4] = self.calculate_single_amount(new_ratio_dec)
             self.formulation_item_tree.item(item_id, values=tuple(current_values))
-        except (ValueError, TypeError): pass
+        except (InvalidOperation, ValueError, TypeError):
+            pass
         finally:
             self.edit_entry.destroy()
             self.edit_entry = None
@@ -708,18 +851,18 @@ class FormulationEditPopup(ctk.CTkToplevel):
             messagebox.showwarning(self.texts['selection_error'], self.texts['cannot_apply_to_separator'], parent=self)
             return
 
-        other_ratios_sum = 0.0
+        other_ratios_sum = Decimal('0')
         for item_id in self.formulation_item_tree.get_children():
             if item_id == selected_item_id: continue
             values = self.formulation_item_tree.item(item_id, "values")
             if values and values[1] != "---":
-                try: other_ratios_sum += float(values[3])
+                try: other_ratios_sum += to_decimal(values[3])
                 except (ValueError, TypeError): continue
         
-        new_ratio = 100.0 - other_ratios_sum
-        if new_ratio < 0:
+        new_ratio = Decimal('100.0') - other_ratios_sum
+        if new_ratio < Decimal('0'):
             messagebox.showwarning(self.texts['calculation_error'], self.texts['ratio_exceeds_100_warning'], parent=self)
-            new_ratio = 0.0
+            new_ratio = Decimal('0.0')
 
         current_values = list(self.formulation_item_tree.item(selected_item_id, "values"))
         current_values[3] = f"{new_ratio:.4f}"
@@ -751,25 +894,30 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.formulation_item_tree.move(selected_item, "", "end")
             self.update_phase_numbers()
 
-    def calculate_single_amount(self, ratio: float) -> str:
+    def calculate_single_amount(self, ratio) -> str:
         try:
-            total_amount = float(self.main_total_amount_entry.get())
-            amount = (total_amount * ratio) / 100.0
-            return f"{amount:.4f}"
-        except (ValueError, TypeError): return "0.0000"
+            total_amount = to_decimal(self.main_total_amount_entry.get())
+            ratio_dec = to_decimal(ratio)
+            amount = (total_amount * ratio_dec) / Decimal('100')
+            return decimal_to_str_full(amount)
+        except Exception:
+            return "0"
 
     def calculate_item_amounts(self, event=None):
-        try: total_amount = float(self.main_total_amount_entry.get())
-        except (ValueError, TypeError): total_amount = 0.0
+        try:
+            total_amount = to_decimal(self.main_total_amount_entry.get())
+        except (InvalidOperation, ValueError, TypeError):
+            total_amount = Decimal('0')
         for item_id in self.formulation_item_tree.get_children():
             values = list(self.formulation_item_tree.item(item_id, "values"))
             if values and values[1] != "---":
                 try:
-                    ratio = float(values[3])
-                    amount = (total_amount * ratio) / 100.0
-                    values[4] = f"{amount:.4f}"
+                    ratio_dec = to_decimal(values[3])
+                    amount = (total_amount * ratio_dec) / Decimal('100')
+                    values[4] = decimal_to_str_full(amount)
                     self.formulation_item_tree.item(item_id, values=tuple(values))
-                except (ValueError, TypeError): continue
+                except (InvalidOperation, ValueError, TypeError):
+                    continue
         self.update_formulation_summary()
 
     def update_phase_numbers(self):
@@ -785,16 +933,18 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.update_formulation_summary()
 
     def update_formulation_summary(self):
-        total_ratio, total_amount = 0.0, 0.0
+        total_ratio = Decimal('0')
+        total_amount = Decimal('0')
         for item_id in self.formulation_item_tree.get_children():
             values = self.formulation_item_tree.item(item_id, "values")
             if values and values[1] != "---":
                 try:
-                    total_ratio += float(values[3])
-                    total_amount += float(values[4])
-                except (ValueError, TypeError): continue
-        self.total_ratio_label.configure(text=f"{total_ratio:.4f} %")
-        self.total_amount_label.configure(text=f"{total_amount:.4f} g")
+                    total_ratio += to_decimal(values[3])
+                    total_amount += to_decimal(values[4])
+                except (InvalidOperation, ValueError, TypeError):
+                    continue
+        self.total_ratio_label.configure(text=f"{decimal_to_str_full(total_ratio)} %")
+        self.total_amount_label.configure(text=f"{decimal_to_str_full(total_amount)} g")
 
     def toggle_target_info(self):
         if self.target_info_var.get():
@@ -983,20 +1133,22 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
             # 총 실험량 값을 먼저 가져옵니다.
             try:
-                total_amount = float(details.get("총 실험량", 0.0))
+                total_amount = to_decimal(details.get("총 실험량", 0.0))
             except (ValueError, TypeError):
-                total_amount = 0.0
+                total_amount = Decimal('0')
 
             for item in items:
-                ratio_val = try_convert_to_float(item.get("함량(%)", "0.0000"))
-                ratio_str = f"{ratio_val:.4f}" if isinstance(ratio_val, float) else str(ratio_val)
+                # 기존 try_convert_to_float 유지하되 Decimal로 변환하여 포맷
+                ratio_val = try_convert_to_float(item.get("함량(%)", "0"))
+                ratio_dec = to_decimal(ratio_val)
+                ratio_str = decimal_to_str_full(ratio_dec)
 
                 # 총 실험량과 함량을 기반으로 실험량을 다시 계산합니다.
-                if isinstance(ratio_val, float) and total_amount > 0:
-                    amount_val = (total_amount * ratio_val) / 100.0
-                    amount_str = f"{amount_val:.4f}"
+                if total_amount > Decimal('0'):
+                    amount_val = (total_amount * ratio_dec) / Decimal('100')
+                    amount_str = decimal_to_str_full(amount_val)
                 else:
-                    amount_str = "0.0000"
+                    amount_str = "0"
 
                 self.formulation_item_tree.insert("", "end", values=(
                     item.get("구분") or "", item.get("코드") or "", item.get("원료명") or "",
