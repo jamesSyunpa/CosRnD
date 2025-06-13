@@ -1,12 +1,6 @@
 # modules/home_frame.py
 import customtkinter as ctk
 from tkinter import ttk # noqa
-import sys
-import os
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.append(PROJECT_ROOT)
-
 from database.db_manager import db_manager
 from database.models import Material
 from sqlalchemy import desc

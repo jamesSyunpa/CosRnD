@@ -6,6 +6,9 @@ from tkinter import messagebox
 from tkinter import ttk
 from collections import deque
 import os
+import tkinter.font as tkfont
+import re
+import subprocess
 
 # ==================== PyInstaller 경로 처리 ====================
 if getattr(sys, 'frozen', False):
@@ -39,7 +42,11 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.language = "korean" # 기본 언어 설정
+        self.texts = get_texts(self.language) # 중앙 번역 객체 생성
         self.title("화장품 연구소 관리 시스템")
+
+        self.last_shared_db_info = (0, 0) # (size, mtime)
+        self.db_sync_timer = None
 
         # 최근 활동 기록을 위한 설정
         self.recent_actions = deque(maxlen=5) # 화면에 표시할 최대 개수
@@ -102,6 +109,9 @@ class App(ctk.CTk):
         self.update_treeview_style() # Treeview 스타일을 현재 테마에 맞게 업데이트
         self.center_on_mouse_screen()
         self.deiconify()
+        
+        # 로그인 성공 후 DB 동기화 검사 시작
+        self.start_db_sync_check()
 
     def load_app_settings(self):
         """config.ini에서 앱 설정을 로드합니다 (테마, 언어 등)."""
@@ -131,27 +141,30 @@ class App(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ===== 네비게이션 프레임 =====
+        # --- 네비게이션 프레임 ---
         self.navigation_frame = ctk.CTkFrame(self, corner_radius=0, width=200)
         self.navigation_frame.grid(row=0, column=0, sticky="nsew")
         self.navigation_frame.grid_columnconfigure(0, weight=1)
 
-        # --- 언어별 텍스트 ---
-        current_texts = get_texts(self.language)
-
+ 
         # ACTION_CONFIG를 언어에 맞게 동적으로 생성
         self.ACTION_CONFIG = {
-            f"document/{current_texts['formulation_mgt']}": {"icon": "℞", "title": current_texts['formulation_mgt']},
-            f"document/{current_texts['document_sub']}": {"icon": "📄", "title": current_texts['document_sub']},
-            f"data/{current_texts['ingredient_mgt']}": {"icon": "🧪", "title": current_texts['ingredient_mgt']},
-            f"data/{current_texts['client_mgt']}": {"icon": "🏢", "title": current_texts['client_mgt']},
-            f"data/{current_texts['user_mgt']}": {"icon": "👥", "title": current_texts['user_mgt']},
-            f"settings/{current_texts['settings_sub']}": {"icon": "⚙️", "title": current_texts['settings_sub']},
-            f"quality/{current_texts['coa']}": {"icon": "🔬", "title": current_texts['coa']},
-            f"quality/{current_texts['msds']}": {"icon": "🔬", "title": current_texts['msds']},
-            f"quality/{current_texts['prod_standard']}": {"icon": "🔬", "title": current_texts['prod_standard']},
-            f"quality/{current_texts['mfg_record']}": {"icon": "🔬", "title": current_texts['mfg_record']},
+            f"document/{self.texts['formulation_mgt']}": {"icon": "℞", "title": self.texts['formulation_mgt']},
+            f"document/{self.texts['document_sub']}": {"icon": "📄", "title": self.texts['document_sub']},
+            f"data/{self.texts['ingredient_mgt']}": {"icon": "🧪", "title": self.texts['ingredient_mgt']},
+            f"data/{self.texts['client_mgt']}": {"icon": "🏢", "title": self.texts['client_mgt']},
+            f"data/{self.texts['user_mgt']}": {"icon": "👥", "title": self.texts['user_mgt']},
+            f"settings/{self.texts['settings_sub']}": {"icon": "⚙️", "title": self.texts['settings_sub']},
+            f"quality/{self.texts['coa']}": {"icon": "🔬", "title": self.texts['coa']},
+            f"quality/{self.texts['msds']}": {"icon": "🔬", "title": self.texts['msds']},
+            f"quality/{self.texts['prod_standard']}": {"icon": "🔬", "title": self.texts['prod_standard']},
+            f"quality/{self.texts['mfg_record']}": {"icon": "🔬", "title": self.texts['mfg_record']},
         }
+        # 품질 관리 탭에 동적으로 추가된 항목들을 ACTION_CONFIG에 반영
+        # '원료목록보고 자료'와 같이 quality_management.py에서 추가된 탭을 자동으로 인식
+        if 'ingredient_report' in self.texts:
+            self.ACTION_CONFIG[f"quality/{self.texts['ingredient_report']}"] = {"icon": "🔬", "title": self.texts['ingredient_report']}
+
 
         # --- 변경: recent_actions에 들어있는 항목이 ACTION_CONFIG에 없으면 표시용 플레이스홀더 추가 ---
         # (삭제된 거래처 등으로 인해 ACTION_CONFIG에서 사라졌더라도 홈 화면에서 항목이 사라지지 않도록 함)
@@ -168,7 +181,7 @@ class App(ctk.CTk):
         # 네비게이션 제목
         self.navigation_frame_label = ctk.CTkLabel(
             self.navigation_frame, 
-            text=current_texts["menu"],
+            text=self.texts["menu"],
             font=ctk.CTkFont(size=16, weight="bold")
         )
         self.navigation_frame_label.grid(row=0, column=0, padx=15, pady=(20, 30))
@@ -183,9 +196,9 @@ class App(ctk.CTk):
         
         self.nav_buttons = {}
         all_nav_items = [
-            {"name": FRAME_HOME, "text": current_texts["home"], "admin_only": False},
-            {"name": FRAME_DOCUMENT, "text": current_texts["document"], "admin_only": False},
-            {"name": FRAME_QUALITY, "text": current_texts["quality"], "admin_only": False},
+            {"name": FRAME_HOME, "text": self.texts["home"], "admin_only": False},
+            {"name": FRAME_DOCUMENT, "text": self.texts["document"], "admin_only": False},
+            {"name": FRAME_QUALITY, "text": self.texts["quality"], "admin_only": False},
         ]
 
         current_row = 1
@@ -210,8 +223,8 @@ class App(ctk.CTk):
         # 데이터 관리 버튼
         self.data_button = ctk.CTkButton(
             self.navigation_frame,
-            text=current_texts["data"],
-            command=lambda: self.navigate_and_record("data/" + current_texts["ingredient_mgt"]),
+            text=self.texts["data"],
+            command=lambda: self.navigate_and_record("data/" + self.texts["ingredient_mgt"]),
             width=140, height=35, font=ctk.CTkFont(size=12),
             fg_color="#E65100", hover_color="#BF360C", anchor="center"  # 주황색 계열
         )
@@ -222,8 +235,8 @@ class App(ctk.CTk):
         if self.current_user.is_admin:
             self.settings_button = ctk.CTkButton(
                 self.navigation_frame,
-                text=current_texts["settings"],
-                command=lambda: self.navigate_and_record("settings/" + current_texts["settings_sub"]),
+                text=self.texts["settings"],
+                command=lambda: self.navigate_and_record("settings/" + self.texts["settings_sub"]),
                 width=140, height=35, font=ctk.CTkFont(size=12), fg_color="gray50", hover_color="gray30", anchor="center"
             )
             self.settings_button.grid(row=current_row, column=0, padx=15, pady=8)
@@ -232,7 +245,7 @@ class App(ctk.CTk):
         # 로그아웃 버튼 (다른 스타일)
         self.logout_button = ctk.CTkButton(
             self.navigation_frame, 
-            text=current_texts["logout"],
+            text=self.texts["logout"],
             command=self.logout,
             width=140,
             height=35,
@@ -269,7 +282,6 @@ class App(ctk.CTk):
             self,
             config_path=CONFIG_FILE_PATH,
             application_path=application_path,
-            language=self.language
         )
         self.frames[FRAME_SETTINGS].grid(row=0, column=0, sticky="nsew")
         
@@ -279,7 +291,6 @@ class App(ctk.CTk):
             self.main_content_frame,
             self.current_user,
             self,
-            language=self.language
         )
         self.frames[FRAME_DATA].grid(row=0, column=0, sticky="nsew")
 
@@ -288,7 +299,7 @@ class App(ctk.CTk):
             self.main_content_frame,
             self.current_user,
             self,
-            language=self.language
+            texts=self.texts
         )
         self.frames[FRAME_DOCUMENT].grid(row=0, column=0, sticky="nsew")
 
@@ -297,7 +308,7 @@ class App(ctk.CTk):
             self.main_content_frame,
             self.current_user,
             self,
-            language=self.language
+            texts=self.texts
         )
         self.frames[FRAME_QUALITY].grid(row=0, column=0, sticky="nsew")
         # 기본 선택
@@ -425,6 +436,313 @@ class App(ctk.CTk):
 
         print(f"{datetime.now()}: Treeview 스타일을 '{theme}' 테마로 업데이트했습니다.")
 
+    def autosize_treeview_columns(self, treeview, padding=10, min_width=20, max_width=None):
+        """
+        Treeview의 각 열과 트리 컬럼('#0') 너비를 해당 열의 가장 긴 텍스트에 맞춰 자동 조절합니다.
+        - treeview: ttk.Treeview 인스턴스
+        - padding: 측정된 텍스트 너비에 더할 여유 픽셀
+        - min_width: 최소 너비
+        - max_width: (선택) 최대 너비로 제한
+        사용 예: app.autosize_treeview_columns(my_treeview, padding=18)
+        """
+        try:
+            # 가능한 경우 Treeview에서 사용 중인 폰트를 얻어 측정에 사용
+            try:
+                font = tkfont.Font(font=treeview.cget("font"))
+            except Exception:
+                font = tkfont.nametofont("TkDefaultFont")
+
+            # 트리 컬럼('#0') 처리 (있을 경우)
+            try:
+                header = treeview.heading('#0').get('text', '') or ''
+                max_w = font.measure(str(header))
+                for iid in treeview.get_children():
+                    txt = treeview.item(iid).get('text', '') or ''
+                    w = font.measure(str(txt))
+                    if w > max_w:
+                        max_w = w
+                width = max(min_width, max_w + padding)
+                if max_width:
+                    width = min(width, max_width)
+                treeview.column('#0', width=int(width))
+            except Exception:
+                # '#0' 컬럼이 없거나 접근 불가하면 무시
+                pass
+
+            # 일반 컬럼들 처리
+            cols = list(treeview["columns"]) if treeview["columns"] else []
+            for col in cols:
+                header = treeview.heading(col).get('text', '') or col
+                max_w = font.measure(str(header))
+                for iid in treeview.get_children():
+                    try:
+                        val = treeview.set(iid, col) or ''
+                    except Exception:
+                        # 안전하게 item values에서 시도 (인덱스 불확실 시 빈 문자열)
+                        try:
+                            vals = treeview.item(iid).get('values', ())
+                            # 값이 튜플/리스트이고 컬럼 인덱스를 찾을 수 있으면 사용
+                            val = vals[cols.index(col)] if cols.index(col) < len(vals) else ''
+                        except Exception:
+                            val = ''
+                    w = font.measure(str(val))
+                    if w > max_w:
+                        max_w = w
+                width = max(min_width, max_w + padding)
+                if max_width:
+                    width = min(width, max_width)
+                treeview.column(col, width=int(width))
+        except Exception as e:
+            print(f"[경고] autosize_treeview_columns 실패: {e}")
+
+    def move_total_between_en_and_cas(self, treeview, total_candidates=None, en_candidates=None, cas_candidates=None):
+        """
+        Treeview에서 '총합량' 열을 '영문명' 열 뒤, 'CAS No.' 열 앞에 위치시키는 유틸리티.
+        - treeview: ttk.Treeview 인스턴스
+        - total_candidates: 총합량 컬럼을 식별할 문자열 목록(컬럼 id 또는 헤더 텍스트 일부). 기본값 포함.
+        - en_candidates: 영문명 컬럼 식별 목록(기본값 포함)
+        - cas_candidates: CAS No. 컬럼 식별 목록(기본값 포함)
+        반환: True(성공적으로 이동) / False(대상 컬럼을 찾지 못함)
+        사용: app.move_total_between_en_and_cas(my_treeview)
+        """
+        try:
+            # 기본 후보 키워드
+            if total_candidates is None:
+                total_candidates = ['total', '총합', '총합량', '총량', 'total_amount', 'amount_total']
+            if en_candidates is None:
+                en_candidates = ['english', '영문', 'eng_name', 'english_name']
+            if cas_candidates is None:
+                cas_candidates = ['cas', 'cas no', 'cas_no', 'casno']
+
+            cols = list(treeview["columns"]) if treeview["columns"] else []
+
+            # helper: 컬럼 id 또는 heading 텍스트로 매칭
+            def find_col_by_candidates(candidates):
+                for c in cols:
+                    # 컬럼 id로 먼저 검사
+                    if any(k.lower() in str(c).lower() for k in candidates):
+                        return c
+                    # heading 텍스트 검사
+                    try:
+                        hdr = treeview.heading(c).get('text', '') or ''
+                        if any(k.lower() in str(hdr).lower() for k in candidates):
+                            return c
+                    except Exception:
+                        pass
+                # '#0' (tree column) 검사
+                try:
+                    hdr0 = treeview.heading('#0').get('text', '') or ''
+                    if any(k.lower() in str(hdr0).lower() for k in candidates):
+                        return '#0'
+                except Exception:
+                    pass
+                return None
+
+            en_col = find_col_by_candidates(en_candidates)
+            cas_col = find_col_by_candidates(cas_candidates)
+            total_col = find_col_by_candidates(total_candidates)
+
+            # 못 찾으면 실패
+            if not total_col or not en_col:
+                return False
+
+            # '#0'이 포함될 수 있으므로 처리: columns 튜플에는 '#0'이 없음 -> 별도 처리 필요
+            # 여기서는 '#0'이 총합량/영문명인 경우를 고려하되, 일반적인 컬럼 재배열은 columns 항목만 변경.
+            if total_col == '#0' or en_col == '#0' or cas_col == '#0':
+                # 단순한 케이스가 아니면 프레임 쪽에서 수동으로 처리하도록 False 반환
+                return False
+
+            # cols 리스트에서 total_col 제거 후 en_col 다음 위치로 삽입
+            if total_col in cols and en_col in cols:
+                cols.remove(total_col)
+                en_index = cols.index(en_col)
+                insert_index = en_index + 1
+                # 만약 cas_col 존재하면 그 앞에 들어가도록 보장
+                if cas_col in cols:
+                    cas_index = cols.index(cas_col)
+                    # insert_index가 cas_index보다 크면 cas_index 위치로 조정
+                    if insert_index > cas_index:
+                        insert_index = cas_index
+                cols.insert(insert_index, total_col)
+                # 재할당하여 순서 변경
+                treeview["columns"] = tuple(cols)
+                return True
+
+            return False
+        except Exception as e:
+            print(f"[경고] move_total_between_en_and_cas 실패: {e}")
+            return False
+
+    def reorder_treeview_columns_by_headers(self, treeview, desired_headers_order, match_partial=True):
+        """
+        Treeview 컬럼을 헤더 텍스트 기준으로 재배열합니다.
+        - treeview: ttk.Treeview 인스턴스
+        - desired_headers_order: 재배열할 헤더 문자열 목록(예: ['국문명','영문명','총함량(%)','cas no.','기능'])
+        - match_partial: True면 부분 일치 허용
+        반환: True/False (성공 여부)
+        사용: app.reorder_treeview_columns_by_headers(my_treeview, ['국문명','영문명','총함량(%)','cas no.','기능'])
+        """
+        try:
+            # 현재 컬럼 리스트 (('#0'은 columns에 없음))
+            cols = list(treeview["columns"]) if treeview["columns"] else []
+
+            # 컬럼 id와 heading 텍스트 매핑 수집
+            col_map = {}
+            for c in cols:
+                try:
+                    hdr = str(treeview.heading(c).get('text', '') or '')
+                except Exception:
+                    hdr = ''
+                col_map[c] = hdr
+
+            # '#0' 헤더도 검사 대상에 포함될 수 있으므로 따로 저장
+            root_hdr = ''
+            try:
+                root_hdr = str(treeview.heading('#0').get('text', '') or '')
+            except Exception:
+                root_hdr = ''
+
+            def normalize(s: str):
+                return ''.join(ch for ch in (s or '').lower() if ch.isalnum())
+
+            norm_map = {c: normalize(h) for c, h in col_map.items()}
+            norm_root = normalize(root_hdr)
+
+            new_order = []
+            used = set()
+
+            for desired in desired_headers_order:
+                nd = normalize(desired)
+                found = None
+                # 1) header 텍스트로 정확/부분 매칭
+                for c, nh in norm_map.items():
+                    if c in used:
+                        continue
+                    if (nh == nd) or (match_partial and nd in nh) or (match_partial and nh in nd):
+                        found = c
+                        break
+                # 2) '#0' 매칭 검사
+                if not found and norm_root:
+                    if (norm_root == nd) or (match_partial and nd in norm_root) or (match_partial and norm_root in nd):
+                        # '#0'는 columns 튜플에 포함되지 않으므로 무시하고 실패 처리
+                        # 프레임 쪽에서 '#0'을 컬럼으로 사용하면 별도 처리 필요
+                        found = None
+                if found:
+                    new_order.append(found)
+                    used.add(found)
+
+            # 나머지(사용되지 않은) 컬럼은 기존 순서대로 뒤에 붙인다.
+            for c in cols:
+                if c not in used:
+                    new_order.append(c)
+
+            # 유효성: 새 순서가 기존 columns와 같은 길이를 가지면 적용
+            if len(new_order) == len(cols) and tuple(new_order) != tuple(cols):
+                treeview["columns"] = tuple(new_order)
+                return True
+            # 길이가 다르거나 변경 없음이면 False 반환
+            return False
+        except Exception as e:
+            print(f"[경고] reorder_treeview_columns_by_headers 실패: {e}")
+            return False
+
+    def reorder_ingredient_sum_columns(self, treeview):
+        """
+        전성분 합계 탭(복합 전성분, 서류용) 전용 래퍼.
+        요청된 순서: [국문명, 영문명, 총함량(%), cas no., 기능]
+        """
+        desired = ['구분', '국문명', '영문명', '총함량(%)', 'cas no.', '기능']
+        res = self.reorder_treeview_columns_by_headers(treeview, desired, match_partial=True)
+        # 전성분 합계 탭은 항상 '구분'을 행 번호로 표시해야 하므로 강제 교정
+        try:
+            self.normalize_group_column_to_row_numbers(treeview, header_name='구분', force=True)
+        except Exception:
+            pass
+        return res
+
+    def normalize_group_column_to_row_numbers(self, treeview, header_name='구분', force=False):
+        """
+        '구분' 헤더(또는 지정한 header_name)에 들어있는 값이
+        "1,10,18,..." 처럼 쉼표로 연결된 ID 목록으로 보일 때,
+        각 행에 대해 해당 값을 해당 행의 순번(1-based)으로 대체합니다.
+
+        - treeview: ttk.Treeview 인스턴스
+        - header_name: 헤더 텍스트(부분일치 허용)
+        - force: True면 내용과 상관없이 모든 행을 해당 행 번호로 덮어씀
+        동작: 변경이 필요할 때만 수정. '#0' 컬럼(트리 텍스트)도 지원.
+        """
+        # 컬럼 id 찾기 (헤더 텍스트 기준, 부분 일치 허용)
+        cols = list(treeview["columns"]) if treeview["columns"] else []
+        target_col = None
+        header_norm = ''.join(ch for ch in (header_name or '').lower() if ch.isalnum())
+
+        # 먼저 columns에서 헤더 텍스트 매칭
+        for c in cols:
+            try:
+                hdr = str(treeview.heading(c).get('text', '') or '')
+            except Exception:
+                hdr = ''
+            nh = ''.join(ch for ch in hdr.lower() if ch.isalnum())
+            if header_norm in nh or nh in header_norm:
+                target_col = c
+                break
+
+        # '#0' 헤더도 가능성 검사
+        if not target_col:
+            try:
+                hdr0 = str(treeview.heading('#0').get('text', '') or '')
+                nh0 = ''.join(ch for ch in hdr0.lower() if ch.isalnum())
+                if header_norm in nh0 or nh0 in header_norm:
+                    target_col = '#0'
+            except Exception:
+                pass
+
+        if not target_col:
+            # 대상 컬럼을 찾지 못하면 아무 작업 안 함
+            return
+
+        # 값이 "숫자(,숫자...)" 형태인지 확인하는 정규식
+        listnum_re = re.compile(r'^\s*\d+(?:\s*,\s*\d+\s*)*$')
+
+        # 각 행 순회하며 필요 시 교정 (force=True면 무조건 교정)
+        for idx, iid in enumerate(treeview.get_children(), start=1):
+            try:
+                if target_col == '#0':
+                    cur = str(treeview.item(iid).get('text', '') or '')
+                else:
+                    cur = str(treeview.set(iid, target_col) or '')
+            except Exception:
+                cur = ''
+
+            need_replace = force or (cur and listnum_re.match(cur))
+            if need_replace:
+                new_val = str(idx)
+                if target_col == '#0':
+                    try:
+                        treeview.item(iid, text=new_val)
+                    except Exception:
+                        pass
+                else:
+                    # 시도 1: set 사용
+                    try:
+                        treeview.set(iid, target_col, new_val)
+                        continue
+                    except Exception:
+                        pass
+                    # 시도 2: item values로 재설정
+                    try:
+                        vals = list(treeview.item(iid).get('values', ()))
+                        col_index = cols.index(target_col) if target_col in cols else None
+                        if col_index is not None:
+                            # 확장 필요 시 빈값으로 채움
+                            while len(vals) <= col_index:
+                                vals.append('')
+                            vals[col_index] = new_val
+                            treeview.item(iid, values=tuple(vals))
+                    except Exception:
+                        pass
+        return
+
     def logout(self):
         print(f"{datetime.now()}: logout 호출")
 
@@ -480,53 +798,116 @@ class App(ctk.CTk):
         마우스 커서가 위치한 모니터의 중앙에 창을 배치하고 크기를 조절합니다.
         멀티 모니터 환경에서 각기 다른 해상도를 지원합니다.
         """
-        print(f"{datetime.now()}: center_on_mouse_screen 호출")
         self.update_idletasks()
 
-        # 마우스 커서의 현재 위치를 가져옵니다.
+        # 마우스 커서의 현재 위치를 가져와서 해당 모니터의 정보를 얻습니다.
         pointer_x = self.winfo_pointerx()
         pointer_y = self.winfo_pointery()
 
-        # 마우스 위치를 기반으로 현재 모니터의 정보를 가져옵니다.
-        # geometry()는 'widthxheight+x+y' 형식의 문자열을 반환합니다.
-        # 이 정보는 창이 위치할 모니터의 크기와 위치를 나타냅니다.
-        # Tkinter는 이 메서드를 호출할 때 가장 적합한 모니터 정보를 자동으로 찾습니다.
-        geom = self.winfo_geometry()
-        self.geometry(f'1x1+{pointer_x}+{pointer_y}') # 임시로 창을 마우스 위치로 이동시켜 올바른 모니터 감지
+        # 창을 임시로 마우스 위치에 옮겨서 해당 모니터의 정보를 얻습니다.
+        self.geometry(f'+{pointer_x}+{pointer_y}')
         self.update_idletasks()
         
-        # 마우스가 있는 모니터의 너비와 높이를 가져옵니다.
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        
-        # 모니터의 작업 영역(작업 표시줄 제외)을 고려하여 위치를 계산합니다.
-        screen_x = self.winfo_screenmmwidth() # 이 값은 실제 좌표가 아니므로 사용하지 않음
-        screen_y = self.winfo_screenmmheight() # 이 값은 실제 좌표가 아니므로 사용하지 않음
 
-        width = int(screen_width * 0.9)
-        height = int(screen_height * 0.9)
+        # [수정] 창 크기를 화면 크기에 비례하여 설정
+        width = int(screen_width * 0.85)
+        height = int(screen_height * 0.7) # [수정] 높이를 1/3 줄여서 60%로 설정
+
+        # [수정] 모니터의 중앙에 위치하도록 좌표 계산
         x = (screen_width // 2) - (width // 2)
         y = (screen_height // 2) - (height // 2)
-        
-        self.geometry(f"{width}x{height}+{x}+{y}") # 최종 크기와 위치 설정
+
+        # [수정] 크기와 위치를 한 번에 설정하여 정확도를 높입니다.
+        self.geometry(f"{width}x{height}+{x}+{y}")
         self.minsize(int(screen_width * 0.6), int(screen_height * 0.6))
 
     def recreate_main_ui(self):
         """메인 UI를 재생성하여 언어 변경 등을 반영합니다."""
-        # 기존 메인 UI 위젯들 제거
+        # ACTION_CONFIG와 같은 동적 설정을 다시 생성하기 위해 기존 UI 위젯을 먼저 제거합니다.
         for widget in self.winfo_children():
             widget.destroy()
-        
-        # 메인 UI 재생성
+
+        # 언어 설정에 따라 번역 텍스트를 다시 로드합니다.
+        self.texts = get_texts(self.language)
+
+        # 최근 활동 기록은 유지되어야 하므로 그대로 둡니다.
+        # self.recent_actions.clear() # 기존 기록을 유지해야 하므로 주석 처리
+
+        # 메인 UI를 새로운 설정으로 다시 설정합니다.
         self.setup_main_ui()
         self.update_treeview_style()
+        # 기존 메인 UI 위젯들 제거
+
+    def start_db_sync_check(self):
+        """공유 DB의 변경 사항을 주기적으로 확인하는 타이머를 시작합니다."""
+        # 30초마다 check_shared_db 함수를 호출
+        self.check_shared_db()
+        self.db_sync_timer = self.after(30000, self.start_db_sync_check)
+
+    def stop_db_sync_check(self):
+        """DB 동기화 검사 타이머를 중지합니다."""
+        if self.db_sync_timer:
+            self.after_cancel(self.db_sync_timer)
+            self.db_sync_timer = None
+
+    def check_shared_db(self):
+        """공유 DB 파일의 상태를 확인하고, 변경 시 업데이트를 제안합니다."""
+        config = configparser.ConfigParser()
+        config.read(CONFIG_FILE_PATH, encoding='utf-8')
+        shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+
+        if not shared_db_path or not os.path.exists(shared_db_path):
+            return # 공유 경로가 설정되지 않았거나 존재하지 않으면 중단
+
+        try:
+            # 공유 DB 파일의 정보 가져오기
+            shared_db_stat = os.stat(shared_db_path)
+            current_db_info = (shared_db_stat.st_size, shared_db_stat.st_mtime)
+
+            # 처음 확인하는 경우, 현재 상태를 저장만 함
+            if self.last_shared_db_info == (0, 0):
+                self.last_shared_db_info = current_db_info
+                return
+
+            # 이전 정보와 다를 경우, 변경된 것으로 간주
+            if self.last_shared_db_info != current_db_info:
+                print("공유 DB 변경 감지! 업데이트 제안")
+                self.last_shared_db_info = current_db_info # 다음 비교를 위해 최신 정보로 업데이트
+
+                if messagebox.askyesno("데이터베이스 업데이트", "다른 사용자가 데이터를 업데이트했습니다.\n최신 데이터로 동기화하시겠습니까?\n\n(프로그램이 재시작됩니다.)"):
+                    self.sync_with_shared_db(shared_db_path)
+
+        except (FileNotFoundError, OSError):
+            # 공유 DB 파일이 없거나 접근 권한 문제 등으로 오류 발생 시 무시
+            pass
+        except Exception as e:
+            print(f"[경고] 공유 DB 확인 중 오류 발생: {e}")
+
+    def sync_with_shared_db(self, shared_db_path):
+        """공유 DB 파일을 로컬 DB로 복사하고 프로그램을 재시작합니다."""
+        import shutil
+        local_db_path = os.path.join(application_path, db_manager.get_db_relative_path(), "cosmetic.db")
+        
+        try:
+            db_manager.dispose_engine() # DB 연결 해제
+            shutil.copy(shared_db_path, local_db_path) # 파일 복사
+            self.restart_program() # 프로그램 재시작
+        except Exception as e:
+            messagebox.showerror("동기화 오류", f"데이터베이스 동기화 중 오류가 발생했습니다: {e}")
 
     def restart_program(self):
         """프로그램을 재시작합니다."""
-        print("프로그램 재시작...")
-        self.destroy() # 현재 창 닫기
-        # 새 프로세스로 현재 스크립트 다시 실행
-        os.execv(sys.executable, ['python'] + sys.argv)
+        try:
+            print("프로그램 재시작...")
+            self.destroy()  # 현재 창 닫기
+
+            # 현재 실행 파일 경로와 인자들을 사용하여 새 프로세스 시작
+            # sys.executable은 python.exe 또는 빌드된 .exe 파일의 경로
+            subprocess.Popen([sys.executable] + sys.argv)
+        except Exception as e:
+            print(f"프로그램 재시작 실패: {e}")
 
 # --- 변경: get_texts에 안전한 기본값 주입용 래퍼 추가 ---
 # 기존 get_texts를 보존한 뒤, 누락된 키가 있으면 언어에 맞는 기본 문자열을 삽입합니다.

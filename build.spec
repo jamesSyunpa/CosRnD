@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+ # -*- mode: python ; coding: utf-8 -*-
 
 import os
 import sys
@@ -15,18 +15,30 @@ datas = collect_data_files('customtkinter')
 # --- 숨겨진 import 추가 ---
 # PyInstaller가 자동으로 찾지 못할 수 있는 모듈들을 명시적으로 추가합니다.
 hiddenimports = [
-    'babel.numbers',
+    'babel.numbers', 'babel.dates',
     'sqlalchemy.sql.default_comparator',
-    'pkg_resources.py2_warn',
-    'PIL', # Pillow 라이브러리
-    'tkcalendar' # tkcalendar 라이브러리 (main.py에서 사용될 가능성)
+    # SQLAlchemy dialects
+    'sqlalchemy.dialects.sqlite',
+    'sqlalchemy.dialects.mysql',
+    'sqlalchemy.dialects.postgresql',
+    # Pillow and tkcalendar
+    'PIL', 'PIL._tkinter_finder', 'tkcalendar',
+    # Pandas and openpyxl dependencies
+    'pandas', 'openpyxl', 'openpyxl.cell.cell',
+    # Other potential hidden imports
+    'pkg_resources.py2_warn'
 ]
 
 a = Analysis(
     ['main.py'],
-    pathex=[project_root],
+    pathex=[
+        project_root,
+        os.path.join(project_root, 'modules'),
+        os.path.join(project_root, 'database'),
+        os.path.join(project_root, 'utils')
+    ],
     binaries=[],
-    datas=datas,
+    datas=collect_data_files('customtkinter'),
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -60,14 +72,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='icon.ico'
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='RnD_Management_System'
 )

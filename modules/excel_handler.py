@@ -11,6 +11,23 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_FILE_PATH = os.path.join(PROJECT_ROOT, 'config.ini')
 
+def _get_display_length(text):
+    """Calculate display length of a string, considering East Asian characters."""
+    if not text:
+        return 0
+    text = str(text)
+    length = 0
+    # East Asian characters (Hangul, Japanese, Chinese) are wider.
+    for char in text:
+        if '\uac00' <= char <= '\uD7A3' or \
+           '\u3040' <= char <= '\u309F' or \
+           '\u30a0' <= char <= '\u30FF' or \
+           '\u4E00' <= char <= '\u9FFF':
+            length += 2
+        else:
+            length += 1
+    return length
+
 def get_excel_path():
     """config.ini에서 엑셀 기본 경로를 읽어옵니다."""
     config = configparser.ConfigParser()
@@ -201,12 +218,54 @@ def export_data_to_excel(headers, data_rows, default_filename="export.xlsx"):
 
     save_excel_path(os.path.dirname(file_path))
 
+    # --- 스타일 정의 ---
+    thin_border = Border(left=Side(style='thin'), 
+                         right=Side(style='thin'), 
+                         top=Side(style='thin'), 
+                         bottom=Side(style='thin'))
+    header_font = Font(name='맑은 고딕', size=11, bold=True)
+    default_font = Font(name='맑은 고딕', size=10)
+    center_align = Alignment(horizontal='center', vertical='center')
+    left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
     try:
         workbook = Workbook()
         sheet = workbook.active
-        sheet.append(headers)
-        for row in data_rows:
-            sheet.append(row)
+
+        # 헤더 쓰기 및 스타일 적용
+        for col_idx, header_text in enumerate(headers, 1):
+            cell = sheet.cell(row=1, column=col_idx, value=header_text)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = thin_border
+
+        # 데이터 쓰기 및 스타일 적용
+        for row_idx, row in enumerate(data_rows, 2):
+            for col_idx, cell_value in enumerate(row, 1):
+                cell = sheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                cell.font = default_font
+                cell.border = thin_border
+                cell.alignment = left_align
+
+        # 컬럼 너비 자동 조절
+        for col in sheet.columns:
+            max_length = 0
+            safe_cell = next((c for c in col if not isinstance(c, openpyxl.cell.cell.MergedCell)), None)
+            if not safe_cell:
+                continue
+            column_letter = safe_cell.column_letter
+            for cell in col:
+                if cell.value:
+                    # _get_display_length 함수를 사용하여 한글/영문 길이를 고려
+                    length = _get_display_length(cell.value)
+                    if length > max_length:
+                        max_length = length
+            adjusted_width = max_length + 2
+            if adjusted_width > 5:
+                sheet.column_dimensions[column_letter].width = adjusted_width
+
         workbook.save(file_path)
         messagebox.showinfo("성공", f"데이터가 '{file_path}'에 저장되었습니다.")
     except Exception as e:
@@ -228,14 +287,60 @@ def export_multisheet_data_to_excel(sheets_data, default_filename="export.xlsx")
 
     save_excel_path(os.path.dirname(file_path))
 
+    # --- 스타일 정의 ---
+    thin_border = Border(left=Side(style='thin'), 
+                         right=Side(style='thin'), 
+                         top=Side(style='thin'), 
+                         bottom=Side(style='thin'))
+    header_font = Font(name='맑은 고딕', size=11, bold=True)
+    default_font = Font(name='맑은 고딕', size=10)
+    center_align = Alignment(horizontal='center', vertical='center')
+    left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
     try:
         workbook = Workbook()
         workbook.remove(workbook.active)
         for sheet_name, sheet_content in sheets_data.items():
             sheet = workbook.create_sheet(title=sheet_name)
-            sheet.append(sheet_content['headers'])
-            for row in sheet_content['data']:
-                sheet.append(row)
+            headers = sheet_content.get('headers', [])
+            data_rows = sheet_content.get('data', [])
+            apply_style = sheet_content.get('style', False)
+
+            # 헤더 쓰기 및 스타일 적용
+            for col_idx, header_text in enumerate(headers, 1):
+                cell = sheet.cell(row=1, column=col_idx, value=header_text)
+                if apply_style:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = center_align
+                    cell.border = thin_border
+
+            # 데이터 쓰기 및 스타일 적용
+            for row_idx, row in enumerate(data_rows, 2):
+                for col_idx, cell_value in enumerate(row, 1):
+                    cell = sheet.cell(row=row_idx, column=col_idx, value=cell_value)
+                    if apply_style:
+                        cell.font = default_font
+                        cell.border = thin_border
+                        cell.alignment = left_align
+
+            # 컬럼 너비 자동 조절
+            for column_cells in sheet.columns:
+                max_length = 0
+                safe_cell = next((c for c in column_cells if not isinstance(c, openpyxl.cell.cell.MergedCell)), None)
+                if not safe_cell:
+                    continue
+                column_letter = safe_cell.column_letter
+                for cell in column_cells:
+                    if cell.value is not None:
+                        length = _get_display_length(cell.value)
+                        if length > max_length:
+                            max_length = length
+                adjusted_width = max_length + 2
+                if adjusted_width > 5: # 최소 너비
+                    sheet.column_dimensions[column_letter].width = adjusted_width
+
         workbook.save(file_path)
         messagebox.showinfo("성공", f"데이터가 '{file_path}'에 저장되었습니다.")
     except Exception as e:
@@ -358,12 +463,15 @@ def export_formulation_template(formulation_data, default_filename="formulation.
             row_idx = 4
             if is_target_sheet:
                 info_layout = [
-                    ("타겟 샘플명", sheet_details.get("타겟 샘플명")), ("타겟 거래처", sheet_details.get("타겟 거래처")),
+                    ("타겟 샘플명", sheet_details.get("타겟 샘플명")),
+                    ("타겟 거래처", sheet_details.get("타겟 거래처")),
                 ]
             else:
                 info_layout = [
-                    ("실험품명", sheet_details.get("실험품명")), ("실험년월일", sheet_details.get("실험년월일")),
-                    ("담당자", sheet_details.get("담당자")), ("거래처", sheet_details.get("거래처")),
+                    ("실험품명", sheet_details.get("실험품명")),
+                    ("실험년월일", sheet_details.get("실험년월일")),
+                    ("담당자", sheet_details.get("담당자")),
+                    ("거래처", sheet_details.get("거래처")),
                     ("LAB NO.", str(sheet_details.get("LAB NO.") or "").upper()), ("차수", str(sheet_details.get("차수") or "").upper()),
                     ("담당번호", str(sheet_details.get("담당번호") or "").upper()), ("총 실험량", sheet_details.get("총 실험량")),
                 ]
@@ -537,7 +645,21 @@ def export_formulation_template(formulation_data, default_filename="formulation.
                         if hasattr(col_dim, 'max_len'):
                             col_dim.width = col_dim.max_len + 5
                 else:
-                    set_column_widths_for_sheet(sheet)
+                    # 컬럼 너비 자동 조절 (개선된 로직)
+                    for column_cells in sheet.columns:
+                        max_length = 0
+                        safe_cell = next((c for c in column_cells if not isinstance(c, openpyxl.cell.cell.MergedCell)), None)
+                        if not safe_cell:
+                            continue
+                        column_letter = safe_cell.column_letter
+                        for cell in column_cells:
+                            if cell.value is not None:
+                                length = _get_display_length(cell.value)
+                                if length > max_length:
+                                    max_length = length
+                        adjusted_width = max_length + 2
+                        if adjusted_width > 2:
+                            sheet.column_dimensions[column_letter].width = adjusted_width
 
         details = formulation_data.get("details", {}); items = formulation_data.get("items", [])
         target_details = formulation_data.get("target_details")
@@ -722,14 +844,6 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
         header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
         total_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
 
-        # --- 컬럼 너비 설정 (수정) ---
-        sheet.column_dimensions['A'].width = 10 # 구분
-        sheet.column_dimensions['B'].width = 15 # 코드
-        sheet.column_dimensions['C'].width = 40 # 원료명
-        sheet.column_dimensions['D'].width = 15 # 함량
-        sheet.column_dimensions['E'].width = 18 # 단가
-        sheet.column_dimensions['F'].width = 20 # 원가
-
         # --- 문서 제목 및 결재란 ---
         sheet.merge_cells('A1:C2') # 제목이 더 넓은 공간을 차지하도록 수정
         title_cell = sheet['A1']
@@ -800,6 +914,22 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
             value_cell.font = total_font; value_cell.alignment = right_align; value_cell.number_format = '#,##0.00'
             row_idx += 1
 
+        # --- 컬럼 너비 자동 조절 ---
+        for column_cells in sheet.columns:
+            max_length = 0
+            safe_cell = next((c for c in column_cells if not isinstance(c, openpyxl.cell.cell.MergedCell)), None)
+            if not safe_cell:
+                continue
+            column_letter = safe_cell.column_letter
+            for cell in column_cells:
+                if cell.value is not None:
+                    length = _get_display_length(cell.value)
+                    if length > max_length:
+                        max_length = length
+            adjusted_width = max_length + 2
+            if adjusted_width > 2:
+                sheet.column_dimensions[column_letter].width = adjusted_width
+
         wb.save(file_path)
         messagebox.showinfo("성공", f"견적서가 '{file_path}'에 저장되었습니다.")
     except Exception as e:
@@ -844,6 +974,7 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
             if content_type == 'table':
                 headers = content.get('headers', [])
                 data_rows = content.get('data', [])
+                number_formats = content.get('number_formats', {})
                 
                 # 헤더 쓰기
                 for col_idx, header_text in enumerate(headers, 1): # noqa
@@ -874,8 +1005,19 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
                         cell = sheet.cell(row=row_idx, column=col_idx)
                         header_text = headers[col_idx - 1] # 0-based index for headers
 
-                        # '함량' 또는 '%'가 포함된 헤더의 열은 숫자로 변환 시도
-                        if '함량' in header_text or '%' in header_text:
+                        # 숫자 형식 적용 대상인지 확인
+                        num_format = number_formats.get(header_text)
+                        if num_format:
+                            # [수정] 빈 문자열이나 None일 경우를 안전하게 처리
+                            if cell_value is None or cell_value == '':
+                                cell.value = None # 빈 셀로 남겨둠
+                            else:
+                                try:
+                                    cell.value = float(cell_value)
+                                except (ValueError, TypeError):
+                                    cell.value = cell_value # 변환 실패 시 원본 값 유지
+                            cell.number_format = num_format
+                        elif '함량' in header_text or '%' in header_text:
                             converted_value = try_convert_to_float(cell_value)
                             cell.value = converted_value
                         else:
@@ -891,6 +1033,23 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
                                 cell.alignment = right_align
                             else: # noqa
                                 cell.alignment = left_align
+                
+                # 컬럼 너비 자동 조절 (개선된 로직)
+                for column_cells in sheet.columns:
+                    max_length = 0
+                    safe_cell = next((c for c in column_cells if not isinstance(c, openpyxl.cell.cell.MergedCell)), None)
+                    if not safe_cell:
+                        continue
+                    column_letter = safe_cell.column_letter
+                    for cell in column_cells:
+                        if cell.value is not None:
+                            length = _get_display_length(cell.value)
+                            if length > max_length:
+                                max_length = length
+                    
+                    adjusted_width = (max_length + 2)
+                    if adjusted_width > 2:
+                        sheet.column_dimensions[column_letter].width = adjusted_width
                 
                 # --- 셀 병합 로직 추가 (원료별 목록 시트에만 적용) ---
                 if sheet_name == "원료별 목록":
@@ -933,27 +1092,6 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
                         # 병합에 실패하더라도 데이터는 그대로 기록되도록 계속 진행
                 # --- 셀 병합 로직 종료 ---
 
-                # 컬럼 너비 자동 조절
-                for col in sheet.columns:
-                    max_length = 0
-                    column = col[0].column_letter
-                    for cell in col:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = (max_length + 2)
-                    sheet.column_dimensions[column].width = adjusted_width
-
-            elif content_type == 'text':
-                # 이 로직은 이제 '디자인용 전성분' 시트에서는 사용되지 않지만,
-                # 다른 텍스트 타입의 시트를 위해 유지합니다.
-                sheet['A1'].value = content
-                sheet['A1'].font = default_font
-                sheet['A1'].alignment = Alignment(wrap_text=True, vertical='top')
-                sheet.column_dimensions['A'].width = 100
-
         # '디자인용 전성분' 시트에 대한 특별 스타일링
         if "디자인용 전성분" in wb.sheetnames:
             sheet = wb["디자인용 전성분"]
@@ -965,6 +1103,18 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
                 row[0].alignment = left_align
                 row[1].font = default_font # 전성분 목록
                 row[1].alignment = Alignment(wrap_text=True, vertical='top')
+            # 자동 너비 조절 적용
+            for column_cells in sheet.columns:
+                max_length = 0
+                safe_cell = next((c for c in column_cells if not isinstance(c, openpyxl.cell.cell.MergedCell)), None)
+                if not safe_cell:
+                    continue
+                column_letter = safe_cell.column_letter
+                for cell in column_cells:
+                    if cell.value is not None:
+                        length = _get_display_length(cell.value)
+                        if length > max_length: max_length = length
+                sheet.column_dimensions[column_letter].width = max_length + 2
             sheet.column_dimensions['B'].width = 100
 
         wb.save(file_path)

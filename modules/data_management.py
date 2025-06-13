@@ -11,6 +11,7 @@ from datetime import datetime # noqa
 from modules.ui_components import HelpPopup
 from modules.history_popup import HistoryPopup
 from modules.translation import get_texts
+import traceback  # 상단에 추가
 
 class DataManagementFrame(ctk.CTkFrame):
     def __init__(self, master, current_user, app, language="korean"):
@@ -18,7 +19,7 @@ class DataManagementFrame(ctk.CTkFrame):
         self.current_user = current_user
         self.app = app
         self.language = language
-        self.client_search_timer = None # 거래처 검색 디바운싱 타이머
+        self.client_search_timer = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -44,25 +45,23 @@ class DataManagementFrame(ctk.CTkFrame):
 
         # 도움말 버튼
         self.texts = get_texts(self.language)
-        self.help_button = ctk.CTkButton(top_frame, text=self.texts['help'], width=80, command=self.show_help)
-        self.help_button.place(relx=0.98, y=10, anchor="ne")
 
-        # --- 언어별 텍스트 ---
-        texts = {
-            "korean": {"ingredient": "성분 관리", "client": "거래처 관리", "user": "회원 관리"},
-            "english": {"ingredient": "Ingredient Mgt.", "client": "Client Mgt.", "user": "User Mgt."}
+        # --- 변경: 탭 텍스트를 texts에서 가져오되 기본값 지정 ---
+        tab_texts = {
+            "ingredient": self.texts.get("ingredient", "성분 관리"),
+            "client": self.texts.get("client_mgt", "거래처 관리"),  # client -> client_mgt로 변경
+            "user": self.texts.get("user", "회원 관리")
         }
-        current_texts = texts[self.language]
 
-        self.tab_view.add(current_texts["ingredient"])
-        self.setup_material_management_tab(self.tab_view.tab(current_texts["ingredient"]))
+        self.tab_view.add(tab_texts["ingredient"])
+        self.setup_material_management_tab(self.tab_view.tab(tab_texts["ingredient"]))
 
         # 관리자일 경우에만 거래처 및 회원 관리 탭 추가
         if self.current_user.is_admin:
-            self.tab_view.add(current_texts["client"])
-            self.tab_view.add(current_texts["user"])
-            self.setup_client_management_tab(self.tab_view.tab(current_texts["client"]))
-            self.setup_user_management_tab(self.tab_view.tab(current_texts["user"]))
+            self.tab_view.add(tab_texts["client"])
+            self.tab_view.add(tab_texts["user"])
+            self.setup_client_management_tab(self.tab_view.tab(tab_texts["client"]))
+            self.setup_user_management_tab(self.tab_view.tab(tab_texts["user"]))
 
     def show_help(self):
         """데이터 관리 도움말을 표시합니다."""
@@ -98,11 +97,13 @@ class DataManagementFrame(ctk.CTkFrame):
         material_frame.grid(row=0, column=0, sticky="nsew") # MaterialManagementFrame needs language
 
     def setup_user_management_tab(self, tab_frame):
-        tab_frame.grid_columnconfigure(1, weight=1)
+        tab_frame.grid_columnconfigure(0, weight=0, minsize=500) # 좌측 폼 (고정 너비)
+        tab_frame.grid_columnconfigure(1, weight=1) # 우측 리스트 (가변 너비)
         tab_frame.grid_rowconfigure(0, weight=1)
 
         user_form_frame = ctk.CTkFrame(tab_frame)
-        user_form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ns")
+        user_form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        user_form_frame.grid_columnconfigure(1, weight=1) # 입력 필드가 너비를 채우도록 설정
         
         form_label = ctk.CTkLabel(user_form_frame, text=self.texts['user_info'], font=ctk.CTkFont(size=14, weight="bold"))
         form_label.grid(row=0, column=0, columnspan=2, pady=(10, 20))
@@ -112,7 +113,7 @@ class DataManagementFrame(ctk.CTkFrame):
         current_row = 1
         for key, label_text in user_labels.items():
             ctk.CTkLabel(user_form_frame, text=label_text).grid(row=current_row, column=0, padx=10, pady=5, sticky="w")
-            entry = ctk.CTkEntry(user_form_frame, width=200)
+            entry = ctk.CTkEntry(user_form_frame) # 고정 너비 제거
             entry.grid(row=current_row, column=1, padx=10, pady=5, sticky="ew")
             if key == "password":
                 entry.configure(show="*")
@@ -158,14 +159,15 @@ class DataManagementFrame(ctk.CTkFrame):
         user_excel_frame.grid(row=0, column=3, sticky="e")
         ctk.CTkButton(user_excel_frame, text=self.texts['export_data'], command=self.export_user_data).pack(side="left", padx=5)
         self.user_import_button = ctk.CTkButton(user_excel_frame, text=self.texts['import_data'], command=self.import_user_data)
-        self.user_import_button.pack(side="left", padx=5)
 
         if not self.current_user.is_admin:
             self.user_save_button.configure(state="disabled")
             self.user_new_button.configure(state="disabled")
             self.user_delete_button.configure(state="disabled")
             is_admin_check.configure(state="disabled")
-            self.user_import_button.configure(state="disabled")
+        else:
+            # 관리자일 때만 가져오기 버튼 표시
+            self.user_import_button.pack(side="left", padx=5)
 
         user_tree_columns = self.texts['user_tree_columns']
         user_column_ids = [k for k in user_tree_columns if k != 'id']
@@ -185,31 +187,37 @@ class DataManagementFrame(ctk.CTkFrame):
         self.load_users()
 
     def setup_client_management_tab(self, tab_frame):
-        tab_frame.grid_columnconfigure(1, weight=1)
+        tab_frame.grid_columnconfigure(0, weight=0, minsize=500) # 좌측 폼 (고정 너비)
+        tab_frame.grid_columnconfigure(1, weight=1) # 우측 리스트 (가변 너비)
         tab_frame.grid_rowconfigure(0, weight=1)
 
-        form_frame = ctk.CTkFrame(tab_frame)
-        form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ns")
+        # 스크롤 가능한 프레임을 생성하여 모든 위젯을 담습니다.
+        scrollable_frame = ctk.CTkScrollableFrame(tab_frame, fg_color="transparent")
+        scrollable_frame.grid(row=0, column=0, padx=(10, 0), pady=10, sticky="nsew")
+
+        form_frame = ctk.CTkFrame(scrollable_frame)
+        form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        form_frame.grid_columnconfigure(1, weight=1) # 입력 필드가 너비를 채우도록 설정
         
         form_label = ctk.CTkLabel(form_frame, text=self.texts['client_info'], font=ctk.CTkFont(size=14, weight="bold"))
         form_label.grid(row=2, column=0, columnspan=2, pady=(20, 10))
 
         # 거래처 유형 필드 추가
         ctk.CTkLabel(form_frame, text=self.texts['client_type']).grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.client_type_combobox = ctk.CTkComboBox(form_frame, values=self.texts['client_type_values'], width=200)
-        self.client_type_combobox.grid(row=3, column=1, padx=10, pady=5)
+        self.client_type_combobox = ctk.CTkComboBox(form_frame, values=self.texts['client_type_values']) # noqa
+        self.client_type_combobox.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
         labels = self.texts['client_labels']
         self.client_entries = {}
         for i, (key, label_text) in enumerate(labels.items()):
             label = ctk.CTkLabel(form_frame, text=label_text)
             label.grid(row=i+4, column=0, padx=10, pady=5, sticky="w")
-            entry = ctk.CTkEntry(form_frame, width=200)
-            entry.grid(row=i+4, column=1, padx=10, pady=5)
+            entry = ctk.CTkEntry(form_frame) # 고정 너비 제거
+            entry.grid(row=i+4, column=1, padx=10, pady=5, sticky="ew")
             self.client_entries[key] = entry
 
         self.is_active_var = ctk.StringVar(value="on")
-        ctk.CTkCheckBox(form_frame, text=self.texts['is_active'], variable=self.is_active_var, onvalue="on", offvalue="off").grid(row=len(labels)+4, column=1, padx=10, pady=10, sticky="e")
+        ctk.CTkCheckBox(form_frame, text=self.texts['is_active'], variable=self.is_active_var, onvalue="on", offvalue="off").grid(row=len(labels)+4, column=1, padx=10, pady=10, sticky="e") # noqa
         
         current_row = len(labels) + 5
         self.client_history_button = ctk.CTkButton(form_frame, text=self.texts['view_selected_history'], command=self.show_selected_client_history, state="disabled")
@@ -254,17 +262,26 @@ class DataManagementFrame(ctk.CTkFrame):
 
         ctk.CTkButton(client_excel_frame, text=self.texts['export_data'], command=self.export_client_data).pack(side="left", padx=5)
         self.client_import_button = ctk.CTkButton(client_excel_frame, text=self.texts['import_data'], command=self.import_client_data)
-        self.client_import_button.pack(side="left", padx=5)
 
         if not self.current_user.is_admin:
             self.client_save_button.configure(state="disabled")
             self.client_new_button.configure(state="disabled")
             self.client_delete_button.configure(state="disabled")
-            self.client_import_button.configure(state="disabled")
+        else:
+            # 관리자일 때만 가져오기 버튼 표시
+            self.client_import_button.pack(side="left", padx=5)
 
         tree_columns = self.texts['client_tree_columns']
         client_column_ids = [k for k in tree_columns if k != 'id']
-        self.client_tree = ttk.Treeview(list_frame, columns=client_column_ids, show="headings", selectmode="browse")
+        # 구분 컬럼을 포함한 전체 컬럼 리스트 생성
+        all_columns = ['division'] + client_column_ids
+        self.client_tree = ttk.Treeview(list_frame, columns=all_columns, show="headings", selectmode="browse")
+        
+        # 구분 컬럼 설정 (맨 앞에 추가)
+        self.client_tree.heading("division", text="구분")
+        self.client_tree.column("division", width=60, anchor="center")
+        
+        # 기존 컬럼들 설정
         self.client_tree.heading("type", text=tree_columns['type']); self.client_tree.column("type", width=80, anchor="center") # noqa
         self.client_tree.heading("code", text=tree_columns['code']); self.client_tree.column("code", width=120) # noqa
         self.client_tree.heading("name", text=tree_columns['name']); self.client_tree.column("name", width=150) # noqa
@@ -610,7 +627,8 @@ class DataManagementFrame(ctk.CTkFrame):
         for i, client in enumerate(clients):
             active_status = "Y" if client.is_active else "N"
             tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-            self.client_tree.insert("", "end", iid=client.id, tags=(tag,), values=( # iid에 client.id 할당
+            self.client_tree.insert("", "end", iid=client.id, tags=(tag,), values=(
+                str(i + 1),  # 구분 번호
                 client.client_type, 
                 client.business_number,
                 client.name,
@@ -824,3 +842,55 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("정보", "조회할 거래처가 없습니다.", parent=self)
             return
         HistoryPopup(self, "전체 거래처 변경 이력", all_clients, item_name_key='name', item_code_key='business_number')
+
+    def load_client_data(self):
+        """거래처 데이터를 로드하고 표시합니다."""
+        try:
+            # 수정: 명확한 컬럼 지정과 중복 방지를 위한 쿼리
+            query = """
+                SELECT 
+                    c.id,
+                    c.name,
+                    c.contact_person,
+                    c.phone,
+                    c.email,
+                    c.address,
+                    c.website,
+                    c.notes,
+                    GROUP_CONCAT(DISTINCT i.name) as ingredients
+                FROM clients c
+                LEFT JOIN ingredients i ON i.supplier_id = c.id
+                GROUP BY 
+                    c.id, c.name, c.contact_person, 
+                    c.phone, c.email, c.address, 
+                    c.website, c.notes
+                ORDER BY c.name
+            """
+            
+            results = db_manager.execute_query(query)
+            
+            # 결과 검증
+            if results:
+                print(f"거래처 데이터 로드: {len(results)}개 항목")
+                for idx, row in enumerate(results[:3]):  # 처음 3개 항목만 로깅
+                    print(f"Sample {idx+1}: {row}")
+            
+            self.client_tree.delete(*self.client_tree.get_children())
+            
+            for row in results:
+                values = [
+                    row['name'],
+                    row['contact_person'] or "",
+                    row['phone'] or "",
+                    row['email'] or "",
+                    row['address'] or "",
+                    row['website'] or "",
+                    row['notes'] or "",
+                    row['ingredients'] or ""
+                ]
+                self.client_tree.insert('', 'end', text=str(row['id']), values=values)
+                
+            # 결과 검증을 위한 카운트 출력
+            print(f"Treeview에 추가된 항목 수: {len(self.client_tree.get_children())}")
+        except Exception as e:
+            print(f"거래처 데이터 로드 실패: {e}\n{traceback.format_exc()}")

@@ -67,9 +67,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
         """원료 데이터 관리 UI를 설정합니다."""
 
         # ===== 탭 전체 그리드 구조 =====
-        tab_frame.grid_columnconfigure(0, weight=1, minsize=450)  # 좌측 폼
-        tab_frame.grid_columnconfigure(1, weight=0)               # 가운데 조절바
-        tab_frame.grid_columnconfigure(2, weight=2, minsize=750)  # 우측 리스트 (버튼 잘림 방지를 위해 최소 너비 증가)
+        tab_frame.grid_columnconfigure(0, weight=0, minsize=500)  # 좌측 폼 (고정 너비 영역)
+        tab_frame.grid_columnconfigure(1, weight=0)  # 가운데 조절바
+        tab_frame.grid_columnconfigure(2, weight=1)  # 우측 리스트 (가변 너비)
         tab_frame.grid_rowconfigure(0, weight=1)
 
         # ===== 좌측: 원료 입력 폼 =====
@@ -78,14 +78,14 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.form_container.grid_columnconfigure(0, weight=0)
         self.form_container.grid_columnconfigure(1, weight=1)  # 입력 필드 가변
 
-        material_labels = ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "등록일"]
+        material_labels = ["코드", "원료명", "단가", "포장단위", "공급처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "등록일"]
         self.material_entries = {}
         for i, text in enumerate(material_labels):
             ctk.CTkLabel(self.form_container, text=text).grid(row=i, column=0, padx=10, pady=5, sticky="w")
-            if text == "거래처":
-                self.client_entry = AutocompleteEntry(self.form_container)
-                self.client_entry.grid(row=i, column=1, padx=10, pady=5, sticky="ew")
-                self.material_entries[text] = self.client_entry
+            if text == "공급처":
+                self.supplier_entry = AutocompleteEntry(self.form_container)
+                self.supplier_entry.grid(row=i, column=1, padx=10, pady=5, sticky="ew")
+                self.material_entries[text] = self.supplier_entry
             else:
                 entry = ctk.CTkEntry(self.form_container)
                 entry.grid(row=i, column=1, padx=10, pady=5, sticky="ew")
@@ -206,22 +206,22 @@ class MaterialManagementFrame(ctk.CTkFrame):
         ctk.CTkLabel(right_header_frame, text="검색:").pack(side="left", padx=(0, 5))
         self.material_search_entry = ctk.CTkEntry(right_header_frame, width=150)
         self.material_search_entry.pack(side="left", padx=5)
-        self.material_search_entry.bind("<KeyRelease>", self.on_material_search) # 디바운싱 적용
+        self.material_search_entry.bind("<KeyRelease>", self.on_material_search)
         ctk.CTkButton(right_header_frame, text="초기화", width=60, command=self.reset_material_search).pack(side="left", padx=5)
         ctk.CTkButton(right_header_frame, text="데이터 내보내기", command=self.export_material_data).pack(side="left", padx=5)
         self.excel_import_button = ctk.CTkButton(right_header_frame, text="데이터 가져오기", command=self.import_material_data)
-        self.excel_import_button.pack(side="left", padx=5)
 
         # 비관리자 접근 제한
         if not self.current_user.is_admin:
             self.material_active_var.set("off")
             self.form_container.configure(label_text="원료 정보 조회 (관리자만 수정 가능)")
-            # 모든 버튼 비활성화
-            for btn in [self.material_history_button,
-                self.ing_add_button, self.ing_update_button, self.ing_remove_button, self.mat_save_button,
-                self.mat_new_button, self.mat_delete_button, self.excel_import_button
-            ]:
-                btn.configure(state="disabled")
+            # 데이터 수정/관리 관련 버튼 숨기기
+            self.ing_add_button.pack_forget()
+            self.ing_update_button.pack_forget()
+            self.ing_remove_button.pack_forget()
+            self.mat_save_button.pack_forget()
+            self.mat_new_button.pack_forget()
+            self.mat_delete_button.pack_forget()
             # 모든 입력 필드 비활성화
             for entry in self.material_entries.values():
                 entry.configure(state="readonly")
@@ -229,18 +229,22 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 entry.configure(state="readonly")
 
         # ===== 원료 목록 트리뷰 =====        
+        else: # 관리자일 경우에만 가져오기 버튼 표시
+            self.excel_import_button.pack(side="left", padx=5)
+
         # 트리뷰 생성
-        mat_tree_cols = ("id", "code", "name", "unit_price", "package_unit", "client", "manufacturer", "hs_code", "origin", "name_en", "nmpa_reg_num")
+        mat_tree_cols = ("group", "id", "code", "name", "unit_price", "package_unit", "client", "manufacturer", "hs_code", "origin", "name_en", "nmpa_reg_num")
         self.material_tree = ttk.Treeview(list_frame, columns=mat_tree_cols, show="headings", selectmode="browse")
-        
+
         # 컬럼 설정
         # 'id' 컬럼은 숨김 처리
-        self.material_tree.heading("id", text="ID");                self.material_tree.column("id", width=40, anchor="center")
+        self.material_tree.heading("group", text="구분");           self.material_tree.column("group", width=50, anchor="center")
+        self.material_tree.heading("id", text="ID");                self.material_tree.column("id", width=0, stretch=tk.NO) # ID 컬럼 숨김
         self.material_tree.heading("code", text="코드");            self.material_tree.column("code", width=100, anchor="w")
         self.material_tree.heading("name", text="원료명");          self.material_tree.column("name", width=200, anchor="w")
         self.material_tree.heading("unit_price", text="단가");       self.material_tree.column("unit_price", width=80, anchor="e")
         self.material_tree.heading("package_unit", text="포장단위"); self.material_tree.column("package_unit", width=80, anchor="center")
-        self.material_tree.heading("client", text="거래처");        self.material_tree.column("client", width=150, anchor="w")
+        self.material_tree.heading("client", text="공급처");        self.material_tree.column("client", width=150, anchor="w")
         self.material_tree.heading("manufacturer", text="제조원명"); self.material_tree.column("manufacturer", width=150, anchor="w")
         self.material_tree.heading("hs_code", text="HS CODE");      self.material_tree.column("hs_code", width=100, anchor="w")
         self.material_tree.heading("origin", text="원산지");        self.material_tree.column("origin", width=100, anchor="w")
@@ -313,10 +317,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
         mat_headers = ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "사용여부"]
         mat_rows = []
         for mat in materials:
-            client_name = session.query(Client.name).filter_by(id=mat.client_id).scalar() or ""
+            supplier_name = session.query(Client.name).filter_by(id=mat.supplier_id).scalar() or ""
             mat_rows.append((
                 mat.code, mat.name, mat.unit_price, mat.package_unit,
-                client_name, mat.manufacturer, mat.hs_code, mat.origin, mat.name_en, mat.nmpa_reg_num, "Y" if mat.is_active else "N"
+                supplier_name, mat.manufacturer, mat.hs_code, mat.origin, mat.name_en, mat.nmpa_reg_num, "Y" if mat.is_active else "N"
             ))
 
         ing_headers = ["원료코드", "한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "HS CODE", "NMPA등록번호", "비고"]
@@ -426,11 +430,17 @@ class MaterialManagementFrame(ctk.CTkFrame):
                             if not client_id:
                                 # 해당 사업자번호의 거래처가 없으면 새로 생성
                                 client_name_val = get_val(mat_row, "거래처명", "client_name") or biz_num_str
-                                new_client = Client(name=str(client_name_val).strip(), business_number=biz_num_str, is_active=True)
+                                new_client = Client(
+                                    name=str(client_name_val).strip(), 
+                                    business_number=biz_num_str, 
+                                    is_active=True,
+                                    client_type='원료'  # 공급처이므로 타입을 '원료'로 지정
+                                )
                                 session.add(new_client)
                                 session.flush()
                                 client_id = new_client.id
                                 client_map_by_biz_num[biz_num_str] = client_id
+                                # 이름 맵에도 추가하여 일관성 유지
                                 client_map_by_name[str(client_name_val).strip()] = client_id
                                 new_clients_count += 1
                                 print(f"  새 거래처 생성 (사업자번호 기준): {client_name_val} ({biz_num_str}) -> ID {client_id}")
@@ -439,23 +449,29 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
                         # 2순위: '거래처사업자번호'가 없을 경우, '거래처명'으로 찾기
                         else:
-                            client_name_val = get_val(mat_row, "거래처", "client_name") # 내보내기 헤더와 키 맞춤
+                            client_name_val = get_val(mat_row, "거래처", "client_name") or get_val(mat_row, "거래처명", None)
                             if client_name_val:
                                 client_name_str = str(client_name_val).strip()
                                 client_id = client_map_by_name.get(client_name_str)
                                 if not client_id:
                                     # 이름으로도 거래처를 찾을 수 없으면 새로 생성 (사업자번호 없이)
-                                    new_client = Client(name=client_name_str, business_number=None, is_active=True)
+                                    new_client = Client(
+                                        name=client_name_str, 
+                                        business_number=None, 
+                                        is_active=True,
+                                        client_type='원료' # 공급처이므로 타입을 '원료'로 지정
+                                    )
                                     session.add(new_client)
                                     session.flush()
                                     client_id = new_client.id
+                                    # 새로 생성된 클라이언트를 이름 맵에 추가하여 중복 생성을 방지합니다.
                                     client_map_by_name[client_name_str] = client_id
                                     new_clients_count += 1
                                     print(f"  새 거래처 생성 (이름만): {client_name_str} -> ID {client_id}")
                                 else:
                                     print(f"  거래처 매칭 성공 (이름): {client_name_str} -> ID {client_id}")
                         
-                        material.client_id = client_id
+                        material.supplier_id = client_id
                         
                         material.manufacturer = get_val(mat_row, "제조원명", "manufacturer") or ""
                         material.hs_code = get_val(mat_row, "HS CODE", "hs_code") or ""
@@ -605,12 +621,12 @@ class MaterialManagementFrame(ctk.CTkFrame):
         material_data_list = []
         try:
             for i, mat in enumerate(materials):
-                client_name = mat.client.name if mat.client else ""
+                supplier_name = mat.supplier.name if mat.supplier else ""
                 tag = 'oddrow' if i % 2 == 0 else 'evenrow'
                 values = (
-                    mat.id, mat.code, mat.name,
+                    i + 1, mat.id, mat.code, mat.name,
                     f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
-                    mat.package_unit, client_name, mat.manufacturer, mat.hs_code,
+                    mat.package_unit, supplier_name, mat.manufacturer, mat.hs_code,
                     mat.origin, mat.name_en or "", mat.nmpa_reg_num or "",
                 )
                 material_data_list.append((values, tag))
@@ -634,23 +650,24 @@ class MaterialManagementFrame(ctk.CTkFrame):
             return
         
         session = db_manager.get_session()
+        session = self.db_manager.get_session()
         try:
-            clients = session.query(Client).filter_by(is_active=True).all()
+            # '원료' 타입의 활성 거래처만 불러옵니다.
+            suppliers = session.query(Client).filter_by(is_active=True, client_type='원료').all()
             
             # 거래처 매핑 딕셔너리 생성
-            self.client_map = {client.name: client.id for client in clients}  # 이름 -> ID
-            self.client_id_map = {client.id: client.name for client in clients}  # ID -> 이름
+            self.supplier_map = {s.name: s.id for s in suppliers}  # 이름 -> ID
+            self.supplier_id_map = {s.id: s.name for s in suppliers}  # ID -> 이름
             
-            client_names = list(self.client_map.keys())
+            supplier_names = list(self.supplier_map.keys())
             
-            print(f"로드된 거래처 수: {len(clients)}")
+            print(f"로드된 공급처 수: {len(suppliers)}")
             
             # AutocompleteEntry에 거래처 목록 설정 (오류 수정)
-            if hasattr(self, 'material_entries') and '거래처' in self.material_entries:
-                client_widget = self.material_entries['거래처']
-                if isinstance(client_widget, AutocompleteEntry):
-                    client_widget.set_completion_list(client_names)
-                    print(f"AutocompleteEntry에 {len(client_names)}개 거래처 설정 완료")
+            if hasattr(self, 'supplier_entry'):
+                self.supplier_entry.set_completion_list(supplier_names)
+                print(f"AutocompleteEntry에 {len(supplier_names)}개 공급처 설정 완료")
+
         except Exception as e:
             print(f"거래처 로드 중 오류: {e}")
             import traceback
@@ -665,7 +682,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
             print("대량 가져오기 중이므로 트리 선택 이벤트 무시")
             return
             
-        if not hasattr(self, "client_entry"):
+        if not hasattr(self, "supplier_entry"):
             return
 
         selected_item = self.material_tree.selection()
@@ -682,7 +699,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         try:
             material = session.query(Material).options(
                 joinedload(Material.ingredients),
-                joinedload(Material.client)
+                joinedload(Material.supplier)
             ).filter_by(id=mat_id).first()
             if not material:
                 print(f"재료 ID {mat_id}를 찾을 수 없습니다.")
@@ -717,16 +734,16 @@ class MaterialManagementFrame(ctk.CTkFrame):
             self.material_entries["등록일"].insert(0, material.reg_date or "")
 
             # 거래처 정보 처리 (개선된 버전)
-            client_name = ""
-            if material.client:
-                client_name = material.client.name
-            elif hasattr(self, 'client_id_map') and material.client_id in self.client_id_map:
-                client_name = self.client_id_map.get(material.client_id, "")
+            supplier_name = ""
+            if material.supplier:
+                supplier_name = material.supplier.name
+            elif hasattr(self, 'supplier_id_map') and material.supplier_id in self.supplier_id_map:
+                supplier_name = self.supplier_id_map.get(material.supplier_id, "")
             
             # 거래처 입력 필드에 설정
-            self.client_entry.delete(0, "end")
-            if client_name:
-                self.client_entry.insert(0, client_name)
+            self.supplier_entry.delete(0, "end")
+            if supplier_name:
+                self.supplier_entry.insert(0, supplier_name)
 
             # 사용여부 체크박스 설정
             self.material_active_var.set("on" if material.is_active else "off")
@@ -1041,8 +1058,8 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 material = Material()
                 session.add(material)
 
-            client_name_input = self.client_entry.get().strip()
-            new_client_id = self.client_map.get(client_name_input)
+            supplier_name_input = self.supplier_entry.get().strip()
+            new_supplier_id = self.supplier_map.get(supplier_name_input)
 
             # --- 변경 사항 로깅 ---
             if log_action == "신규 생성":
@@ -1052,7 +1069,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 log_entries.append(f"영문원료명: '{self.material_entries['영문원료명'].get()}'")
                 log_entries.append(f"단가: '{self.material_entries['단가'].get() or '0.0'}'")
                 log_entries.append(f"포장단위: '{self.material_entries['포장단위'].get()}'")
-                log_entries.append(f"거래처: '{client_name_input}'")
+                log_entries.append(f"공급처: '{supplier_name_input}'")
                 log_entries.append(f"제조원명: '{self.material_entries['제조원명'].get()}'")
                 log_entries.append(f"HS CODE: '{self.material_entries['HS CODE'].get()}'")
                 log_entries.append(f"원산지: '{self.material_entries['원산지'].get()}'")
@@ -1074,9 +1091,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 log_change("단가", str(material.unit_price or 0.0), self.material_entries["단가"].get() or "0.0")
                 log_change("포장단위", material.package_unit or "", self.material_entries["포장단위"].get())
                 
-                if material.client_id != new_client_id:
-                    old_client_name = self.client_id_map.get(material.client_id, "")
-                    log_entries.append(f"거래처: '{old_client_name}' -> '{client_name_input}'")
+                if material.supplier_id != new_supplier_id:
+                    old_supplier_name = self.supplier_id_map.get(material.supplier_id, "")
+                    log_entries.append(f"공급처: '{old_supplier_name}' -> '{supplier_name_input}'")
 
                 log_change("제조원명", material.manufacturer or "", self.material_entries["제조원명"].get())
                 log_change("HS CODE", material.hs_code or "", self.material_entries["HS CODE"].get())
@@ -1114,7 +1131,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
             material.name_en = self.material_entries["영문원료명"].get()
             material.unit_price = float(self.material_entries["단가"].get() or 0.0)
             material.package_unit = self.material_entries["포장단위"].get()
-            material.client_id = new_client_id
+            material.supplier_id = new_supplier_id
             material.manufacturer = self.material_entries["제조원명"].get()
             material.hs_code = self.material_entries["HS CODE"].get()
             material.origin = self.material_entries["원산지"].get()

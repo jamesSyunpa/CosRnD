@@ -96,15 +96,20 @@ class DBManager:
                     for column in table.c:
                         if column.name not in existing_columns:
                             # SQLAlchemy의 DDL 컴파일러를 사용하여 ADD COLUMN 구문 생성
-                            from sqlalchemy.schema import CreateColumn
+                            from sqlalchemy.schema import AddConstraint, CreateColumn
+                            # [수정] SQLite에서 DEFAULT 값이 있는 컬럼 추가 시 발생하는 오류를 피하기 위해,
+                            # 컬럼의 default 속성을 일시적으로 제거하고 DDL을 생성합니다.
+                            column.default = None
+                            add_column_ddl = str(CreateColumn(column).compile(self.engine))
                             # 트랜잭션 내에서 DDL 실행
                             with connection.begin() as trans:
-                                add_column_ddl = str(CreateColumn(column).compile(self.engine))
                                 connection.execute(text(add_column_ddl))
                                 print(f"테이블 '{table_name}'에 누락된 컬럼 '{column.name}' 추가 완료.")
+                except ImportError: # sqlalchemy.exc.NoSuchTableError가 없는 구버전 호환
+                    pass # 구버전에서는 기존 로직으로 처리
                 except Exception as e:
                     # 테이블이 아직 존재하지 않는 경우 등 예외 처리
-                    if "no such table" in str(e):
+                    if "no such table" in str(e).lower():
                         print(f"테이블 '{table_name}'이(가) 아직 생성되지 않았습니다. create_all에서 생성됩니다.")
                     else:
                         print(f"테이블 '{table_name}' 스키마 업데이트 중 오류 발생: {e}")
@@ -260,7 +265,7 @@ class DBManager:
             query = session.query(Material).filter(Material.is_active == True)
 
             # Eager loading 옵션 설정
-            options = [joinedload(Material.client)]
+            options = [joinedload(Material.supplier)]
             if load_ingredients:
                 options.append(subqueryload(Material.ingredients))
             
@@ -284,7 +289,7 @@ class DBManager:
                         Ingredient.name_en.like(search_pattern)
                     ])
 
-                query = query.outerjoin(Material.client).filter(or_(*filters)) # or_ 함수로 모든 조건을 묶음
+                query = query.outerjoin(Material.supplier).filter(or_(*filters)) # or_ 함수로 모든 조건을 묶음
             
             results = query.distinct().order_by(Material.code).all()
             return results
@@ -295,7 +300,11 @@ class DBManager:
         """거래처명, 코드, 대표자명, 담당자명으로 거래처를 검색합니다."""
         session = self.get_session()
         try:
-            query = session.query(Client)
+            # '거래처 관리'에서는 '원료' 타입의 공급처를 제외하고 조회합니다.
+            query = session.query(Client).filter(
+                or_(Client.client_type != '원료', Client.client_type == None)
+            )
+
             if search_term:
                 search_pattern = f"%{search_term}%"
                 query = query.filter(
@@ -327,6 +336,22 @@ class DBManager:
             return False
         finally:
             session.close()
+
+    def execute_query(self, query, params=None):
+        # 쿼리 실행 전 로깅 추가
+        if 'SELECT' in query.upper():
+            print(f"Executing query: {query}")
+        try:
+            with self.Session() as session:
+                result = session.execute(text(query), params or {})
+                # 결과를 리스트로 변환하기 전에 먼저 전체를 가져옴
+                rows = result.fetchall()
+                results = [dict(row) for row in rows]
+                print(f"Query returned {len(results)} rows")
+                return results
+        except Exception as e:
+            print(f"Query execution failed: {str(e)}")
+            raise
 
 # 전역 DBManager 인스턴스 생성
 db_manager = DBManager()

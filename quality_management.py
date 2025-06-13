@@ -10,12 +10,11 @@ from modules.translation import get_texts
 
 class QualityManagementFrame(ctk.CTkFrame):
     """품질 관리 관련 기능을 포함하는 프레임"""
-    def __init__(self, master, user, app, language="korean"):
+    def __init__(self, master, user, app, texts):
         super().__init__(master)
         self.current_user = user
         self.app = app
-        self.language = language
-        self.texts = get_texts(language)
+        self.texts = texts # App으로부터 중앙 texts 객체를 전달받음
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -36,12 +35,15 @@ class QualityManagementFrame(ctk.CTkFrame):
         self.tab_view.add(self.texts['msds'])
         self.tab_view.add(self.texts['prod_standard'])
         self.tab_view.add(self.texts['mfg_record'])
+        self.tab_view.add(self.texts['ingredient_report'])
 
         # --- 각 탭 UI 설정 ---
         self.setup_coa_tab(self.tab_view.tab(self.texts['coa']))
         self.setup_placeholder_tab(self.tab_view.tab(self.texts['msds']), self.texts['msds'])
         self.setup_placeholder_tab(self.tab_view.tab(self.texts['prod_standard']), self.texts['prod_standard'])
         self.setup_placeholder_tab(self.tab_view.tab(self.texts['mfg_record']), self.texts['mfg_record'])
+        self.setup_placeholder_tab(self.tab_view.tab(self.texts['ingredient_report']), self.texts['ingredient_report'])
+
 
     def setup_coa_tab(self, tab_frame):
         """COA 탭의 UI를 설정합니다."""

@@ -4,6 +4,7 @@ from tkinter import messagebox, filedialog
 import configparser
 import os
 import modules.excel_handler as excel_handler
+from database.db_manager import db_manager # db_manager를 사용하기 위해 import 합니다.
 from database.models import Formulation, FormulationItem, Material, Client, User # 모델 import 추가
 from modules.ui_components import HelpPopup # HelpPopup 클래스를 ui_components에서 가져옵니다.
 from modules.translation import get_texts
@@ -98,9 +99,15 @@ class SettingsManagementFrame(ctk.CTkFrame):
 
     def setup_path_settings_tab(self, tab_frame):
         """경로 설정 탭의 UI를 설정하고, 관리자 전용 데이터 리셋 버튼을 추가합니다."""
+        # 스크롤 가능한 프레임을 생성하여 모든 위젯을 담습니다.
+        scrollable_frame = ctk.CTkScrollableFrame(tab_frame, fg_color="transparent")
+        scrollable_frame.pack(fill="both", expand=True)
+        # 스크롤 프레임 내부의 그리드 설정
+        scrollable_frame.grid_columnconfigure(0, weight=1)
+
         # --- 경로 설정 프레임 ---
-        path_frame = ctk.CTkFrame(tab_frame)
-        path_frame.pack(padx=20, pady=20, fill="x")
+        path_frame = ctk.CTkFrame(scrollable_frame)
+        path_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
         path_frame.grid_columnconfigure(1, weight=1)
 
         # --- 테마 설정 ---
@@ -122,33 +129,35 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self.language_menu.grid(row=1, column=1, padx=10, pady=10, sticky="w")
 
 
-        ctk.CTkLabel(path_frame, text=self.texts['db_path']).grid(row=2, column=0, padx=10, pady=10, sticky="w")
-        self.db_path_entry = ctk.CTkEntry(path_frame)
-        self.db_path_entry.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
-        db_browse_button = ctk.CTkButton(path_frame, text=self.texts['browse'], command=self.browse_db_path)
-        db_browse_button.grid(row=2, column=2, padx=10, pady=10)
+        # 관리자일 경우에만 경로 설정 및 저장 기능 표시
+        if self.current_user.is_admin:
+            ctk.CTkLabel(path_frame, text=self.texts['db_path']).grid(row=2, column=0, padx=10, pady=10, sticky="w")
+            self.db_path_entry = ctk.CTkEntry(path_frame)
+            self.db_path_entry.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
+            db_browse_button = ctk.CTkButton(path_frame, text=self.texts['browse'], command=self.browse_db_path)
+            db_browse_button.grid(row=2, column=2, padx=10, pady=10)
 
-        ctk.CTkLabel(path_frame, text=self.texts['excel_path']).grid(row=3, column=0, padx=10, pady=10, sticky="w")
-        self.excel_path_entry = ctk.CTkEntry(path_frame)
-        self.excel_path_entry.grid(row=3, column=1, padx=10, pady=10, sticky="ew")
-        excel_browse_button = ctk.CTkButton(path_frame, text=self.texts['browse'], command=self.browse_excel_path)
-        excel_browse_button.grid(row=3, column=2, padx=10, pady=10)
+            ctk.CTkLabel(path_frame, text=self.texts['excel_path']).grid(row=3, column=0, padx=10, pady=10, sticky="w")
+            self.excel_path_entry = ctk.CTkEntry(path_frame)
+            self.excel_path_entry.grid(row=3, column=1, padx=10, pady=10, sticky="ew")
+            excel_browse_button = ctk.CTkButton(path_frame, text=self.texts['browse'], command=self.browse_excel_path)
+            excel_browse_button.grid(row=3, column=2, padx=10, pady=10)
 
-        save_button = ctk.CTkButton(tab_frame, text=self.texts['save_paths'], command=self.save_paths)
-        save_button.pack(pady=20, padx=20, anchor="e")
-        
-        info_label = ctk.CTkLabel(
-            tab_frame, 
-            text=self.texts['db_path_warning'],
-            text_color=("#B00020", "#FF8A80")  # (라이트 모드 색상, 다크 모드 색상)
-        )
-        info_label.pack(pady=10, padx=20, anchor="e")
+            save_button = ctk.CTkButton(scrollable_frame, text=self.texts['save_paths'], command=self.save_paths)
+            save_button.grid(row=1, column=0, pady=20, padx=20, sticky="e")
+            
+            info_label = ctk.CTkLabel(
+                scrollable_frame, 
+                text=self.texts['db_path_warning'],
+                text_color=("#B00020", "#FF8A80")  # (라이트 모드 색상, 다크 모드 색상)
+            )
+            info_label.grid(row=2, column=0, pady=10, padx=20, sticky="e")
 
         # --- 관리자 전용 기능 ---
         if self.current_user.is_admin:
             # --- 엑셀 폼 내보내기 프레임 ---
-            export_frame = ctk.CTkFrame(tab_frame)
-            export_frame.pack(padx=20, pady=(20, 10), fill="x")
+            export_frame = ctk.CTkFrame(scrollable_frame)
+            export_frame.grid(row=3, column=0, padx=20, pady=(20, 10), sticky="ew")
             export_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
             ctk.CTkLabel(export_frame, text=self.texts['export_excel_forms'], font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, pady=(10, 5))
@@ -158,8 +167,8 @@ class SettingsManagementFrame(ctk.CTkFrame):
             ctk.CTkButton(export_frame, text=self.texts['export_user_form'], command=self.export_user_template).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
 
             # --- 데이터 리셋 프레임 ---
-            reset_frame = ctk.CTkFrame(tab_frame)
-            reset_frame.pack(padx=20, pady=(50, 20), fill="x", anchor="s")
+            reset_frame = ctk.CTkFrame(scrollable_frame)
+            reset_frame.grid(row=4, column=0, padx=20, pady=(50, 20), sticky="ew")
             reset_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
             ctk.CTkLabel(reset_frame, text=self.texts['data_reset_warning'], font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
@@ -172,14 +181,6 @@ class SettingsManagementFrame(ctk.CTkFrame):
             
             all_reset_style = {"fg_color": "#B71C1C", "hover_color": "#7f0000"}
             ctk.CTkButton(reset_frame, text=self.texts['reset_all_data'], command=lambda: self.confirm_reset("all"), **all_reset_style).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
-
-        else:
-            # 관리자가 아니면 경로 설정 비활성화
-            self.db_path_entry.configure(state="disabled")
-            db_browse_button.configure(state="disabled")
-            self.excel_path_entry.configure(state="disabled")
-            excel_browse_button.configure(state="disabled")
-            save_button.configure(state="disabled")
 
         self.load_settings()
 
@@ -197,12 +198,13 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self.language_menu.set(language)
 
         # 경로 설정 로드
-        db_dir = config.get('Paths', 'database_dir', fallback='data')
-        excel_dir = config.get('Paths', 'excel_dir', fallback='')
-        self.db_path_entry.delete(0, 'end')
-        self.db_path_entry.insert(0, db_dir)
-        self.excel_path_entry.delete(0, 'end')
-        self.excel_path_entry.insert(0, excel_dir)
+        if self.current_user.is_admin:
+            db_dir = config.get('Paths', 'database_dir', fallback='data')
+            excel_dir = config.get('Paths', 'excel_dir', fallback='')
+            self.db_path_entry.delete(0, 'end')
+            self.db_path_entry.insert(0, db_dir)
+            self.excel_path_entry.delete(0, 'end')
+            self.excel_path_entry.insert(0, excel_dir)
 
     def browse_db_path(self):
         path = filedialog.askdirectory(title="DB 저장 폴더 선택")
@@ -224,87 +226,22 @@ class SettingsManagementFrame(ctk.CTkFrame):
             self.excel_path_entry.insert(0, path)
 
     def save_paths(self):
-        from database.db_manager import db_manager # db_manager를 함수 내에서 import
-
-        config = configparser.ConfigParser()
-        config.read(self.config_path, encoding='utf-8')
-
-        if not config.has_section('Paths'):
-            config.add_section('Paths')
-
-        old_db_dir_relative = config.get('Paths', 'database_dir', fallback='data')
-        new_db_dir_relative = self.db_path_entry.get().strip()
-
-        # DB 경로가 변경되었는지 확인
-        if old_db_dir_relative != new_db_dir_relative:
-            old_db_path = os.path.join(self.application_path, old_db_dir_relative, "cosmetic.db")
-            
-            # 이전 경로에 DB 파일이 존재하는지 확인
-            if os.path.exists(old_db_path):
-                # 사용자에게 선택 요청
-                dialog = ctk.CTkToplevel(self)
-                dialog.title("DB 파일 처리")
-                dialog.geometry("450x180")
-                dialog.transient(self)
-                dialog.grab_set()
-                
-                result = {"action": None}
-
-                def set_action(action):
-                    result["action"] = action
-                    dialog.destroy()
-
-                ctk.CTkLabel(dialog, text="기존 DB 파일을 어떻게 처리하시겠습니까?", font=ctk.CTkFont(size=14)).pack(pady=20)
-                
-                btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-                btn_frame.pack(pady=10)
-                
-                ctk.CTkButton(btn_frame, text="새 경로로 이동", command=lambda: set_action("move")).pack(side="left", padx=10)
-                ctk.CTkButton(btn_frame, text="새로 생성 (기존 파일 유지)", command=lambda: set_action("create")).pack(side="left", padx=10)
-                ctk.CTkButton(btn_frame, text="취소", fg_color="gray", command=lambda: set_action("cancel")).pack(side="left", padx=10)
-                
-                self.wait_window(dialog) # 대화상자가 닫힐 때까지 대기
-
-                if result["action"] == "move":
-                    # 1. DB 연결 해제
-                    db_manager.dispose_engine()
-
-                    new_db_dir_absolute = os.path.join(self.application_path, new_db_dir_relative)
-                    os.makedirs(new_db_dir_absolute, exist_ok=True)
-                    new_db_path = os.path.join(new_db_dir_absolute, "cosmetic.db")
-                    try:
-                        # 2. 파일 이동
-                        os.rename(old_db_path, new_db_path)
-                        
-                        # 3. 설정 파일에 새 경로 저장
-                        config.set('Paths', 'database_dir', new_db_dir_relative)
-                        with open(self.config_path, 'w', encoding='utf-8') as configfile:
-                            config.write(configfile)
-                        
-                        # 4. DB 연결 재설정 및 안내
-                        db_manager.setup_database(self.application_path)
-                        messagebox.showinfo("성공", "DB 파일이 새 경로로 이동되었으며, 연결이 재설정되었습니다.")
-                        # 재시작하지 않고 계속 진행
-
-                    except Exception as e:
-                        messagebox.showerror("오류", f"DB 파일 이동 중 오류 발생: {e}")
-                        # 이동 실패 시, 기존 경로로 다시 연결 시도
-                        db_manager.setup_database(self.application_path)
-                        return # 오류 발생 시 저장 중단
-                elif result["action"] == "cancel":
-                    messagebox.showinfo("취소", "경로 저장이 취소되었습니다.")
-                    return # 저장 작업 취소
-
-        # 설정 파일에 새로운 경로 저장
-        config.set('Paths', 'database_dir', new_db_dir_relative)
-        config.set('Paths', 'excel_dir', self.excel_path_entry.get())
-        
         try:
-            with open(self.config_path, 'w', encoding='utf-8') as configfile:
-                config.write(configfile)
-            messagebox.showinfo("성공", "경로가 저장되었습니다.\nDB 경로는 프로그램 재시작 시 적용됩니다.")
-        except Exception as e:
-            messagebox.showerror("오류", f"설정 저장 중 오류가 발생했습니다: {e}")
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(self.config_path, encoding='utf-8')
+            if not config.has_section('Paths'): config.add_section('Paths')
+            config.set('Paths', 'database_dir', self.db_path_entry.get())
+            config.set('Paths', 'excel_dir', self.excel_path_entry.get())
+            with open(self.config_path, 'w', encoding='utf-8') as configfile: config.write(configfile)
+            db_manager.setup_database(
+                application_path=self.application_path,
+                config_path=self.config_path,
+                on_initial_setup=self.app.on_initial_setup if hasattr(self.app, 'on_initial_setup') else None
+            )
+            
+            messagebox.showinfo("설정 저장", "경로 설정이 저장되었습니다.")
+        except Exception as e: # noqa
+            messagebox.showerror("저장 오류", f"설정 저장 중 오류가 발생했습니다: {e}")
 
     # ===== 엑셀 폼 내보내기 메서드들 =====
     def export_material_template(self):
