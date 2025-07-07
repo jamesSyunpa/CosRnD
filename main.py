@@ -9,6 +9,8 @@ import os
 import tkinter.font as tkfont
 import re
 import subprocess
+import time
+from PIL import Image
 
 # ==================== PyInstaller 경로 처리 ====================
 if getattr(sys, 'frozen', False):
@@ -93,9 +95,96 @@ class App(ctk.CTk):
         """DB가 처음 생성될 때 호출되는 콜백. 기본 admin 계정을 생성합니다."""
         db_manager.create_default_admin()
 
+    def show_splash_screen(self, on_complete):
+        splash = ctk.CTkToplevel(self)
+        splash.overrideredirect(True)
+
+        width, height = 350, 350
+        x = (splash.winfo_screenwidth() // 2) - (width // 2)
+        y = (splash.winfo_screenheight() // 2) - (height // 2)
+        splash.geometry(f'{width}x{height}+{x}+{y}')
+        
+        splash.lift()
+        splash.focus_force()
+        
+        bg_color = splash._apply_appearance_mode(ctk.ThemeManager.theme["CTk"]["fg_color"])
+        splash.configure(fg_color=bg_color)
+
+        try:
+            splash.wm_attributes("-transparentcolor", bg_color)
+        except Exception:
+            pass
+
+        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent")
+        bg_label.pack(fill="both", expand=True)
+
+        try:
+            icon_path = os.path.join(application_path, "icon.ico")
+            if os.path.exists(icon_path):
+                pil_img = Image.open(icon_path).convert("RGBA")
+                ctk_splash_image = ctk.CTkImage(light_image=pil_img, size=(width, height))
+                bg_label.configure(image=ctk_splash_image)
+            else:
+                raise FileNotFoundError("icon.ico not found")
+        except Exception as e:
+            print(f"Splash icon error: {e}")
+            bg_label.configure(fg_color=("gray85", "gray15"), text=f"Icon Load Error:\n{e}", font=ctk.CTkFont(size=12))
+
+        progress_label = ctk.CTkLabel(splash, text="Initializing... 0%", font=ctk.CTkFont(size=12),
+                                      fg_color=("white", "black"), text_color=("black", "white"), corner_radius=5)
+        progress_label.place(relx=0.5, rely=0.85, anchor="center")
+
+        progress_bar = ctk.CTkProgressBar(splash, width=280)
+        progress_bar.set(0)
+        progress_bar.place(relx=0.5, rely=0.92, anchor="center")
+
+        splash.update()
+
+        tasks = [
+            ("Clearing old session...", lambda: self.recent_actions.clear()),
+            ("Loading user history...", self.load_recent_actions),
+            ("Building main interface...", self.setup_main_ui),
+            ("Applying visual theme...", self.update_treeview_style),
+        ]
+        
+        total_tasks = len(tasks)
+
+        def run_tasks(task_index=0):
+            if task_index < total_tasks:
+                description, task_func = tasks[task_index]
+                start_progress = task_index / total_tasks
+                end_progress = (task_index + 1) / total_tasks
+                
+                progress_label.configure(text=f"{description}")
+                splash.update_idletasks()
+
+                task_func()
+                
+                steps = 10
+                for i in range(steps + 1):
+                    current_progress = start_progress + (end_progress - start_progress) * (i / steps)
+                    progress_bar.set(current_progress)
+                    progress_label.configure(text=f"{description} {int(current_progress * 100)}%")
+                    splash.update_idletasks()
+                    time.sleep(0.02)
+
+                self.after(50, lambda: run_tasks(task_index + 1))
+            else:
+                progress_label.configure(text="Done!")
+                progress_bar.set(1)
+                splash.update_idletasks()
+                self.after(300, lambda: (splash.destroy(), on_complete()))
+
+        self.after(100, run_tasks)
+
     def on_login_success(self, user):
         print(f"{datetime.now()}: on_login_success 호출")
         self.current_user = user
+
+        # 로그인 창을 즉시 파괴하여 더 이상 존재하지 않는 위젯에 대한 콜백 오류를 방지합니다.
+        if hasattr(self, 'login_window') and self.login_window:
+            self.login_window.destroy()
+            self.login_window = None
 
         # 만약 로그인한 사용자가 'admin'이고, 유일한 관리자라면 새 관리자 생성을 강제
         if user.username == 'admin' and db_manager.get_admin_user_count() == 1:
@@ -103,15 +192,14 @@ class App(ctk.CTk):
             self.show_initial_signup_window()
             return # 메인 UI를 띄우지 않고 종료
 
-        self.recent_actions.clear() # 새 로그인 시 이전 기록 초기화
-        self.load_recent_actions()
-        self.setup_main_ui()
-        self.update_treeview_style() # Treeview 스타일을 현재 테마에 맞게 업데이트
-        self.center_on_mouse_screen()
-        self.deiconify()
-        
-        # 로그인 성공 후 DB 동기화 검사 시작
-        self.start_db_sync_check()
+        def show_main_window():
+            self.center_on_mouse_screen()
+            self.deiconify()
+            # 로그인 성공 후 DB 동기화 검사 시작
+            self.start_db_sync_check()
+            print(f"{datetime.now()}: Main window displayed")
+
+        self.show_splash_screen(on_complete=show_main_window)
 
     def load_app_settings(self):
         """config.ini에서 앱 설정을 로드합니다 (테마, 언어 등)."""
