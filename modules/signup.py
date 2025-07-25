@@ -103,8 +103,12 @@ class SignupWindow(ctk.CTkToplevel):
                 messagebox.showwarning("입력 오류", "이미 사용 중인 ID입니다.", parent=self)
                 return
 
+            print("\n=== 사용자 등록 시작 ===")
+            
             # 4. 비밀번호 암호화 및 사용자 생성
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+            print("  * 비밀번호 암호화 완료")
+            
             new_user = User(
                 username=username,
                 password=hashed_password.decode('utf-8'),
@@ -115,19 +119,55 @@ class SignupWindow(ctk.CTkToplevel):
                 is_admin=self.is_initial_setup  # 초기 설정 시 관리자로 생성
             )
             
-            session.add(new_user)
-            session.commit()
+            print(f"  * 새 사용자 객체 생성 - ID: {username}, 관리자: {self.is_initial_setup}")
             
-            messagebox.showinfo("성공", "회원가입이 완료되었습니다. 로그인 해주세요.", parent=self)
-            self.destroy()
-            
-            # 초기 설정으로 admin 계정을 생성한 경우, 기존 admin 계정 삭제
-            if self.is_initial_setup and db_manager.delete_user_by_username('admin'):
-                print("초기 'admin' 계정이 삭제되었습니다.")
-            
-            # 성공 콜백이 있으면 호출 (가입 후 자동 로그인)
-            if self.on_success:
-                self.on_success(new_user)
+            # 단일 트랜잭션에서 모든 작업 수행
+            try:
+                # 초기 설정인 경우 기존 admin 계정 삭제
+                if self.is_initial_setup:
+                    admin = session.query(User).filter_by(username='admin').first()
+                    if admin:
+                        session.delete(admin)
+                        print("  * 기존 admin 계정 삭제됨")
+                
+                # 새 사용자 추가
+                session.add(new_user)
+                session.commit()
+                print("  * DB 저장 완료")
+                
+                # 사용자 정보 다시 로드 (세션에서 최신 상태로)
+                session.refresh(new_user)
+                
+                # SimpleNamespace 객체 생성 (로그인용)
+                from types import SimpleNamespace
+                user_info = SimpleNamespace(
+                    id=new_user.id,
+                    username=new_user.username,
+                    is_admin=new_user.is_admin,
+                    position=new_user.position,
+                    contact=new_user.contact,
+                    zip_code=new_user.zip_code,
+                    address=new_user.address
+                )
+                print(f"  * 사용자 정보 준비 완료 - ID: {user_info.id}, 관리자: {user_info.is_admin}")
+                
+                # UI 업데이트는 commit 이후에 수행
+                messagebox.showinfo("성공", 
+                    "초기 관리자 계정이 생성되었습니다." if self.is_initial_setup else "회원가입이 완료되었습니다.", 
+                    parent=self)
+                    
+                # 성공 콜백 호출 (가입 후 자동 로그인)
+                if self.on_success:
+                    print("  * 로그인 콜백 호출")
+                    self.on_success(user_info)
+                
+                self.destroy()
+                print("=== 사용자 등록 완료 ===\n")
+                
+            except Exception as e:
+                print(f"  * [오류] 사용자 등록 실패: {e}")
+                session.rollback()
+                raise
 
         except Exception as e:
             session.rollback()
