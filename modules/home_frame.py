@@ -1,6 +1,7 @@
 # modules/home_frame.py
 import customtkinter as ctk
 from tkinter import ttk # noqa
+from modules.progress_window import ProgressWindow
 import sys
 import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -147,9 +148,3 @@ class HomeFrame(ctk.CTkFrame):
         finally:
             session.close()
             self.changes_textbox.configure(state="disabled")
-
-    def refresh_data(self):
-        """홈 프레임에 표시되는 데이터를 새로고침합니다."""
-        print("홈 프레임 데이터 새로고침...")
-        self.refresh_cards()
-        self.load_recent_material_changes()

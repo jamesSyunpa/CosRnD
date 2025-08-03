@@ -3,22 +3,14 @@
 import os
 import sys
 from PyInstaller.utils.hooks import collect_data_files
-import customtkinter
 
 # --- 프로젝트 루트 경로 설정 ---
 # 이 spec 파일이 프로젝트 루트에 있다고 가정합니다.
 project_root = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 # --- 데이터 파일 수집 ---
-# customtkinter 패키지의 모든 데이터 파일을 안전하게 수집합니다.
-# collect_data_files는 패키지 내부의 assets 등 필요한 리소스를 모두 반환합니다.
-datas = collect_data_files('customtkinter', include_py_files=False)
-
-# 프로젝트 루트의 설정 파일을 추가합니다. (icon은 프로젝트에 있는 정확한 파일명을 사용하세요)
-datas += [('config.ini', '.')]
-
-# 주의: 아이콘 파일이 프로젝트 루트에 있다면 아래처럼 추가하세요.
-# datas += [('icon.ico', '.')]
+# customtkinter의 테마 파일들을 포함시킵니다.
+datas = collect_data_files('customtkinter')
 
 # --- 숨겨진 import 추가 ---
 # PyInstaller가 자동으로 찾지 못할 수 있는 모듈들을 명시적으로 추가합니다.
@@ -32,7 +24,7 @@ hiddenimports = [
     # Pillow and tkcalendar
     'PIL', 'PIL._tkinter_finder', 'tkcalendar',
     # Pandas and openpyxl dependencies
-    'pandas', 'openpyxl', 'openpyxl.cell.cell',
+    'pandas', 'openpyxl',
     # Other potential hidden imports
     'pkg_resources.py2_warn'
 ]
@@ -46,7 +38,7 @@ a = Analysis(
         os.path.join(project_root, 'utils')
     ],
     binaries=[],
-    datas=datas,
+    datas=collect_data_files('customtkinter'),
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -73,11 +65,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,         # 디버깅 중에는 콘솔을 켜서 런타임 로그를 확인합니다.
+    console=False,         # GUI 애플리케이션이므로 콘솔 창을 숨깁니다.
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='Icon.ico'
+    icon='icon.ico'
 )
