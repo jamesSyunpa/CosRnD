@@ -2,7 +2,6 @@
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import bcrypt
-from modules.progress_window import ProgressWindow
 from modules.material_management import MaterialManagementFrame
 from modules.document_management import CustomDropdown # CustomDropdown을 여기서 가져옵니다.
 from database.db_manager import db_manager
@@ -49,10 +48,30 @@ class DataManagementFrame(ctk.CTkFrame):
 
         # --- 변경: 탭 텍스트를 texts에서 가져오되 기본값 지정 ---
         tab_texts = {
-            "ingredient": self.texts.get("ingredient", "성분 관리"),
-            "client": self.texts.get("client_mgt", "거래처 관리"),  # client -> client_mgt로 변경
-            "user": self.texts.get("user", "회원 관리")
+            "ingredient": self.texts.get("ingredient_mgt", "성분 관리"),
+            "client": self.texts.get("client_mgt", "거래처 관리"),
+            "user": self.texts.get("user_mgt", "회원 관리")
         }
+
+        self.tab_map = {
+            tab_texts["ingredient"]: "data/ingredient_mgt",
+            tab_texts["client"]: "data/client_mgt",
+            tab_texts["user"]: "data/user_mgt"
+        }
+
+        # Reverse mapping: stable/internal keys -> displayed tab label
+        # e.g. 'ingredient_mgt' or 'data/ingredient_mgt' -> tab_texts['ingredient']
+        self.tab_key_map = {}
+        try:
+            self.tab_key_map['ingredient_mgt'] = tab_texts['ingredient']
+            self.tab_key_map['client_mgt'] = tab_texts['client']
+            self.tab_key_map['user_mgt'] = tab_texts['user']
+            self.tab_key_map['data/ingredient_mgt'] = tab_texts['ingredient']
+            self.tab_key_map['data/client_mgt'] = tab_texts['client']
+            self.tab_key_map['data/user_mgt'] = tab_texts['user']
+        except Exception:
+            # Defensive: if texts missing, leave map possibly incomplete
+            pass
 
         self.tab_view.add(tab_texts["ingredient"])
         self.setup_material_management_tab(self.tab_view.tab(tab_texts["ingredient"]))
@@ -73,18 +92,72 @@ class DataManagementFrame(ctk.CTkFrame):
     def on_tab_change(self):
         """탭이 변경될 때마다 활동을 기록합니다."""
         selected_tab = self.tab_view.get()
-        self.app.record_action(f"data/{selected_tab}")
+        static_key = self.tab_map.get(selected_tab)
+        if static_key:
+            self.app.record_action(static_key)
 
     def switch_to_tab(self, tab_name):
         """외부에서 특정 탭으로 전환하는 메서드"""
         try:
             self.tab_view.set(tab_name)
         except Exception as e:
+            # Try resolving tab_name as an internal key (e.g., 'ingredient_mgt' or 'data/ingredient_mgt')
+            resolved_label = None
+            if tab_name in self.tab_key_map:
+                resolved_label = self.tab_key_map[tab_name]
+            else:
+                # If full action provided like 'data/ingredient_mgt', try the part after '/'
+                if '/' in tab_name:
+                    _, maybe_key = tab_name.split('/', 1)
+                    resolved_label = self.tab_key_map.get(maybe_key)
+
+            if resolved_label:
+                try:
+                    self.tab_view.set(resolved_label)
+                    return
+                except Exception as e2:
+                    print(f"데이터 관리 탭 '{tab_name}'을(를) '{resolved_label}'로 변환했으나 전환 실패: {e2}")
+                    return
+
             print(f"데이터 관리 탭 '{tab_name}'으로 전환 실패: {e}")
 
     def refresh_data(self):
-        """데이터 새로고침이 필요한 경우 호출될 메서드"""
-        pass # 추후 필요시 구현
+        """데이터 관리 프레임의 모든 탭에 있는 데이터를 새로고침합니다."""
+        print("데이터 관리 프레임 새로고침...")
+
+        # 1. 회원 관리 탭 새로고침 (존재하는 경우)
+        if hasattr(self, 'load_users'):
+            try:
+                print("  - 사용자 목록 새로고침...")
+                self.load_users()
+                self.clear_user_form()
+            except Exception as e:
+                print(f"[오류] 사용자 목록 새로고침 실패: {e}")
+
+        # 2. 거래처 관리 탭 새로고침 (존재하는 경우)
+        if hasattr(self, 'load_clients'):
+            try:
+                print("  - 거래처 목록 새로고침...")
+                self.load_clients()
+                self.clear_client_form()
+            except Exception as e:
+                print(f"[오류] 거래처 목록 새로고침 실패: {e}")
+
+        # 3. 성분 관리 탭(MaterialManagementFrame) 새로고침
+        try:
+            # 탭 이름은 self.texts에서 가져옴
+            ingredient_tab_name = self.texts.get("ingredient", "성분 관리")
+            material_tab_frame = self.tab_view.tab(ingredient_tab_name)
+            
+            # material_tab_frame의 자식 위젯(MaterialManagementFrame)을 찾아서 refresh_data 호출
+            for child in material_tab_frame.winfo_children():
+                if hasattr(child, 'refresh_data'):
+                    print("  - 성분 관리 탭 새로고침...")
+                    child.refresh_data()
+                    break # MaterialManagementFrame은 하나만 있다고 가정
+        except Exception as e:
+            # 탭이 아직 생성되지 않았거나 다른 오류 발생 시
+            print(f"[오류] 성분 관리 탭 새로고침 실패: {e}")
 
     # ==============================================================================
     # 아래는 settings_management.py에서 이동 및 통합된 UI 설정 메서드들입니다.
