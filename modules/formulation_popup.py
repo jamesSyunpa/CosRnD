@@ -129,7 +129,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.data_loading = False  # 데이터 로딩 중 플래그
 
         self.title(self.texts['formulation_popup_title'])
-        # self.geometry("1200x800") # 크기 고정 해제
+        self.geometry("1400x900") # 창 크기를 더 크게 설정
         self.transient(master)
         self.resizable(True, True) # 크기 조절 활성화
         self.minsize(1000, 700) # 최소 크기 설정
@@ -169,7 +169,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.form_pane.grid(row=0, column=0, sticky="nsew")
 
         # 3. 우측: 처방 내용(원료 목록)
-        content_pane = ctk.CTkFrame(main_container, fg_color="transparent")
+        content_pane = ctk.CTkFrame(main_container)
         content_pane.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
 
         # --- form_pane 내부 UI 구성 ---
@@ -247,7 +247,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         ctk.CTkLabel(experiment_info_frame, text=self.texts['manager_name']).grid(row=1, column=2, padx=10, pady=5, sticky="w")
         self.exp_manager_entry = ctk.CTkEntry(experiment_info_frame)
         self.exp_manager_entry.grid(row=1, column=3, padx=10, pady=5, sticky="ew")
-        self.exp_manager_entry.insert(0, self.current_user.username) # 기본값으로 현재 사용자 설정
+        self.exp_manager_entry.insert(0, self.current_user.real_name or self.current_user.username) # 기본값으로 현재 사용자 설정
 
         ctk.CTkLabel(experiment_info_frame, text=self.texts['manager_code']).grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.exp_code_entry = ctk.CTkEntry(experiment_info_frame)
@@ -355,6 +355,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.move_up_button.pack(side="left", padx=(10, 2))
         self.move_down_button = ctk.CTkButton(content_buttons, text="▼", width=40, command=self.move_item_down)
         self.move_down_button.pack(side="left", padx=(2, 10))
+        self.sort_by_phase_button = ctk.CTkButton(content_buttons, text="구분순 정렬", width=80, command=self.sort_items_by_phase)
+        self.sort_by_phase_button.pack(side="left", padx=5)
         self.delete_item_button = ctk.CTkButton(content_buttons, text=self.texts['delete_selected'], width=80, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_selected_item)
         self.delete_item_button.pack(side="left", padx=5)
 
@@ -379,6 +381,15 @@ class FormulationEditPopup(ctk.CTkToplevel):
         tree_scrollbar = ttk.Scrollbar(content_pane, orient="vertical", command=self.formulation_item_tree.yview) # content_pane을 부모로 사용
         self.formulation_item_tree.configure(yscrollcommand=tree_scrollbar.set)
         tree_scrollbar.grid(row=1, column=1, sticky="ns")
+        
+        # --- 처방 내용 안내 메시지 (Treeview가 비어있을 때 표시용) ---
+        self.empty_message_label = ctk.CTkLabel(
+            content_pane, 
+            text="'원료 추가' 버튼을 클릭하여 처방에 원료를 추가하세요.",
+            text_color="gray",
+            font=ctk.CTkFont(size=12)
+        )
+        # 초기에는 숨김 (처방 로드 후에 결정)
 
 
         # --- 처방 내용 요약 ---
@@ -480,7 +491,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.exp_name_entry.delete(0, "end")
         self.exp_date_entry.set_date(datetime.now())
         self.exp_manager_entry.delete(0, "end")
-        self.exp_manager_entry.insert(0, self.current_user.username)
+        self.exp_manager_entry.insert(0, self.current_user.real_name or self.current_user.username)
         self.exp_code_entry.delete(0, "end")
         self.revision_entry.delete(0, "end")
         # 현재 사용자의 담당번호 자동 입력 (속성이 없을 수 있으므로 안전하게 접근)
@@ -509,6 +520,9 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.formulation_item_tree.delete(item)
         self.main_total_amount_entry.delete(0, "end")
         self.update_formulation_summary()
+        
+        # 안내 메시지 표시 (처방 내용이 비어있으므로)
+        self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
         self.update_lab_no() # 폼 초기화 후 LAB NO. 업데이트
 
     def load_formulation_details(self, formulation_id):
@@ -572,7 +586,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             if form.manager_name:
                 self.exp_manager_entry.insert(0, str(form.manager_name))
             else:
-                self.exp_manager_entry.insert(0, self.current_user.username)
+                self.exp_manager_entry.insert(0, self.current_user.real_name or self.current_user.username)
                 
             # 담당번호 로드 및 처리
             manager_code = self.get_manager_code_from_form(form, session)
@@ -680,6 +694,33 @@ class FormulationEditPopup(ctk.CTkToplevel):
                 if hasattr(self.current_user, 'manager_code') and self.current_user.manager_code:
                     return self.current_user.manager_code
         return None
+    
+    def get_manager_display_name(self, manager_value):
+        """담당자 필드의 값을 표시용 이름으로 변환합니다"""
+        if not manager_value or not manager_value.strip():
+            return self.current_user.real_name or self.current_user.username or ""
+        
+        manager_value = manager_value.strip()
+        
+        # 숫자로만 이루어진 경우 사용자 ID로 판단하여 이름으로 변환
+        if manager_value.isdigit():
+            session = db_manager.get_session()
+            try:
+                from database.models import User
+                user = session.query(User).filter_by(id=int(manager_value)).first()
+                if user:
+                    # real_name이 있으면 우선 사용, 없으면 username 사용
+                    return user.real_name or user.username
+                else:
+                    return manager_value  # 사용자를 찾을 수 없으면 원래 값 반환
+            except Exception as e:
+                print(f"담당자 이름 변환 중 오류: {e}")
+                return manager_value
+            finally:
+                session.close()
+        
+        # 이미 이름인 경우 그대로 반환
+        return manager_value
         
     def load_change_log(self, form):
         """변경 이력을 로드합니다"""
@@ -719,9 +760,20 @@ class FormulationEditPopup(ctk.CTkToplevel):
             print(f"처방 아이템 {len(form.items)}개 로딩 중...")
             total_amount = Decimal('0')
             
-            # 정렬할 때 order가 None인 항목이 섞여 있어 TypeError가 발생할 수 있음
-            # None은 마지막에 오도록 튜플 키로 안전하게 정렬합니다.
-            sorted_items = sorted(form.items, key=lambda x: (x.order is None, x.order if x.order is not None else 0))
+            # 정렬: 1차로 phase(구분) 순서, 2차로 order 순서
+            # None 값들은 마지막에 오도록 튜플 키로 안전하게 정렬합니다.
+            def sort_key(item):
+                # phase를 숫자로 변환하여 정렬
+                if item.phase is None:
+                    return (1, 999, item.order if item.order is not None else 0)
+                try:
+                    phase_num = int(item.phase)
+                    return (0, phase_num, item.order if item.order is not None else 0)
+                except (ValueError, TypeError):
+                    # 숫자가 아닌 경우 문자열로 정렬
+                    return (0, str(item.phase), item.order if item.order is not None else 0)
+            
+            sorted_items = sorted(form.items, key=sort_key)
             
             for item in sorted_items:
                 phase = str(item.phase) if item.phase else ""
@@ -749,8 +801,13 @@ class FormulationEditPopup(ctk.CTkToplevel):
             # 총 실험량 필드 업데이트
             if total_amount > 0:
                 self.main_total_amount_entry.insert(0, decimal_to_str_full(total_amount))
+                
+            # 안내 메시지 숨기기 (아이템이 있으므로)
+            self.empty_message_label.grid_remove()
         else:
             print("처방 아이템이 없습니다.")
+            # 안내 메시지 표시 (아이템이 없으므로)
+            self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
             
         # 요약 정보 업데이트
         self.update_formulation_summary()
@@ -951,6 +1008,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     "", material.code, material.name, decimal_to_str_full(ratio), decimal_to_str_full(amount)
                 ))
                 self.update_phase_numbers()
+                # 안내 메시지 숨기기 (아이템이 추가되었으므로)
+                self.empty_message_label.grid_remove()
         finally:
             session.close()
 
@@ -960,6 +1019,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
         tag = 'oddrow' if len(self.formulation_item_tree.get_children()) % 2 == 0 else 'evenrow'
         self.formulation_item_tree.insert("", "end", tags=(tag,), values=("", "---", "---", "---", "---"))
         self.update_phase_numbers()
+        # 안내 메시지 숨기기 (아이템이 추가되었으므로)
+        self.empty_message_label.grid_remove()
 
     def delete_selected_item(self):
         """처방 내용 Treeview에서 선택된 항목을 삭제합니다."""
@@ -969,6 +1030,10 @@ class FormulationEditPopup(ctk.CTkToplevel):
             return
         self.formulation_item_tree.delete(selected_item)
         self.update_phase_numbers()
+        
+        # 모든 아이템이 삭제되었는지 확인하고 안내 메시지 표시
+        if not self.formulation_item_tree.get_children():
+            self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
     def edit_item_ratio(self, event):
         """Treeview의 '함량' 셀을 더블클릭하여 수정합니다."""
@@ -1121,6 +1186,39 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.total_ratio_label.configure(text=f"{decimal_to_str_full(total_ratio)} %")
         self.total_amount_label.configure(text=f"{decimal_to_str_full(total_amount)} g")
 
+    def sort_items_by_phase(self):
+        """처방 내용 아이템들을 구분(phase) 순서로 정렬합니다."""
+        # 현재 Treeview의 모든 아이템 정보를 수집
+        items_data = []
+        for item_id in self.formulation_item_tree.get_children():
+            values = self.formulation_item_tree.item(item_id, "values")
+            tags = self.formulation_item_tree.item(item_id, "tags")
+            items_data.append((values, tags))
+        
+        # phase(구분) 순서로 정렬
+        # 숫자가 있는 것은 숫자 순으로, 빈 문자열이나 "---"는 마지막에
+        def sort_key(item):
+            phase_value = item[0][0]  # phase는 첫 번째 컬럼
+            if not phase_value or phase_value == "---" or phase_value == "":
+                return (1, 999)  # 빈 값들은 마지막에
+            try:
+                return (0, int(phase_value))  # 숫자로 변환 가능하면 숫자 순으로
+            except (ValueError, TypeError):
+                return (1, str(phase_value))  # 문자열은 문자열 순으로
+        
+        sorted_items = sorted(items_data, key=sort_key)
+        
+        # 기존 아이템들 삭제
+        for item_id in self.formulation_item_tree.get_children():
+            self.formulation_item_tree.delete(item_id)
+        
+        # 정렬된 순서로 다시 삽입
+        for values, tags in sorted_items:
+            self.formulation_item_tree.insert("", "end", values=values, tags=tags)
+        
+        # phase 번호 업데이트
+        self.update_phase_numbers()
+
     def toggle_target_info(self):
         if self.target_info_var.get():
             self.target_fields_frame.pack(fill="x", expand=True, padx=10, pady=5)
@@ -1167,10 +1265,14 @@ class FormulationEditPopup(ctk.CTkToplevel):
         if not self.exp_name_entry.get().strip():
             messagebox.showwarning(self.texts['warning'], self.texts['export_formulation_name_empty'], parent=self)
             return
+        
+        # 담당자명 처리: ID가 아닌 이름으로 변환
+        manager_name = self.get_manager_display_name(self.exp_manager_entry.get())
+        
         formulation_data = {
             "details": {
                 "실험품명": self.exp_name_entry.get(), "실험년월일": self.exp_date_entry.get(),
-                "담당자": self.exp_manager_entry.get(), "담당번호": self.exp_code_entry.get().upper(),
+                "담당자": manager_name, "담당번호": self.exp_code_entry.get().upper(),
                 "LAB NO.": self.lab_no_entry.get().upper(), "차수": self.revision_entry.get().upper(),
                 "거래처": self.formulation_client_name_combo.get(), "총 실험량": self.main_total_amount_entry.get(),
                 "pH (당일)": self.exp_ph_initial_entry.get(), "pH (익일)": self.exp_ph_next_day_entry.get(),
@@ -1270,7 +1372,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     self.exp_date_entry.set_date(datetime.now())
             else: self.exp_date_entry.set_date(datetime.now())
             self.exp_manager_entry.delete(0, "end")
-            self.exp_manager_entry.insert(0, details.get("담당자", self.current_user.username) or self.current_user.username) # 담당자가 없으면 현재 사용자
+            self.exp_manager_entry.insert(0, details.get("담당자", self.current_user.real_name or self.current_user.username) or (self.current_user.real_name or self.current_user.username)) # 담당자가 없으면 현재 사용자
             # '담당번호' 또는 이전 형식인 '문서 번호' 키를 모두 확인하여 값을 가져옵니다.
             manager_code = details.get("담당번호") or details.get("문서 번호") or ""
             # clear_form에 의해 자동 입력된 값을 지우고 엑셀의 값으로 덮어씁니다.

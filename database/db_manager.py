@@ -502,10 +502,7 @@ class DBManager:
             return False
 
     def has_users(self) -> bool:
-        if self._check_init_state():
-            print("[DEBUG] 이미 초기화된 DB")
-            return True
-            
+        # 초기화 상태와 관계없이 실제 사용자 수를 확인
         session = self.get_session()
         try:
             count = session.query(User).count()
@@ -595,22 +592,15 @@ class DBManager:
             user = session.query(User).filter_by(username=username).first()
             if user and bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
                 print(f"{datetime.now()}: 사용자 '{username}' 인증 성공")
-                # Return a lightweight detached object with commonly used attributes
-                return SimpleNamespace(
-                    id=user.id,
-                    username=user.username,
-                    is_admin=user.is_admin,
-                    position=getattr(user, 'position', None),
-                    manager_code=getattr(user, 'manager_code', None),
-                    contact=getattr(user, 'contact', None),
-                    zip_code=getattr(user, 'zip_code', None),
-                    address=getattr(user, 'address', None),
-                    remember_id=getattr(user, 'remember_id', False),
-                    auto_login=getattr(user, 'auto_login', False),
-                )
+                # User 객체를 그대로 반환 (권한 메서드 사용 가능)
+                return user
             print(f"{datetime.now()}: 사용자 '{username}' 인증 실패")
             return None
         finally:
+            # User 객체를 반환하므로 세션을 닫으면 안 됨
+            # 대신 detached 상태로 만듦
+            if user:
+                session.expunge(user)  # 세션에서 분리
             session.close()
 
     def get_user_settings(self, username):
@@ -754,5 +744,20 @@ class DBManager:
         session.query(FormulationItem).update({FormulationItem.material_id: None}, synchronize_session=False)
         session.query(Material).delete(synchronize_session=False)
         print("원료 데이터가 리셋되었습니다.")
+
+    def has_admin_users(self):
+        """시스템에 관리자 권한 사용자가 이미 존재하는지 확인합니다."""
+        session = self.get_session()
+        try:
+            # is_admin=True이거나 role이 'MSAD'인 사용자 확인
+            admin_count = session.query(User).filter(
+                or_(User.is_admin == True, User.role == 'MSAD')
+            ).count()
+            return admin_count > 0
+        except Exception as e:
+            print(f"관리자 존재 여부 확인 중 오류: {e}")
+            return False
+        finally:
+            session.close()
 
 db_manager = DBManager()

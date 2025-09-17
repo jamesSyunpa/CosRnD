@@ -11,10 +11,11 @@ from modules.history_popup import HistoryPopup
 from utils.autocomplete import AutocompleteEntry
 
 class MaterialManagementFrame(ctk.CTkFrame):
-    def __init__(self, master, user):
+    def __init__(self, master, user, app=None):
         super().__init__(master)
         
         self.current_user = user
+        self.app = app
         self.db_manager = db_manager
         self.temp_ingredients = []
         self._selected_material_id = None
@@ -25,11 +26,30 @@ class MaterialManagementFrame(ctk.CTkFrame):
         
         # 탭 뷰가 필요 없으므로, UI를 프레임에 직접 구성합니다.
         self.setup_data_management_tab(self)
+        
+        # 권한에 따른 UI 요소 제어
+        self.setup_permission_controls()
 
         self.refresh_data()
 
     def get_client_list(self, db_manager):
         return [row[0] for row in db_manager.get_all_clients()]
+
+    def can_edit_data(self):
+        """현재 사용자가 성분 데이터를 편집할 수 있는지 확인합니다."""
+        if not self.current_user:
+            return False
+        
+        # 관리자(MSAD)만 편집 가능
+        return self.current_user.can_edit_material_data()
+    
+    def can_view_data(self):
+        """현재 사용자가 성분 데이터를 조회할 수 있는지 확인합니다."""
+        if not self.current_user:
+            return False
+        
+        # 모든 연구원(QC, RD, RQ, RQD, MSAD) 조회 가능
+        return self.current_user.can_view_material_data()
 
     def start_new_mode(self):
         self.is_new_mode = True
@@ -62,6 +82,16 @@ class MaterialManagementFrame(ctk.CTkFrame):
         """이 화면에 필요한 모든 데이터를 DB에서 새로 불러옵니다."""
         self.load_clients_to_combobox()
         self.load_materials()
+
+    def setup_permission_controls(self):
+        """사용자 권한에 따라 UI 요소들을 제어합니다."""
+        # 권한 제어는 setup_data_management_tab에서 처리되므로 여기서는 추가 설정만
+        can_edit = self.can_edit_data()
+        
+        if not can_edit:
+            # 공급처 선택 비활성화
+            if hasattr(self, 'supplier_entry'):
+                self.supplier_entry.configure(state="disabled")
                 
     def setup_data_management_tab(self, tab_frame):
         """원료 데이터 관리 UI를 설정합니다."""
@@ -76,9 +106,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.form_container = ctk.CTkScrollableFrame(tab_frame, label_text="원료 정보 입력")
         self.form_container.grid(row=0, column=0, padx=(0, 0), pady=0, sticky="nsew")
         self.form_container.grid_columnconfigure(0, weight=0)
-        self.form_container.grid_columnconfigure(1, weight=1)  # 입력 필드 가변
+        self.form_container.grid_columnconfigure(1, weight=1)  # ?�력 ?�드 가변
 
-        material_labels = ["코드", "원료명", "단가", "포장단위", "공급처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "등록일"]
+        material_labels = ["코드", "원료명", "용도", "보관온도", "공급처", "제조회사명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "등록일"]
         self.material_entries = {}
         for i, text in enumerate(material_labels):
             ctk.CTkLabel(self.form_container, text=text).grid(row=i, column=0, padx=10, pady=5, sticky="w")
@@ -145,7 +175,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.ingredient_tree.configure(xscrollcommand=ing_h_scroll.set)
         ing_h_scroll.grid(row=2, column=0, columnspan=2, sticky='ew', padx=5)
 
-        ing_labels = ["한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "비고"]
+        ing_labels = ["전성분명", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "비고"]
         self.ingredient_entries = {}
         for i, text in enumerate(ing_labels):
             ctk.CTkLabel(ingredient_frame, text=text).grid(row=i+3, column=0, padx=5, pady=2, sticky="w")
@@ -211,10 +241,11 @@ class MaterialManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(right_header_frame, text="데이터 내보내기", command=self.export_material_data).pack(side="left", padx=5)
         self.excel_import_button = ctk.CTkButton(right_header_frame, text="데이터 가져오기", command=self.import_material_data)
 
-        # 비관리자 접근 제한
-        if not self.current_user.is_admin:
+        # 데이터 편집 권한 접근 제한
+        if not self.can_edit_data():
             self.material_active_var.set("off")
-            self.form_container.configure(label_text="원료 정보 조회 (관리자만 수정 가능)")
+            user_role = getattr(self.current_user, 'role', 'Unknown')
+            self.form_container.configure(label_text=f"원료 정보 조회 전용 (현재 권한: {user_role}) - 편집은 관리자(MSAD) 권한 필요")
             # 데이터 수정/관리 관련 버튼 숨기기
             self.ing_add_button.pack_forget()
             self.ing_update_button.pack_forget()
@@ -229,35 +260,35 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 entry.configure(state="readonly")
 
         # ===== 원료 목록 트리뷰 =====        
-        else: # 관리자일 경우에만 가져오기 버튼 표시
+        else: # 데이터 편집 권한이 있는 경우에만 가져오기 버튼 표시
             self.excel_import_button.pack(side="left", padx=5)
 
-        # 트리뷰 생성
+        # ?�리�??�성
         mat_tree_cols = ("group", "id", "code", "name", "unit_price", "package_unit", "client", "manufacturer", "hs_code", "origin", "name_en", "nmpa_reg_num")
         self.material_tree = ttk.Treeview(list_frame, columns=mat_tree_cols, show="headings", selectmode="browse")
 
-        # 컬럼 설정
-        # 'id' 컬럼은 숨김 처리
+        # 컬럼 ?�정
+        # 'id' 컬럼?� ?��? 처리
         self.material_tree.heading("group", text="구분");           self.material_tree.column("group", width=50, anchor="center")
-        self.material_tree.heading("id", text="ID");                self.material_tree.column("id", width=0, stretch=tk.NO) # ID 컬럼 숨김
+        self.material_tree.heading("id", text="ID");                self.material_tree.column("id", width=0, stretch=tk.NO) # ID 컬럼 숨기기
         self.material_tree.heading("code", text="코드");            self.material_tree.column("code", width=100, anchor="w")
-        self.material_tree.heading("name", text="원료명");          self.material_tree.column("name", width=200, anchor="w")
+        self.material_tree.heading("name", text="자료명");          self.material_tree.column("name", width=200, anchor="w")
         self.material_tree.heading("unit_price", text="단가");       self.material_tree.column("unit_price", width=80, anchor="e")
         self.material_tree.heading("package_unit", text="포장단위"); self.material_tree.column("package_unit", width=80, anchor="center")
         self.material_tree.heading("client", text="공급처");        self.material_tree.column("client", width=150, anchor="w")
-        self.material_tree.heading("manufacturer", text="제조원명"); self.material_tree.column("manufacturer", width=150, anchor="w")
+        self.material_tree.heading("manufacturer", text="제조회사명"); self.material_tree.column("manufacturer", width=150, anchor="w")
         self.material_tree.heading("hs_code", text="HS CODE");      self.material_tree.column("hs_code", width=100, anchor="w")
         self.material_tree.heading("origin", text="원산지");        self.material_tree.column("origin", width=100, anchor="w")
-        self.material_tree.heading("name_en", text="영문원료명");    self.material_tree.column("name_en", width=200, anchor="w")
+        self.material_tree.heading("name_en", text="영문자료명");    self.material_tree.column("name_en", width=200, anchor="w")
         self.material_tree.heading("nmpa_reg_num", text="NMPA등록번호"); self.material_tree.column("nmpa_reg_num", width=120, anchor="w")
 
-        # 'id' 컬럼을 숨깁니다.
+        # 'id' 컬럼???�깁?�다.
         self.material_tree.configure(displaycolumns=[col for col in mat_tree_cols if col != 'id'])
 
         # 배치
         self.material_tree.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=(0, 5))
 
-        # 스크롤바
+        # ?�크롤바
         v_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.material_tree.yview)
         self.material_tree.configure(yscrollcommand=v_scrollbar.set)
         v_scrollbar.grid(row=1, column=1, sticky="ns", pady=(0, 5))
@@ -266,15 +297,15 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.material_tree.configure(xscrollcommand=h_scrollbar.set)
         h_scrollbar.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(10, 0), pady=(0, 10))
         
-        # 선택 이벤트 바인딩
+        # ?�택 ?�벤??바인??
         self.material_tree.bind("<<TreeviewSelect>>", self.on_material_tree_select)
                                
     def _create_column_selection_menu(self, treeview, columns_config, button_widget):
-        """열 선택 체크박스 메뉴를 생성하고 버튼에 연결합니다."""
+        """???�택 체크박스 메뉴�??�성?�고 버튼???�결?�니??"""
         column_menu = tk.Menu(button_widget, tearoff=0)
         
         for col_id, config in columns_config.items():
-            # ID 열은 항상 숨김 처리
+            # ID ?��? ??�� ?��? 처리
             if col_id == 'id':
                 continue
             
@@ -342,8 +373,21 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
     def import_material_data(self):
         """엑셀 파일에서 원료 및 전성분 데이터를 가져와서 데이터베이스에 저장합니다."""
+        # 편집 권한 확인
+        if not self.can_edit_data():
+            messagebox.showwarning("권한 오류", "성분 데이터를 편집할 권한이 없습니다.\n편집은 관리자(MSAD) 권한이 필요합니다.\n현재 권한으로는 조회만 가능합니다.")
+            return
+            
         # 대량 가져오기 시작
         self.bulk_importing = True
+        
+        # DB 동기화 체크 임시 중단 (대량 가져오기로 인한 성능 방지)
+        sync_was_running = False
+        if hasattr(self.app, 'stop_db_sync_check'):
+            # 현재 동기화가 실행 중인지 확인
+            sync_was_running = hasattr(self.app, 'db_sync_timer') and self.app.db_sync_timer is not None
+            self.app.stop_db_sync_check()
+            print("[원료가져오기] DB 동기화 체크 임시 중단")
         
         try:
             imported_data = excel_handler.import_multisheet_data()
@@ -358,14 +402,14 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 return
 
             def get_val(row, kor_key, eng_key):
-                """행에서 한글키 또는 영문키로 값을 가져옵니다."""
+                """한글에 실패하면 영문으로 값을 가져옵니다."""
                 value = row.get(kor_key, row.get(eng_key))
                 return value.strip() if isinstance(value, str) else value
 
             session = db_manager.get_session()
             
             try:
-                # 기존 클라이언트 맵 생성
+                # 기존 ?�라?�언??�??�성
                 clients = session.query(Client).all()
                 client_map_by_biz_num = {}
                 client_map_by_name = {}
@@ -380,155 +424,155 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 print(f"  - 사업자번호 맵: {len(client_map_by_biz_num)}개")
                 print(f"  - 이름 맵: {len(client_map_by_name)}개")
                 
-                # 처리될 재료들을 저장할 딕셔너리
+                # 처리된 자료들을 저장할 딕셔너리
                 processed_materials = {}
                 materials_count = 0
                 ingredients_count = 0
                 new_clients_count = 0
                 
-                print(f"가져올 재료 데이터: {len(materials_data)}개")
-                print(f"가져올 전성분 데이터: {len(ingredients_data)}개")
+                print(f"가져올 자료 데이터: {len(materials_data)}개")
+                print(f"가져올 성분 데이터: {len(ingredients_data)}개")
                 
-                # 1단계: 재료 정보 처리 (개선된 거래처 처리 포함)
+                # 1단계: 자료 정보 처리 (개선된 거래처 처리 포함)
                 for i, mat_row in enumerate(materials_data):
                     try:
                         code = get_val(mat_row, "코드", "code")
                         if not code:
-                            print(f"재료 {i+1}: 코드가 없어서 건너뜀")
+                            print(f"자료 {i+1}: 코드가 없어서 건너뜀")
                             continue
                         
-                        # 기존 재료 찾기 또는 새로 생성
+                        # 기존 자료 찾기 또는 새로 생성
                         material = session.query(Material).filter_by(code=code).first()
                         if not material:
                             material = Material(code=code)
                             session.add(material)
-                            print(f"새 재료 생성: {code}")
+                            print(f"새 자료 생성: {code}")
                         else:
-                            print(f"기존 재료 업데이트: {code}")
+                            print(f"기존 자료 업데이트: {code}")
 
-                        # 재료 기본 정보 설정
-                        material.name = get_val(mat_row, "원료명", "name") or ""
-                        material.name_en = get_val(mat_row, "영문원료명", "name_en") or ""
+                        # 자료 기본 정보 설정
+                        material.name = get_val(mat_row, "자료명", "name") or ""
+                        material.name_en = get_val(mat_row, "영문자료명", "name_en") or ""
                         
-                        # 단가 처리
-                        unit_price_val = get_val(mat_row, "단가", "unit_price")
+                        # ?��? 처리
+                        unit_price_val = get_val(mat_row, "?��?", "unit_price")
                         try:
                             material.unit_price = float(unit_price_val) if unit_price_val else 0.0
                         except (ValueError, TypeError):
                             material.unit_price = 0.0
                         
-                        material.package_unit = get_val(mat_row, "포장단위", "package_unit") or ""
+                        material.package_unit = get_val(mat_row, "?�장?�위", "package_unit") or ""
                         
-                        # ========== 개선된 거래처 ID 설정 ==========
+                        # ========== 개선??거래�?ID ?�정 ==========
                         client_id = None
 
-                        # 1순위: '거래처사업자번호' 열이 있으면 해당 번호로 찾기
-                        biz_num_val = get_val(mat_row, "거래처코드(사업자번호)", "client_business_number") # 거래처 템플릿과 키 맞춤
+                        # 1?�위: '거래처사?�자번호' ?�이 ?�으�??�당 번호�?찾기
+                        biz_num_val = get_val(mat_row, "거래처코???�업?�번??", "client_business_number") # 거래�??�플릿과 ??맞춤
                         if biz_num_val:
                             biz_num_str = str(biz_num_val).strip()
                             client_id = client_map_by_biz_num.get(biz_num_str)
                             if not client_id:
-                                # 해당 사업자번호의 거래처가 없으면 새로 생성
+                                # ?�당 ?�업?�번?�의 거래처�? ?�으�??�로 ?�성
                                 client_name_val = get_val(mat_row, "거래처명", "client_name") or biz_num_str
                                 new_client = Client(
                                     name=str(client_name_val).strip(), 
                                     business_number=biz_num_str, 
                                     is_active=True,
-                                    client_type='원료'  # 공급처이므로 타입을 '원료'로 지정
+                                    client_type='?�료'  # 공급처이므�??�?�을 '?�료'�?지??
                                 )
                                 session.add(new_client)
                                 session.flush()
                                 client_id = new_client.id
                                 client_map_by_biz_num[biz_num_str] = client_id
-                                # 이름 맵에도 추가하여 일관성 유지
+                                # ?�름 맵에??추�??�여 ?��????��?
                                 client_map_by_name[str(client_name_val).strip()] = client_id
                                 new_clients_count += 1
-                                print(f"  새 거래처 생성 (사업자번호 기준): {client_name_val} ({biz_num_str}) -> ID {client_id}")
+                                print(f"  ??거래�??�성 (?�업?�번??기�?): {client_name_val} ({biz_num_str}) -> ID {client_id}")
                             else:
-                                print(f"  거래처 매칭 성공 (사업자번호): {biz_num_str} -> ID {client_id}")
+                                print(f"  거래�?매칭 ?�공 (?�업?�번??: {biz_num_str} -> ID {client_id}")
 
-                        # 2순위: '거래처사업자번호'가 없을 경우, '거래처명'으로 찾기
+                        # 2?�위: '거래처사?�자번호'가 ?�을 경우, '거래처명'?�로 찾기
                         else:
-                            client_name_val = get_val(mat_row, "거래처", "client_name") or get_val(mat_row, "거래처명", None)
+                            client_name_val = get_val(mat_row, "거래�?, "client_name") or get_val(mat_row, "거래처명", None)
                             if client_name_val:
                                 client_name_str = str(client_name_val).strip()
                                 client_id = client_map_by_name.get(client_name_str)
                                 if not client_id:
-                                    # 이름으로도 거래처를 찾을 수 없으면 새로 생성 (사업자번호 없이)
+                                    # ?�름?�로??거래처�? 찾을 ???�으�??�로 ?�성 (?�업?�번???�이)
                                     new_client = Client(
                                         name=client_name_str, 
                                         business_number=None, 
                                         is_active=True,
-                                        client_type='원료' # 공급처이므로 타입을 '원료'로 지정
+                                        client_type='?�료' # 공급처이므�??�?�을 '?�료'�?지??
                                     )
                                     session.add(new_client)
                                     session.flush()
                                     client_id = new_client.id
-                                    # 새로 생성된 클라이언트를 이름 맵에 추가하여 중복 생성을 방지합니다.
+                                    # ?�로 ?�성???�라?�언?��? ?�름 맵에 추�??�여 중복 ?�성??방�??�니??
                                     client_map_by_name[client_name_str] = client_id
                                     new_clients_count += 1
-                                    print(f"  새 거래처 생성 (이름만): {client_name_str} -> ID {client_id}")
+                                    print(f"  ??거래�??�성 (?�름�?: {client_name_str} -> ID {client_id}")
                                 else:
-                                    print(f"  거래처 매칭 성공 (이름): {client_name_str} -> ID {client_id}")
+                                    print(f"  거래�?매칭 ?�공 (?�름): {client_name_str} -> ID {client_id}")
                         
                         material.supplier_id = client_id
                         
-                        material.manufacturer = get_val(mat_row, "제조원명", "manufacturer") or ""
+                        material.manufacturer = get_val(mat_row, "?�조?�명", "manufacturer") or ""
                         material.hs_code = get_val(mat_row, "HS CODE", "hs_code") or ""
-                        material.origin = get_val(mat_row, "원산지", "origin") or ""
-                        material.name_en = get_val(mat_row, "영문원료명", "name_en") or ""
-                        material.nmpa_reg_num = get_val(mat_row, "NMPA등록번호", "nmpa_reg_num") or ""
+                        material.origin = get_val(mat_row, "?�산지", "origin") or ""
+                        material.name_en = get_val(mat_row, "?�문?�료�?, "name_en") or ""
+                        material.nmpa_reg_num = get_val(mat_row, "NMPA?�록번호", "nmpa_reg_num") or ""
                         
-                        # 사용여부 처리
-                        is_active_val = get_val(mat_row, "사용여부(Y/N)", "is_active") or "Y"
+                        # ?�용?��? 처리
+                        is_active_val = get_val(mat_row, "?�용?��?(Y/N)", "is_active") or "Y"
                         material.is_active = str(is_active_val).upper() in ["Y", "TRUE", "1", "YES"]
 
-                        # 기존 전성분 삭제 (새로운 전성분으로 대체하기 위해)
+                        # 기존 ?�성�???�� (?�로???�성분으�??�체하�??�해)
                         material.ingredients.clear()
                         
                         processed_materials[code] = material
                         materials_count += 1
                         
                     except Exception as e:
-                        print(f"재료 {i+1} 처리 중 오류: {e}")
+                        print(f"?�료 {i+1} 처리 �??�류: {e}")
                         continue
 
-                # 세션 플러시하여 재료 ID 생성
+                # ?�션 ?�러?�하???�료 ID ?�성
                 session.flush()
-                print(f"재료 처리 완료: {materials_count}개, 새 거래처: {new_clients_count}개")
+                print(f"?�료 처리 ?�료: {materials_count}�? ??거래�? {new_clients_count}�?)
 
-                # 2단계: 전성분 정보 처리 (기존 로직과 동일)
+                # 2?�계: ?�성�??�보 처리 (기존 로직�??�일)
                 ingredient_groups = {}
                 
                 for i, ing_row in enumerate(ingredients_data):
                     try:
-                        material_code = get_val(ing_row, "원료코드", "material_code")
+                        material_code = get_val(ing_row, "?�료코드", "material_code")
                         if not material_code:
-                            print(f"전성분 {i+1}: 원료코드가 없어서 건너뜀")
+                            print(f"?�성�?{i+1}: ?�료코드가 ?�어??건너?�")
                             continue
                         
                         material_code = str(material_code).strip()
                         if material_code not in processed_materials:
-                            print(f"전성분 {i+1}: 원료코드 '{material_code}'에 해당하는 재료를 찾을 수 없음")
+                            print(f"?�성�?{i+1}: ?�료코드 '{material_code}'???�당?�는 ?�료�?찾을 ???�음")
                             continue
                         
                         if material_code not in ingredient_groups:
                             ingredient_groups[material_code] = []
                         
                         ingredient_data = {
-                            'name_ko': get_val(ing_row, "한글전성분", "name_ko") or "",
+                            'name_ko': get_val(ing_row, "?��??�성�?, "name_ko") or "",
                             'name_en': get_val(ing_row, "INGREDIENT", "name_en") or "",
                             'cas_no': get_val(ing_row, "CAS NO.", "cas_no") or "",
                             'function': get_val(ing_row, "기능", "function") or "",
-                            'ewg_grade': get_val(ing_row, "EWG등급", "ewg_grade") or "",
-                            'ewg_data': get_val(ing_row, "EWG등급데이터", "ewg_data") or "",
+                            'ewg_grade': get_val(ing_row, "EWG?�급", "ewg_grade") or "",
+                            'ewg_data': get_val(ing_row, "EWG?�급?�이??, "ewg_data") or "",
                             'hs_code': get_val(ing_row, "HS CODE", "hs_code") or "",
-                            'nmpa_reg_num': get_val(ing_row, "NMPA등록번호", "nmpa_reg_num") or "",
+                            'nmpa_reg_num': get_val(ing_row, "NMPA?�록번호", "nmpa_reg_num") or "",
                             'remark': get_val(ing_row, "비고", "remark") or ""
                         }                        
                         
-                        # 조성비 처리
-                        composition_ratio_val = get_val(ing_row, "조성비(%)", "composition_ratio")
+                        # 조성�?처리
+                        composition_ratio_val = get_val(ing_row, "조성�?%)", "composition_ratio")
                         try:
                             ingredient_data['composition_ratio'] = float(composition_ratio_val) if composition_ratio_val else 0.0
                         except (ValueError, TypeError):
@@ -537,14 +581,14 @@ class MaterialManagementFrame(ctk.CTkFrame):
                         ingredient_groups[material_code].append(ingredient_data)
                         
                     except Exception as e:
-                        print(f"전성분 {i+1} 처리 중 오류: {e}")
+                        print(f"?�성�?{i+1} 처리 �??�류: {e}")
                         continue
                 
-                # 재료별로 전성분 추가
+                # ?�료별로 ?�성�?추�?
                 for material_code, ingredients_list in ingredient_groups.items():
                     try:
                         parent_material = processed_materials[material_code]
-                        print(f"재료 '{material_code}'에 {len(ingredients_list)}개의 전성분 추가")
+                        print(f"?�료 '{material_code}'??{len(ingredients_list)}개의 ?�성�?추�?")
                         
                         for ing_data in ingredients_list:
                             new_ingredient = Ingredient(
@@ -563,61 +607,73 @@ class MaterialManagementFrame(ctk.CTkFrame):
                             ingredients_count += 1
                     
                     except Exception as e:
-                        print(f"재료 '{material_code}' 전성분 추가 중 오류: {e}")
+                        print(f"?�료 '{material_code}' ?�성�?추�? �??�류: {e}")
                         continue
 
-                # 데이터베이스 커밋
+                # ?�이?�베?�스 커밋
                 session.commit()
                 
-                # 성공 메시지
-                success_msg = f"데이터 가져오기 완료!\n재료: {materials_count}개\n전성분: {ingredients_count}개\n새 거래처: {new_clients_count}개"
-                messagebox.showinfo("성공", success_msg)
+                # ?�공 메시지
+                success_msg = f"?�이??가?�오�??�료!\n?�료: {materials_count}�?n?�성�? {ingredients_count}�?n??거래�? {new_clients_count}�?
+                messagebox.showinfo("?�공", success_msg)
                 print(success_msg)
 
-                # 모든 DB 작업이 끝난 후 UI 새로고침
+                # 모든 DB ?�업???�난 ??UI ?�로고침
                 self.bulk_importing = False
-                self.refresh_data() # UI 전체 새로고침으로 변경
+                self.refresh_data() # UI ?�체 ?�로고침?�로 변�?
 
             except Exception as e:
                 session.rollback()
-                error_msg = f"가져오기 중 오류 발생: {str(e)}"
-                print(f"오류 상세: {e}")
+                error_msg = f"가?�오�?�??�류 발생: {str(e)}"
+                print(f"?�류 ?�세: {e}")
                 import traceback
                 traceback.print_exc()
-                messagebox.showerror("데이터베이스 오류", error_msg)
-                self.bulk_importing = False # 오류 발생 시에도 플래그 해제
+                messagebox.showerror("?�이?�베?�스 ?�류", error_msg)
+                self.bulk_importing = False # ?�류 발생 ?�에???�래�??�제
                 
             finally:
                 session.close()
                 
         except Exception as e:
-            error_msg = f"파일 처리 중 오류 발생: {str(e)}"
-            print(f"파일 오류 상세: {e}")
-            messagebox.showerror("파일 오류", error_msg)
-            self.bulk_importing = False # 오류 발생 시에도 플래그 해제
+            error_msg = f"?�일 처리 �??�류 발생: {str(e)}"
+            print(f"?�일 ?�류 ?�세: {e}")
+            messagebox.showerror("?�일 ?�류", error_msg)
+            self.bulk_importing = False # ?�류 발생 ?�에???�래�??�제
         
-        print("import_material_data 완료")
+        # DB ?�기??기�????�데?�트 �?체크 ?�시??
+        if hasattr(self.app, 'update_db_sync_baseline'):
+            # 즉시 기�????�데?�트 (?�체 변경사??반영)
+            self.app.update_db_sync_baseline()
+            
+        if sync_was_running and hasattr(self.app, 'start_db_sync_check'):
+            # 3�??�에 ?�기??체크 ?�시??(DB 변경사???�정???��?
+            self.app.after(3000, lambda: (
+                print("[?�료가?�오�? DB ?�기??체크 ?�시??),
+                self.app.start_db_sync_check()
+            ))
+        
+        print("import_material_data ?�료")
 
     def reset_material_search(self):
-        """원료 검색창을 초기화하고 전체 목록을 다시 불러옵니다."""
+        """?�료 검?�창??초기?�하�??�체 목록???�시 불러?�니??"""
         self.material_search_entry.delete(0, "end")
         self.load_materials()
 
     def on_material_search(self, event=None):
-        """검색창 입력 시 디바운싱을 적용하여 검색을 실행합니다."""
+        """검?�창 ?�력 ???�바?�싱???�용?�여 검?�을 ?�행?�니??"""
         if self.search_timer:
             self.after_cancel(self.search_timer)
-        # 500ms(0.5초) 후에 load_materials 함수를 실행
+        # 500ms(0.5�? ?�에 load_materials ?�수�??�행
         self.search_timer = self.after(500, self.load_materials)
 
     def load_materials(self):
-        """DB에서 원료 목록을 검색하여 Treeview에 표시합니다."""
+        """DB?�서 ?�료 목록??검?�하??Treeview???�시?�니??"""
         search_term = self.material_search_entry.get().strip()
-        # 검색 시에는 전성분도 함께 검색하도록 search_ingredients=True로 변경합니다.
-        # 목록 표시에는 전성분 내용이 필요 없으므로 load_ingredients=False는 유지합니다.
+        # 검???�에???�성분도 ?�께 검?�하?�록 search_ingredients=True�?변경합?�다.
+        # 목록 ?�시?�는 ?�성�??�용???�요 ?�으므�?load_ingredients=False???��??�니??
         materials = db_manager.search_materials(search_term, load_ingredients=False, search_ingredients=True)
         
-        # 1. UI 렌더링 성능 최적화: 데이터를 먼저 메모리에 리스트로 준비
+        # 1. UI ?�더�??�능 최적?? ?�이?��? 먼�? 메모리에 리스?�로 준�?
         material_data_list = []
         try:
             for i, mat in enumerate(materials):
@@ -631,55 +687,55 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 )
                 material_data_list.append((values, tag))
 
-            # 2. Treeview를 한 번에 업데이트
-            # 기존 항목 모두 삭제
+            # 2. Treeview�???번에 ?�데?�트
+            # 기존 ??�� 모두 ??��
             for item in self.material_tree.get_children():
                 self.material_tree.delete(item)
-            # 메모리에 준비된 데이터로 Treeview 채우기
+            # 메모리에 준비된 ?�이?�로 Treeview 채우�?
             for values, tag in material_data_list:
                 self.material_tree.insert("", "end", tags=(tag,), values=values)
 
         except Exception as e:
-            print(f"원료 목록 로드 중 오류 발생: {e}")
+            print(f"?�료 목록 로드 �??�류 발생: {e}")
 
     def load_clients_to_combobox(self):
-        """거래처 정보를 콤보박스와 자동완성에 로드합니다. - 개선된 버전"""
-        # 대량 가져오기 중일 때는 불필요한 호출 방지
+        """거래�??�보�?콤보박스?� ?�동?�성??로드?�니?? - 개선??버전"""
+        # ?�??가?�오�?중일 ?�는 불필?�한 ?�출 방�?
         if getattr(self, "bulk_importing", False):
-            print("대량 가져오기 중이므로 콤보박스 업데이트 건너뜀")
+            print("?�??가?�오�?중이므�?콤보박스 ?�데?�트 건너?�")
             return
         
         session = db_manager.get_session()
         session = self.db_manager.get_session()
         try:
-            # '원료' 타입의 활성 거래처만 불러옵니다.
-            suppliers = session.query(Client).filter_by(is_active=True, client_type='원료').all()
+            # '?�료' ?�?�의 ?�성 거래처만 불러?�니??
+            suppliers = session.query(Client).filter_by(is_active=True, client_type='?�료').all()
             
-            # 거래처 매핑 딕셔너리 생성
-            self.supplier_map = {s.name: s.id for s in suppliers}  # 이름 -> ID
-            self.supplier_id_map = {s.id: s.name for s in suppliers}  # ID -> 이름
+            # 거래�?매핑 ?�셔?�리 ?�성
+            self.supplier_map = {s.name: s.id for s in suppliers}  # ?�름 -> ID
+            self.supplier_id_map = {s.id: s.name for s in suppliers}  # ID -> ?�름
             
             supplier_names = list(self.supplier_map.keys())
             
-            print(f"로드된 공급처 수: {len(suppliers)}")
+            print(f"로드??공급�??? {len(suppliers)}")
             
-            # AutocompleteEntry에 거래처 목록 설정 (오류 수정)
+            # AutocompleteEntry??거래�?목록 ?�정 (?�류 ?�정)
             if hasattr(self, 'supplier_entry'):
                 self.supplier_entry.set_completion_list(supplier_names)
-                print(f"AutocompleteEntry에 {len(supplier_names)}개 공급처 설정 완료")
+                print(f"AutocompleteEntry??{len(supplier_names)}�?공급�??�정 ?�료")
 
         except Exception as e:
-            print(f"거래처 로드 중 오류: {e}")
+            print(f"거래�?로드 �??�류: {e}")
             import traceback
             traceback.print_exc()
         finally:
             session.close()
 
     def on_material_tree_select(self, event):
-        """재료 트리뷰에서 항목 선택 시 호출되는 메서드 - 개선된 버전"""
-        # 대량 가져오기 중이면 차단 (콤보박스 업데이트 방지)
+        """?�료 ?�리뷰에????�� ?�택 ???�출?�는 메서??- 개선??버전"""
+        # ?�??가?�오�?중이�?차단 (콤보박스 ?�데?�트 방�?)
         if getattr(self, "bulk_importing", False):
-            print("대량 가져오기 중이므로 트리 선택 이벤트 무시")
+            print("?�??가?�오�?중이므�??�리 ?�택 ?�벤??무시")
             return
             
         if not hasattr(self, "supplier_entry"):
@@ -692,9 +748,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
         mat_id = self.material_tree.item(selected_item[0], "values")[0]
         self._selected_material_id = mat_id
 
-        # db_manager.search_materials에서 이미 client와 ingredients를 로드했으므로,
-        # 여기서는 DB에 다시 접근할 필요 없이 트리뷰의 값을 사용합니다.
-        # 단, 트리뷰에 모든 정보가 없을 수 있으므로, 상세 정보는 DB에서 다시 가져옵니다.
+        # db_manager.search_materials?�서 ?��? client?� ingredients�?로드?�으므�?
+        # ?�기?�는 DB???�시 ?�근???�요 ?�이 ?�리뷰의 값을 ?�용?�니??
+        # ?? ?�리뷰에 모든 ?�보가 ?�을 ???�으므�? ?�세 ?�보??DB?�서 ?�시 가?�옵?�다.
         session = db_manager.get_session()
         try:
             material = session.query(Material).options(
@@ -702,55 +758,55 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 joinedload(Material.supplier)
             ).filter_by(id=mat_id).first()
             if not material:
-                print(f"재료 ID {mat_id}를 찾을 수 없습니다.")
+                print(f"?�료 ID {mat_id}�?찾을 ???�습?�다.")
                 return
 
-            # 비관리자일 경우, 폼을 채우기 전에 입력 필드를 일시적으로 활성화
+            # 비�?리자??경우, ?�을 채우�??�에 ?�력 ?�드�??�시?�으�??�성??
             if not self.current_user.is_admin:
                 for entry in self.material_entries.values():
                     entry.configure(state="normal")
                 for entry in self.ingredient_entries.values():
                     entry.configure(state="normal")
 
-            print(f"선택된 재료: {material.name} (코드: {material.code})")
+            print(f"?�택???�료: {material.name} (코드: {material.code})")
 
-            # 기본 재료 정보 폼 초기화
+            # 기본 ?�료 ?�보 ??초기??
             for key, entry in self.material_entries.items():
                 if isinstance(entry, ctk.CTkComboBox):
                     entry.set("")
                 else:
                     entry.delete(0, "end")
 
-            # 재료 기본 정보 입력
+            # ?�료 기본 ?�보 ?�력
             self.material_entries["코드"].insert(0, material.code or "")
-            self.material_entries["원료명"].insert(0, material.name or "")
-            self.material_entries["영문원료명"].insert(0, material.name_en or "")
-            self.material_entries["단가"].insert(0, str(material.unit_price or 0.0))
-            self.material_entries["포장단위"].insert(0, material.package_unit or "")
-            self.material_entries["제조원명"].insert(0, material.manufacturer or "")
+            self.material_entries["?�료�?].insert(0, material.name or "")
+            self.material_entries["?�문?�료�?].insert(0, material.name_en or "")
+            self.material_entries["?��?"].insert(0, str(material.unit_price or 0.0))
+            self.material_entries["?�장?�위"].insert(0, material.package_unit or "")
+            self.material_entries["?�조?�명"].insert(0, material.manufacturer or "")
             self.material_entries["HS CODE"].insert(0, material.hs_code or "")
-            self.material_entries["원산지"].insert(0, material.origin or "")
-            self.material_entries["NMPA등록번호"].insert(0, material.nmpa_reg_num or "")
-            self.material_entries["등록일"].insert(0, material.reg_date or "")
+            self.material_entries["?�산지"].insert(0, material.origin or "")
+            self.material_entries["NMPA?�록번호"].insert(0, material.nmpa_reg_num or "")
+            self.material_entries["?�록??].insert(0, material.reg_date or "")
 
-            # 거래처 정보 처리 (개선된 버전)
+            # 거래�??�보 처리 (개선??버전)
             supplier_name = ""
             if material.supplier:
                 supplier_name = material.supplier.name
             elif hasattr(self, 'supplier_id_map') and material.supplier_id in self.supplier_id_map:
                 supplier_name = self.supplier_id_map.get(material.supplier_id, "")
             
-            # 거래처 입력 필드에 설정
+            # 거래�??�력 ?�드???�정
             self.supplier_entry.delete(0, "end")
             if supplier_name:
                 self.supplier_entry.insert(0, supplier_name)
 
-            # 사용여부 체크박스 설정
+            # ?�용?��? 체크박스 ?�정
             self.material_active_var.set("on" if material.is_active else "off")
 
-            # 이력 보기 버튼 활성화
+            # ?�력 보기 버튼 ?�성??
             self.material_history_button.configure(state="normal")
-            # 전성분 정보를 temp_ingredients에 복사
+            # ?�성�??�보�?temp_ingredients??복사
             self.temp_ingredients = []
             
             for ing in material.ingredients:
@@ -767,9 +823,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 }
                 self.temp_ingredients.append(ingredient_data)
             
-            print(f"temp_ingredients에 저장된 전성분 개수: {len(self.temp_ingredients)}")
+            print(f"temp_ingredients???�?�된 ?�성�?개수: {len(self.temp_ingredients)}")
             
-            # 비관리자일 경우, 폼을 채운 후 다시 모든 필드를 비활성화
+            # 비�?리자??경우, ?�을 채운 ???�시 모든 ?�드�?비활?�화
             if not self.current_user.is_admin:
                 for entry in self.material_entries.values():
                     entry.configure(state="readonly")
@@ -777,40 +833,40 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     entry.configure(state="readonly")
 
         except Exception as e:
-            print(f"재료 선택 처리 중 오류: {e}")
+            print(f"?�료 ?�택 처리 �??�류: {e}")
             import traceback
             traceback.print_exc()
-            messagebox.showerror("데이터베이스 오류", f"재료 정보 로드 중 오류 발생: {e}")
+            messagebox.showerror("?�이?�베?�스 ?�류", f"?�료 ?�보 로드 �??�류 발생: {e}")
             return
             
         finally:
             session.close()
         
-        # 세션이 닫힌 후에 UI 업데이트 (메모리의 데이터 사용)
+        # ?�션???�힌 ?�에 UI ?�데?�트 (메모리의 ?�이???�용)
         try:
             self.refresh_ingredient_tree()
             self.clear_ingredient_form()
             
         except Exception as e:
-            print(f"UI 업데이트 중 오류: {e}")
-            messagebox.showerror("UI 오류", f"화면 업데이트 중 오류 발생: {e}")
+            print(f"UI ?�데?�트 �??�류: {e}")
+            messagebox.showerror("UI ?�류", f"?�면 ?�데?�트 �??�류 발생: {e}")
 
     def refresh_ingredient_tree(self):
         """
-        전성분 트리뷰를 새로고침합니다.
-        - 수정: 기존 항목을 먼저 삭제하여 UI 불일치 문제를 해결합니다.
+        ?�성�??�리뷰�? ?�로고침?�니??
+        - ?�정: 기존 ??��??먼�? ??��?�여 UI 불일�?문제�??�결?�니??
         """
         try:
-            # 기존 항목들 모두 삭제
+            # 기존 ??��??모두 ??��
             for item in self.ingredient_tree.get_children(): 
                 self.ingredient_tree.delete(item)
             
-            print(f"트리뷰 새로고침: {len(self.temp_ingredients)}개 전성분 표시")
+            print(f"?�리�??�로고침: {len(self.temp_ingredients)}�??�성�??�시")
             
-            # temp_ingredients의 모든 항목을 트리뷰에 추가
+            # temp_ingredients??모든 ??��???�리뷰에 추�?
             for i, ing in enumerate(self.temp_ingredients):
                 tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-                # 컬럼 설정에 따라 값을 동적으로 구성
+                # 컬럼 ?�정???�라 값을 ?�적?�로 구성
                 values = (
                     ing.get("id", f"temp_{i}"), 
                     ing.get("name_ko", ""), 
@@ -824,17 +880,17 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 )
                 
                 item_id = self.ingredient_tree.insert("", "end", tags=(tag,), values=values)
-                print(f"  {i+1}. {ing.get('name_ko', '')} ({ing.get('name_en', '')}) 추가됨")
+                print(f"  {i+1}. {ing.get('name_ko', '')} ({ing.get('name_en', '')}) 추�???)
                 
-            print(f"트리뷰 새로고침 완료: 총 {len(self.ingredient_tree.get_children())}개 항목 표시")
+            print(f"?�리�??�로고침 ?�료: �?{len(self.ingredient_tree.get_children())}�???�� ?�시")
             
         except Exception as e:
-            print(f"트리뷰 새로고침 중 오류: {e}")
+            print(f"?�리�??�로고침 �??�류: {e}")
             import traceback
             traceback.print_exc()
 
     def _setup_treeview_columns(self, treeview, columns_config):
-        """Treeview의 컬럼과 헤더를 설정하고 초기 가시성을 적용합니다."""
+        """Treeview??컬럼�??�더�??�정?�고 초기 가?�성???�용?�니??"""
         treeview.configure(columns=list(columns_config.keys()))
         for col_id, config in columns_config.items():
             treeview.heading(col_id, text=config["text"])
@@ -845,42 +901,42 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
 
     def debug_material_ingredients(self, material_id):
-        """특정 재료의 전성분을 직접 DB에서 조회하여 확인"""
+        """?�정 ?�료???�성분을 직접 DB?�서 조회?�여 ?�인"""
         session = db_manager.get_session()
         try:
             # Material 조회
             material = session.query(Material).filter_by(id=material_id).first()
             if not material:
-                print(f"재료 ID {material_id}를 찾을 수 없습니다.")
+                print(f"?�료 ID {material_id}�?찾을 ???�습?�다.")
                 return
             
-            print(f"재료: {material.name} (코드: {material.code})")
-            print(f"연결된 전성분 개수: {len(material.ingredients)}")
+            print(f"?�료: {material.name} (코드: {material.code})")
+            print(f"?�결???�성�?개수: {len(material.ingredients)}")
             
-            # 각 전성분 정보 출력
+            # �??�성�??�보 출력
             for i, ing in enumerate(material.ingredients):
                 print(f"  {i+1}. {ing.name_ko} ({ing.name_en}) - CAS: {ing.cas_no}")
             
-            # 직접 SQL 쿼리로도 확인
+            # 직접 SQL 쿼리로도 ?�인
             from database.models import Ingredient
             direct_ingredients = session.query(Ingredient).filter_by(material_id=material_id).all()
-            print(f"직접 쿼리 결과 전성분 개수: {len(direct_ingredients)}")
+            print(f"직접 쿼리 결과 ?�성�?개수: {len(direct_ingredients)}")
             
             for i, ing in enumerate(direct_ingredients):
                 print(f"  직접쿼리 {i+1}. {ing.name_ko} ({ing.name_en}) - CAS: {ing.cas_no}")
                 
         except Exception as e:
-            print(f"디버깅 중 오류: {e}")
+            print(f"?�버�?�??�류: {e}")
         finally:
             session.close()
-            # UI 리프레시
+            # UI 리프?�시
             self.clear_material_form()
             self.load_materials()
 
     def _update_visible_columns(self, treeview, columns_config):
-        """체크박스 상태에 따라 Treeview의 열을 업데이트합니다."""
+        """체크박스 ?�태???�라 Treeview???�을 ?�데?�트?�니??"""
         visible_columns = [col_id for col_id, config in columns_config.items() if config.get("variable") and config["variable"].get()]
-        # ID 열은 항상 숨겨져 있어야 하므로, visible_columns에 포함되지 않도록 합니다.
+        # ID ?��? ??�� ?�겨???�어???��?�? visible_columns???�함?��? ?�도�??�니??
         if 'id' not in visible_columns:
             treeview.configure(displaycolumns=visible_columns)
 
@@ -898,35 +954,35 @@ class MaterialManagementFrame(ctk.CTkFrame):
         selected_ing = next((ing for ing in self.temp_ingredients if ing.get("id") == ing_id), None)
         if not selected_ing: return
         
-        # 비관리자일 경우, 폼을 채우기 전에 입력 필드를 일시적으로 활성화
+        # 비�?리자??경우, ?�을 채우�??�에 ?�력 ?�드�??�시?�으�??�성??
         if not self.current_user.is_admin:
             for entry in self.ingredient_entries.values():
                 entry.configure(state="normal")
 
         for key, entry in self.ingredient_entries.items(): entry.delete(0, "end")
-        self.ingredient_entries["한글전성분"].insert(0, selected_ing.get("name_ko", ""))
+        self.ingredient_entries["?��??�성�?].insert(0, selected_ing.get("name_ko", ""))
         self.ingredient_entries["INGREDIENT"].insert(0, selected_ing.get("name_en", ""))
         self.ingredient_entries["CAS NO."].insert(0, selected_ing.get("cas_no", ""))
-        self.ingredient_entries["조성비(%)"].insert(0, str(selected_ing.get("composition_ratio", "")))
+        self.ingredient_entries["조성�?%)"].insert(0, str(selected_ing.get("composition_ratio", "")))
         self.ingredient_entries["기능"].insert(0, selected_ing.get("function", ""))
-        self.ingredient_entries["EWG등급"].insert(0, selected_ing.get("ewg_grade", ""))
-        self.ingredient_entries["EWG등급데이터"].insert(0, selected_ing.get("ewg_data", ""))
+        self.ingredient_entries["EWG?�급"].insert(0, selected_ing.get("ewg_grade", ""))
+        self.ingredient_entries["EWG?�급?�이??].insert(0, selected_ing.get("ewg_data", ""))
         self.ingredient_entries["비고"].insert(0, selected_ing.get("remark", ""))
 
-        # 비관리자일 경우, 폼을 채운 후 다시 모든 필드를 비활성화
+        # 비�?리자??경우, ?�을 채운 ???�시 모든 ?�드�?비활?�화
         if not self.current_user.is_admin:
             for entry in self.ingredient_entries.values():
                 entry.configure(state="readonly")
 
     def get_column_index(self, col_name):
-        """설정된 컬럼 리스트에서 특정 컬럼의 인덱스를 반환합니다."""
+        """?�정??컬럼 리스?�에???�정 컬럼???�덱?��? 반환?�니??"""
         return list(self.ing_cols_config.keys()).index(col_name)
 
 
 
     def clear_material_form(self):
         self._selected_material_id = None
-        # 비관리자일 경우, 폼을 지우기 전에 입력 필드를 일시적으로 활성화
+        # 비�?리자??경우, ?�을 지?�기 ?�에 ?�력 ?�드�??�시?�으�??�성??
         if not self.current_user.is_admin:
             for entry in self.material_entries.values():
                 entry.configure(state="normal")
@@ -940,7 +996,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 entry.delete(0, "end")
         
         today_date = datetime.now().strftime("%Y-%m-%d")
-        self.material_entries["등록일"].insert(0, today_date)
+        self.material_entries["?�록??].insert(0, today_date)
 
         self.material_active_var.set("on")
         self.temp_ingredients = []
@@ -949,7 +1005,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.clear_ingredient_form()
         if self.material_tree.selection(): 
             self.material_tree.selection_remove(self.material_tree.selection()[0])
-        # 비관리자일 경우, 폼을 지운 후 다시 모든 필드를 비활성화
+        # 비�?리자??경우, ?�을 지?????�시 모든 ?�드�?비활?�화
         if not self.current_user.is_admin:
             for entry in self.material_entries.values():
                 entry.configure(state="readonly")
@@ -966,23 +1022,28 @@ class MaterialManagementFrame(ctk.CTkFrame):
             self.ingredient_tree.selection_remove(self.ingredient_tree.selection()[0])
 
     def add_ingredient(self):
+        # ?�집 권한 ?�인
+        if not self.can_edit_data():
+            messagebox.showwarning("권한 ?�류", "?�분 ?�이?��? ?�집??권한???�습?�다.\n?�재 권한?�로??조회�?가?�합?�다.")
+            return
+            
         try:
-            ratio = float(self.ingredient_entries["조성비(%)"].get()) if self.ingredient_entries["조성비(%)"].get() else 0.0
+            ratio = float(self.ingredient_entries["조성�?%)"].get()) if self.ingredient_entries["조성�?%)"].get() else 0.0
         except (ValueError, TypeError):
-            messagebox.showwarning("입력 오류", "조성비는 숫자만 입력 가능합니다.")
+            messagebox.showwarning("?�력 ?�류", "조성비는 ?�자�??�력 가?�합?�다.")
             return
 
         temp_id = (max([ing.get("id", 0) for ing in self.temp_ingredients if isinstance(ing.get("id"), int)] + [0]) + 1)
         
         new_ingredient = {
             "id": temp_id,
-            "name_ko": self.ingredient_entries["한글전성분"].get(), 
+            "name_ko": self.ingredient_entries["?��??�성�?].get(), 
             "name_en": self.ingredient_entries["INGREDIENT"].get(), 
             "cas_no": self.ingredient_entries["CAS NO."].get(),
             "composition_ratio": ratio, 
             "function": self.ingredient_entries["기능"].get(),
-            "ewg_grade": self.ingredient_entries["EWG등급"].get(),
-            "ewg_data": self.ingredient_entries["EWG등급데이터"].get(),
+            "ewg_grade": self.ingredient_entries["EWG?�급"].get(),
+            "ewg_data": self.ingredient_entries["EWG?�급?�이??].get(),
             "remark": self.ingredient_entries["비고"].get()
         }
         self.temp_ingredients.append(new_ingredient)
@@ -990,34 +1051,44 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.clear_ingredient_form()
 
     def update_ingredient(self):
+        # ?�집 권한 ?�인
+        if not self.can_edit_data():
+            messagebox.showwarning("권한 ?�류", "?�분 ?�이?��? ?�집??권한???�습?�다.\n?�재 권한?�로??조회�?가?�합?�다.")
+            return
+            
         if self._selected_ingredient_id is None:
-            messagebox.showwarning("선택 오류", "수정할 전성분을 목록에서 선택하세요.")
+            messagebox.showwarning("?�택 ?�류", "?�정???�성분을 목록?�서 ?�택?�세??")
             return
         
         selected_ing = next((ing for ing in self.temp_ingredients if ing.get("id") == self._selected_ingredient_id), None)
         if not selected_ing: return
 
         try:
-            ratio = float(self.ingredient_entries["조성비(%)"].get()) if self.ingredient_entries["조성비(%)"].get() else 0.0
+            ratio = float(self.ingredient_entries["조성�?%)"].get()) if self.ingredient_entries["조성�?%)"].get() else 0.0
         except (ValueError, TypeError):
-            messagebox.showwarning("입력 오류", "조성비는 숫자만 입력 가능합니다.")
+            messagebox.showwarning("?�력 ?�류", "조성비는 ?�자�??�력 가?�합?�다.")
             return
 
-        selected_ing["name_ko"] = self.ingredient_entries["한글전성분"].get()
+        selected_ing["name_ko"] = self.ingredient_entries["?��??�성�?].get()
         selected_ing["name_en"] = self.ingredient_entries["INGREDIENT"].get()
         selected_ing["cas_no"] = self.ingredient_entries["CAS NO."].get()
         selected_ing["composition_ratio"] = ratio
         selected_ing["function"] = self.ingredient_entries["기능"].get()
-        selected_ing["ewg_grade"] = self.ingredient_entries["EWG등급"].get()
-        selected_ing["ewg_data"] = self.ingredient_entries["EWG등급데이터"].get()
+        selected_ing["ewg_grade"] = self.ingredient_entries["EWG?�급"].get()
+        selected_ing["ewg_data"] = self.ingredient_entries["EWG?�급?�이??].get()
         selected_ing["remark"] = self.ingredient_entries["비고"].get()
         
         self.refresh_ingredient_tree()
         self.clear_ingredient_form()
 
     def remove_ingredient(self):
+        # ?�집 권한 ?�인
+        if not self.can_edit_data():
+            messagebox.showwarning("권한 ?�류", "?�분 ?�이?��? ?�집??권한???�습?�다.\n?�재 권한?�로??조회�?가?�합?�다.")
+            return
+            
         if self._selected_ingredient_id is None:
-            messagebox.showwarning("선택 오류", "삭제할 전성분을 목록에서 선택하세요.")
+            messagebox.showwarning("?�택 ?�류", "??��???�성분을 목록?�서 ?�택?�세??")
             return
         
         self.temp_ingredients = [ing for ing in self.temp_ingredients if ing.get("id") != self._selected_ingredient_id]
@@ -1025,12 +1096,17 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.clear_ingredient_form()
 
     def save_material(self):
+        # ?�집 권한 ?�인
+        if not self.can_edit_data():
+            messagebox.showwarning("권한 ?�류", "?�분 ?�이?��? ?�집??권한???�습?�다.\n?�재 권한?�로??조회�?가?�합?�다.")
+            return
+            
         code = self.material_entries["코드"].get().strip()
-        name = self.material_entries["원료명"].get().strip()
+        name = self.material_entries["?�료�?].get().strip()
 
-        # 필수값 확인
+        # ?�수�??�인
         if not code or not name:
-            messagebox.showwarning("입력 오류", "코드와 원료명은 필수입니다.")
+            messagebox.showwarning("?�력 ?�류", "코드?� ?�료명�? ?�수?�니??")
             return
 
         log_entries = []
@@ -1042,105 +1118,105 @@ class MaterialManagementFrame(ctk.CTkFrame):
             if self._selected_material_id:
                 material = session.query(Material).filter_by(id=self._selected_material_id).first()
 
-            # 코드 중복 검사 (신규 또는 코드 변경 시)
-            # 1. 신규 저장 시 (material is None)
-            # 2. 수정 시 코드가 변경된 경우 (material.code != code)
+            # 코드 중복 검??(?�규 ?�는 코드 변�???
+            # 1. ?�규 ?�????(material is None)
+            # 2. ?�정 ??코드가 변경된 경우 (material.code != code)
             if material is None or material.code != code:
                 existing = session.query(Material).filter_by(code=code).first()
                 if existing:
-                    messagebox.showerror("저장 오류", f"코드 '{code}'는 이미 존재하는 원료 코드입니다.")
+                    messagebox.showerror("?�???�류", f"코드 '{code}'???��? 존재?�는 ?�료 코드?�니??")
                     return
 
-            if material: # 수정 모드
-                log_action = "정보 수정"
-            else: # 신규 생성 모드
-                log_action = "신규 생성"
+            if material: # ?�정 모드
+                log_action = "?�보 ?�정"
+            else: # ?�규 ?�성 모드
+                log_action = "?�규 ?�성"
                 material = Material()
                 session.add(material)
 
             supplier_name_input = self.supplier_entry.get().strip()
             new_supplier_id = self.supplier_map.get(supplier_name_input)
 
-            # --- 변경 사항 로깅 ---
-            if log_action == "신규 생성":
-                log_action = "신규 생성"
+            # --- 변�??�항 로깅 ---
+            if log_action == "?�규 ?�성":
+                log_action = "?�규 ?�성"
                 log_entries.append(f"코드: '{code}'")
-                log_entries.append(f"원료명: '{name}'")
-                log_entries.append(f"영문원료명: '{self.material_entries['영문원료명'].get()}'")
-                log_entries.append(f"단가: '{self.material_entries['단가'].get() or '0.0'}'")
-                log_entries.append(f"포장단위: '{self.material_entries['포장단위'].get()}'")
-                log_entries.append(f"공급처: '{supplier_name_input}'")
-                log_entries.append(f"제조원명: '{self.material_entries['제조원명'].get()}'")
+                log_entries.append(f"?�료�? '{name}'")
+                log_entries.append(f"?�문?�료�? '{self.material_entries['?�문?�료�?].get()}'")
+                log_entries.append(f"?��?: '{self.material_entries['?��?'].get() or '0.0'}'")
+                log_entries.append(f"?�장?�위: '{self.material_entries['?�장?�위'].get()}'")
+                log_entries.append(f"공급�? '{supplier_name_input}'")
+                log_entries.append(f"?�조?�명: '{self.material_entries['?�조?�명'].get()}'")
                 log_entries.append(f"HS CODE: '{self.material_entries['HS CODE'].get()}'")
-                log_entries.append(f"원산지: '{self.material_entries['원산지'].get()}'")
-                log_entries.append(f"영문원료명: '{self.material_entries['영문원료명'].get()}'")
-                log_entries.append(f"NMPA등록번호: '{self.material_entries['NMPA등록번호'].get()}'")
-                log_entries.append(f"등록일: '{self.material_entries['등록일'].get()}'") # 이 부분은 로그 기록이므로 그대로 둡니다.
-                log_entries.append(f"사용 여부: '{self.material_active_var.get() == 'on'}'")
+                log_entries.append(f"?�산지: '{self.material_entries['?�산지'].get()}'")
+                log_entries.append(f"?�문?�료�? '{self.material_entries['?�문?�료�?].get()}'")
+                log_entries.append(f"NMPA?�록번호: '{self.material_entries['NMPA?�록번호'].get()}'")
+                log_entries.append(f"?�록?? '{self.material_entries['?�록??].get()}'") # ??부분�? 로그 기록?��?�?그�?�??�니??
+                log_entries.append(f"?�용 ?��?: '{self.material_active_var.get() == 'on'}'")
                 for temp_ing in self.temp_ingredients:
-                    log_entries.append(f"전성분 추가: {temp_ing['name_ko']} ({temp_ing['name_en']}) - {temp_ing['composition_ratio']}%")
-            else: # 수정
-                log_action = "정보 수정"
+                    log_entries.append(f"?�성�?추�?: {temp_ing['name_ko']} ({temp_ing['name_en']}) - {temp_ing['composition_ratio']}%")
+            else: # ?�정
+                log_action = "?�보 ?�정"
                 def log_change(field_name, old_val, new_val):
                     if old_val != new_val:
                         log_entries.append(f"{field_name}: '{old_val}' -> '{new_val}'")
 
                 log_change("코드", material.code or "", code)
-                log_change("원료명", material.name or "", name)
-                log_change("영문원료명", material.name_en or "", self.material_entries["영문원료명"].get())
-                log_change("단가", str(material.unit_price or 0.0), self.material_entries["단가"].get() or "0.0")
-                log_change("포장단위", material.package_unit or "", self.material_entries["포장단위"].get())
+                log_change("?�료�?, material.name or "", name)
+                log_change("?�문?�료�?, material.name_en or "", self.material_entries["?�문?�료�?].get())
+                log_change("?��?", str(material.unit_price or 0.0), self.material_entries["?��?"].get() or "0.0")
+                log_change("?�장?�위", material.package_unit or "", self.material_entries["?�장?�위"].get())
                 
                 if material.supplier_id != new_supplier_id:
                     old_supplier_name = self.supplier_id_map.get(material.supplier_id, "")
-                    log_entries.append(f"공급처: '{old_supplier_name}' -> '{supplier_name_input}'")
+                    log_entries.append(f"공급�? '{old_supplier_name}' -> '{supplier_name_input}'")
 
-                log_change("제조원명", material.manufacturer or "", self.material_entries["제조원명"].get())
+                log_change("?�조?�명", material.manufacturer or "", self.material_entries["?�조?�명"].get())
                 log_change("HS CODE", material.hs_code or "", self.material_entries["HS CODE"].get())
-                log_change("원산지", material.origin or "", self.material_entries["원산지"].get())
-                log_change("영문원료명", material.name_en or "", self.material_entries["영문원료명"].get())
-                log_change("NMPA등록번호", material.nmpa_reg_num or "", self.material_entries["NMPA등록번호"].get())
-                log_change("등록일", material.reg_date or "", self.material_entries["등록일"].get())
+                log_change("?�산지", material.origin or "", self.material_entries["?�산지"].get())
+                log_change("?�문?�료�?, material.name_en or "", self.material_entries["?�문?�료�?].get())
+                log_change("NMPA?�록번호", material.nmpa_reg_num or "", self.material_entries["NMPA?�록번호"].get())
+                log_change("?�록??, material.reg_date or "", self.material_entries["?�록??].get())
                 
                 if material.is_active != new_is_active:
-                    log_entries.append(f"사용 여부: '{material.is_active}' -> '{new_is_active}'")
+                    log_entries.append(f"?�용 ?��?: '{material.is_active}' -> '{new_is_active}'")
 
-                # 전성분 변경 로깅
+                # ?�성�?변�?로깅
                 old_ingredients = {ing.id: ing for ing in material.ingredients}
                 new_ingredients_map = {ing.get('id'): ing for ing in self.temp_ingredients if isinstance(ing.get('id'), int)}
 
-                # 삭제된 전성분
+                # ??��???�성�?
                 for old_id, old_ing in old_ingredients.items():
                     if old_id not in new_ingredients_map:
-                        log_entries.append(f"전성분 삭제: {old_ing.name_ko} ({old_ing.name_en})")
+                        log_entries.append(f"?�성�???��: {old_ing.name_ko} ({old_ing.name_en})")
 
-                # 추가/수정된 전성분
+                # 추�?/?�정???�성�?
                 for temp_ing in self.temp_ingredients:
                     ing_id = temp_ing.get('id')
-                    if isinstance(ing_id, int) and ing_id in old_ingredients: # 수정
+                    if isinstance(ing_id, int) and ing_id in old_ingredients: # ?�정
                         old_ing = old_ingredients[ing_id]
-                        # 상세 필드 비교 로직 추가 가능 (예: 함량, 이름 등)
+                        # ?�세 ?�드 비교 로직 추�? 가??(?? ?�량, ?�름 ??
                         if old_ing.composition_ratio != temp_ing['composition_ratio']:
-                            log_entries.append(f"전성분 함량 변경 - {temp_ing['name_ko']}: {old_ing.composition_ratio}% -> {temp_ing['composition_ratio']}%")
-                    else: # 추가
-                        log_entries.append(f"전성분 추가: {temp_ing['name_ko']} ({temp_ing['name_en']}) - {temp_ing['composition_ratio']}%")
+                            log_entries.append(f"?�성�??�량 변�?- {temp_ing['name_ko']}: {old_ing.composition_ratio}% -> {temp_ing['composition_ratio']}%")
+                    else: # 추�?
+                        log_entries.append(f"?�성�?추�?: {temp_ing['name_ko']} ({temp_ing['name_en']}) - {temp_ing['composition_ratio']}%")
 
-            # 공통 필드 저장
+            # 공통 ?�드 ?�??
             material.code = code
             material.name = name
-            material.name_en = self.material_entries["영문원료명"].get()
-            material.unit_price = float(self.material_entries["단가"].get() or 0.0)
-            material.package_unit = self.material_entries["포장단위"].get()
+            material.name_en = self.material_entries["?�문?�료�?].get()
+            material.unit_price = float(self.material_entries["?��?"].get() or 0.0)
+            material.package_unit = self.material_entries["?�장?�위"].get()
             material.supplier_id = new_supplier_id
-            material.manufacturer = self.material_entries["제조원명"].get()
+            material.manufacturer = self.material_entries["?�조?�명"].get()
             material.hs_code = self.material_entries["HS CODE"].get()
-            material.origin = self.material_entries["원산지"].get()
-            material.name_en = self.material_entries["영문원료명"].get()
-            material.nmpa_reg_num = self.material_entries["NMPA등록번호"].get()
-            material.reg_date = self.material_entries["등록일"].get() or datetime.now().strftime("%Y-%m-%d") # 등록일이 비어있으면 현재 날짜로 저장
+            material.origin = self.material_entries["?�산지"].get()
+            material.name_en = self.material_entries["?�문?�료�?].get()
+            material.nmpa_reg_num = self.material_entries["NMPA?�록번호"].get()
+            material.reg_date = self.material_entries["?�록??].get() or datetime.now().strftime("%Y-%m-%d") # ?�록?�이 비어?�으�??�재 ?�짜�??�??
             material.is_active = new_is_active
 
-            # 기존 성분 삭제 후 새로 추가
+            # 기존 ?�분 ??�� ???�로 추�?
             material.ingredients.clear()
             session.flush()
             
@@ -1163,11 +1239,11 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 ))
 
             session.commit()
-            messagebox.showinfo("성공", "원료 정보가 저장되었습니다.")
+            messagebox.showinfo("?�공", "?�료 ?�보가 ?�?�되?�습?�다.")
 
         except Exception as e:
             session.rollback()
-            messagebox.showerror("데이터베이스 오류", f"저장 중 오류 발생: {e}")
+            messagebox.showerror("?�이?�베?�스 ?�류", f"?�??�??�류 발생: {e}")
         finally:
             session.close()
             self.clear_material_form()
@@ -1175,30 +1251,35 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
     def show_selected_material_history(self):
         if not self._selected_material_id:
-            messagebox.showwarning("오류", "원료를 먼저 선택해주세요.", parent=self)
+            messagebox.showwarning("?�류", "?�료�?먼�? ?�택?�주?�요.", parent=self)
             return
         session = db_manager.get_session()
         material = session.query(Material).filter_by(id=self._selected_material_id).first()
         session.close()
         if material:
-            HistoryPopup(self, f"'{material.name}' 변경 이력", [material], item_name_key='name', item_code_key='code')
+            HistoryPopup(self, f"'{material.name}' 변�??�력", [material], item_name_key='name', item_code_key='code')
 
     def show_all_material_history(self):
         session = db_manager.get_session()
         all_materials = session.query(Material).all()
         session.close()
         if not all_materials:
-            messagebox.showinfo("정보", "조회할 원료가 없습니다.", parent=self)
+            messagebox.showinfo("?�보", "조회???�료가 ?�습?�다.", parent=self)
             return
-        HistoryPopup(self, "전체 성분 변경 이력", all_materials, item_name_key='name', item_code_key='code')
-            # 저장 후 신규 모드 해제
+        HistoryPopup(self, "?�체 ?�분 변�??�력", all_materials, item_name_key='name', item_code_key='code')
+            # ?�?????�규 모드 ?�제
         self.is_new_mode = False # ------------------------------------------------------------------------
 
     def delete_material(self):
-        if not self._selected_material_id:
-            messagebox.showwarning("선택 오류", "삭제할 원료를 목록에서 선택하세요.")
+        # ?�집 권한 ?�인
+        if not self.can_edit_data():
+            messagebox.showwarning("권한 ?�류", "?�분 ?�이?��? ?�집??권한???�습?�다.\n?�재 권한?�로??조회�?가?�합?�다.")
             return
-        if not messagebox.askyesno("삭제 확인", "정말로 선택한 원료를 삭제하시겠습니까? 모든 하위 전성분 정보도 함께 삭제됩니다."):
+            
+        if not self._selected_material_id:
+            messagebox.showwarning("?�택 ?�류", "??��???�료�?목록?�서 ?�택?�세??")
+            return
+        if not messagebox.askyesno("??�� ?�인", "?�말�??�택???�료�???��?�시겠습?�까? 모든 ?�위 ?�성�??�보???�께 ??��?�니??"):
             return
         
         session = db_manager.get_session()
@@ -1207,10 +1288,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
             if mat_to_delete:
                 session.delete(mat_to_delete)
                 session.commit()
-                messagebox.showinfo("성공", "원료가 삭제되었습니다.")
+                messagebox.showinfo("?�공", "?�료가 ??��?�었?�니??")
         except Exception as e:
             session.rollback()
-            messagebox.showerror("데이터베이스 오류", f"삭제 중 오류 발생: {e}")
+            messagebox.showerror("?�이?�베?�스 ?�류", f"??�� �??�류 발생: {e}")
         finally:
             session.close()
             self.clear_material_form()

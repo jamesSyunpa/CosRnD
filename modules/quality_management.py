@@ -872,13 +872,15 @@ class QualityManagementFrame(ctk.CTkFrame):
         # 시험항목 테이블
         self.finished_table_frame = ctk.CTkFrame(scrollable_frame)
         self.finished_table_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
-        self.finished_table_frame.grid_columnconfigure(1, weight=2)
-        self.finished_table_frame.grid_columnconfigure(2, weight=3)
-        self.finished_table_frame.grid_columnconfigure(3, weight=3)
-        self.finished_table_frame.grid_columnconfigure(4, weight=1)
+        self.finished_table_frame.grid_columnconfigure(0, weight=0)  # 체크박스 컬럼
+        self.finished_table_frame.grid_columnconfigure(1, weight=1)  # 구분 컬럼
+        self.finished_table_frame.grid_columnconfigure(2, weight=2)  # 시험항목 컬럼
+        self.finished_table_frame.grid_columnconfigure(3, weight=3)  # 시험기준 컬럼
+        self.finished_table_frame.grid_columnconfigure(4, weight=3)  # 시험결과 컬럼
+        self.finished_table_frame.grid_columnconfigure(5, weight=1)  # 비고 컬럼
 
         # 테이블 헤더
-        headers = ["구분", "시험항목", "시험기준", "시험결과", "비고"]
+        headers = ["선택", "구분", "시험항목", "시험기준", "시험결과", "비고"]
         for i, h in enumerate(headers):
             ctk.CTkLabel(self.finished_table_frame, text=h, font=ctk.CTkFont(weight="bold"), 
                         fg_color=("gray85", "gray20"), corner_radius=0).grid(row=0, column=i, sticky="ew", padx=2, pady=2)
@@ -886,15 +888,15 @@ class QualityManagementFrame(ctk.CTkFrame):
         # 초기 행 생성
         self._create_initial_finished_product_rows()
 
-        # 테이블 컨트롤 버튼
+        # 테이블 컨트롤 버튼 (판정/시험자 정보 바로 위에 배치)
         finished_table_controls = ctk.CTkFrame(scrollable_frame)
-        finished_table_controls.grid(row=2, column=0, sticky="w", padx=10, pady=(0, 10))
+        finished_table_controls.grid(row=2, column=0, sticky="w", padx=10, pady=(10, 5))
         ctk.CTkButton(finished_table_controls, text="시험항목 추가", command=self._add_finished_item_row).pack(side="left")
         ctk.CTkButton(finished_table_controls, text="선택 항목 제거", command=self._remove_selected_finished_item_row).pack(side="left", padx=10)
 
-        # 판정/시험자 정보
+        # 판정/시험자 정보 (특이사항)
         conclusion_frame = ctk.CTkFrame(scrollable_frame)
-        conclusion_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(20, 10))
+        conclusion_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
         conclusion_frame.grid_columnconfigure((1, 3, 5), weight=1)
 
         for idx, (label, key) in enumerate([("시험자", "시험자"), ("검토자", "검토자"), ("종합판정", "종합판정")]):
@@ -949,14 +951,17 @@ class QualityManagementFrame(ctk.CTkFrame):
         row_index = len(self.finished_item_rows) + 1
         widgets = {'selected': ctk.BooleanVar()}
 
+        # 체크박스 (column 0)
         chk = ctk.CTkCheckBox(self.finished_table_frame, text="", variable=widgets['selected'])
         chk.grid(row=row_index, column=0, sticky="w", padx=2, pady=2)
         widgets['chk'] = chk
 
+        # 구분(ID) 라벨 (column 1)
         widgets['id_label'] = ctk.CTkLabel(self.finished_table_frame, text=item_data['id'])
-        widgets['id_label'].grid(row=row_index, column=0, sticky="ew", padx=2, pady=2)
+        widgets['id_label'].grid(row=row_index, column=1, sticky="ew", padx=2, pady=2)
 
-        for i, key in enumerate(['item', 'spec', 'result', 'note'], start=1):
+        # 시험항목, 시험기준, 시험결과, 비고 (columns 2-5)
+        for i, key in enumerate(['item', 'spec', 'result', 'note'], start=2):
             entry = ctk.CTkEntry(self.finished_table_frame, corner_radius=0, border_width=0)
             entry.insert(0, item_data.get(key, ''))
             entry.grid(row=row_index, column=i, sticky="ew", padx=(1,0), pady=(1,0))

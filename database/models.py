@@ -15,7 +15,13 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String(80), unique=True, nullable=False)
     password = Column(String(255), nullable=False) # 해시된 비밀번호 저장
-    is_admin = Column(Boolean, default=False)
+    real_name = Column(String(50)) # 사용자의 실제 이름
+    is_admin = Column(Boolean, default=False)  # 하위 호환성을 위해 유지
+    
+    # --- 권한 관리 ---
+    # QC: 품질관리원, RD: 연구원, RQ: 연구/품질 통합관리자, 
+    # RQD: 연구/품질/데이터 관리자, MSAD: 모든 관리자
+    role = Column(String(20), default='RD')  # 기본값은 연구원
     
     # --- 사용자 상세 정보 ---
     position = Column(String(50)) # 직책
@@ -33,6 +39,47 @@ class User(Base):
 
     def __repr__(self):
         return f'<User {self.username}>'
+    
+    # 권한 확인 헬퍼 메서드 - 새로운 권한 체계
+    def has_quality_access(self):
+        """품질관리 서류 접근 권한 (원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서)"""
+        return self.role in ['QC', 'RQ', 'RQD', 'MSAD']
+    
+    def has_research_access(self):
+        """연구 서류 접근 권한 (처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료)"""
+        return self.role in ['RD', 'RQ', 'RQD', 'MSAD']
+    
+    def can_view_material_data(self):
+        """성분 데이터 조회 권한 - RD는 검색/참고만"""
+        return self.role in ['RD', 'RQ', 'RQD', 'MSAD']
+    
+    def can_edit_material_data(self):
+        """성분 데이터 편집 권한 - RQD, MSAD만 가능"""
+        return self.role in ['RQD', 'MSAD']
+    
+    def can_view_client_data(self):
+        """거래처 데이터 조회 권한 - QC, RD는 검색/참고만"""
+        return self.role in ['QC', 'RD', 'RQ', 'RQD', 'MSAD']
+    
+    def can_edit_client_data(self):
+        """거래처 데이터 편집 권한 - RQD, MSAD만 가능"""
+        return self.role in ['RQD', 'MSAD']
+    
+    def can_manage_all_data(self):
+        """모든 데이터 관리 권한 (수정, 삭제 등) - RQD, MSAD"""
+        return self.role in ['RQD', 'MSAD']
+    
+    def can_delete(self):
+        """삭제 승인 권한 - RQD, MSAD"""
+        return self.role in ['RQD', 'MSAD']
+    
+    def is_master_admin(self):
+        """최고 관리자 권한 (백업 기능 포함)"""
+        return self.role == 'MSAD'
+    
+    def has_backup_authority(self):
+        """데이터 삭제 전 마스터 백업 권한"""
+        return self.role == 'MSAD'
     
 class Client(Base):
     __tablename__ = 'clients'

@@ -38,6 +38,9 @@ class LoginWindow(ctk.CTkToplevel):
         self.load_last_user_info()
         self.center_on_screen()
         
+        # 창 닫기 버튼 처리 - 프로그램 종료
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
         # 자동 로그인 체크
         self.check_auto_login()
         
@@ -374,3 +377,27 @@ class LoginWindow(ctk.CTkToplevel):
         x = max(0, (screen_width // 2) - (win_width // 2))
         y = max(0, (screen_height // 2) - (win_height // 2))
         self.geometry(f'{win_width}x{win_height}+{x}+{y}')
+
+    def on_closing(self):
+        """로그인 창을 닫을 때 프로그램 전체를 종료합니다."""
+        print(f"{datetime.now()}: 로그인 창 닫기 - 프로그램 종료")
+        try:
+            # DB 연결 해제
+            db_manager.dispose_engine()
+            print(f"{datetime.now()}: DB 연결 해제 완료")
+        except Exception as e:
+            print(f"{datetime.now()}: DB 연결 해제 중 오류: {e}")
+        
+        try:
+            # 로그인 창 파괴
+            self.destroy()
+            
+            # 메인 앱도 파괴
+            if self.master:
+                self.master.destroy()
+        except Exception as e:
+            print(f"{datetime.now()}: 창 파괴 중 오류: {e}")
+        
+        # 강제 종료
+        import os
+        os._exit(0)
