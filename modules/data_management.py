@@ -73,14 +73,19 @@ class DataManagementFrame(ctk.CTkFrame):
             # Defensive: if texts missing, leave map possibly incomplete
             pass
 
-        self.tab_view.add(tab_texts["ingredient"])
-        self.setup_material_management_tab(self.tab_view.tab(tab_texts["ingredient"]))
+        # 성분 관리 탭 - RD, RQ, RQD, MSAD만 접근 가능
+        if self.current_user.can_view_material_data():
+            self.tab_view.add(tab_texts["ingredient"])
+            self.setup_material_management_tab(self.tab_view.tab(tab_texts["ingredient"]))
 
-        # 관리자일 경우에만 거래처 및 회원 관리 탭 추가
-        if self.current_user.is_admin:
+        # 거래처 관리 탭 - QC, RD, RQ, RQD, MSAD 모두 접근 가능 (검색/참고)
+        if self.current_user.can_view_client_data():
             self.tab_view.add(tab_texts["client"])
-            self.tab_view.add(tab_texts["user"])
             self.setup_client_management_tab(self.tab_view.tab(tab_texts["client"]))
+
+        # 회원 관리 탭 - RQD, MSAD만 접근 가능
+        if self.current_user.can_manage_all_data():
+            self.tab_view.add(tab_texts["user"])
             self.setup_user_management_tab(self.tab_view.tab(tab_texts["user"]))
             
             # 사용자 관리 탭 초기화 후 권한 옵션 업데이트
@@ -750,6 +755,19 @@ class DataManagementFrame(ctk.CTkFrame):
                 "role": role_code
             }
 
+            # manager_code 중복 검사 (빈 문자열은 제외)
+            manager_code = new_values["manager_code"].strip()
+            if manager_code:  # 값이 있을 때만 중복 검사
+                existing_manager = session.query(User).filter(
+                    User.manager_code == manager_code,
+                    User.id != user.id  # 자기 자신은 제외
+                ).first()
+                if existing_manager:
+                    messagebox.showerror("저장 오류", 
+                        f"담당번호 '{manager_code}'는 이미 사용 중입니다.\n"
+                        f"사용자: {existing_manager.username} ({existing_manager.real_name or '이름 없음'})")
+                    return
+
             if not user.id: # 신규 생성
                 log_action = "신규 생성"
                 log_entries.append(f"사용자 ID: '{username}'")
@@ -788,7 +806,8 @@ class DataManagementFrame(ctk.CTkFrame):
                 user.password = hashed_password.decode('utf-8')
             
             user.real_name = new_values["real_name"]
-            user.manager_code = new_values["manager_code"]
+            # manager_code가 빈 문자열이면 None으로 설정 (UNIQUE 제약조건 회피)
+            user.manager_code = new_values["manager_code"] if new_values["manager_code"].strip() else None
             user.position = new_values["position"]
             user.contact = new_values["contact"]
             user.zip_code = new_values["zip_code"]

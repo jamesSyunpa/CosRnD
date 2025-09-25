@@ -331,6 +331,8 @@ class DBManager:
                 inspector = inspect(self.engine)
                 tables = inspector.get_table_names()
                 print(f"  * 테이블 생성 완료: {', '.join(tables)}")
+                # 변경 추적 보장 (트리거/로그)
+                self.ensure_change_tracking()
                 
                 # 세션 팩토리 생성
                 self.Session = sessionmaker(bind=self.engine)
@@ -466,6 +468,45 @@ class DBManager:
                         connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
             except Exception as e:
                 print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
+
+    def ensure_change_tracking(self):
+        """변경 추적용 change_log 테이블과 트리거를 생성합니다 (존재하지 않으면)."""
+        try:
+            with self.engine.connect() as conn:
+                # change_log 테이블 생성
+                conn.execute(text(
+                    """
+                    CREATE TABLE IF NOT EXISTS change_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        table_name TEXT NOT NULL,
+                        operation TEXT NOT NULL,
+                        changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                    """
+                ))
+
+                tracked_tables = [
+                    'users', 'clients', 'materials', 'ingredients', 'formulations', 'formulation_items'
+                ]
+                operations = [
+                    ('ai', 'AFTER INSERT', 'INSERT'),
+                    ('au', 'AFTER UPDATE', 'UPDATE'),
+                    ('ad', 'AFTER DELETE', 'DELETE')
+                ]
+
+                for table in tracked_tables:
+                    for suffix, timing, op in operations:
+                        trigger_name = f"trg_{table}_{suffix}"
+                        sql = f"""
+                            CREATE TRIGGER IF NOT EXISTS {trigger_name}
+                            {timing} ON {table}
+                            BEGIN
+                                INSERT INTO change_log(table_name, operation) VALUES('{table}', '{op}');
+                            END;
+                        """
+                        conn.execute(text(sql))
+        except Exception as e:
+            print(f"[경고] 변경 추적 구성 실패(무시): {e}")
 
     def _save_init_state(self, state=True):
         """DB 초기화 상태를 config.ini에 저장"""

@@ -303,15 +303,26 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.tab_view.set(tab_name)
 
     def refresh_data(self):
-        """문서 관리 프레임의 데이터를 새로고침합니다."""
+        """문서 관리 프레임의 데이터를 새로고침합니다. (선택 유지)"""
         print("문서 관리 프레임 데이터 새로고침...")
         try:
-            # 처방 목록 및 폴더 뷰를 새로고침합니다.
-            self.load_formulations()
-            # 클라이언트 필터 드롭다운을 새로고침합니다.
-            self.refresh_formulation_filters()
-            # 다른 탭들의 내용도 초기화/새로고침합니다.
-            self.reset_selection_and_tabs()
+            # 현재 선택된 ID와 뷰 상태 저장
+            selected_ids = self.get_selected_formulation_ids()
+            current_view = self.current_view
+            current_folder = self.current_folder_name
+
+            # 데이터 새로고침
+            self.load_formulations() # 폴더 또는 파일 뷰 새로고침
+            self.load_lab_journal()    # 실험일지 탭 새로고침
+            self.refresh_formulation_filters() # 필터 새로고침
+
+            # 이전에 선택했던 항목 다시 선택 (파일 뷰일 때만)
+            if current_view == "files" and selected_ids:
+                self.formulation_tree.selection_set(selected_ids)
+            
+            # 선택된 항목에 따라 다른 탭들 내용 업데이트
+            self.generate_all_ingredient_lists()
+
         except Exception as e:
             print(f"[오류] 문서 관리 프레임 새로고침 실패: {e}")
 
@@ -414,8 +425,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.reset_selection_button = ctk.CTkButton(file_view_header, text=self.texts['reset_selection'], width=100, command=self.reset_selection_and_tabs)
         self.reset_selection_button.pack(side="left", padx=(0, 10))
 
-        # 관리자일 경우에만 샘플 관련 버튼 표시
-        if self.current_user.is_admin:
+        # 샘플 발송/수정: QC를 제외한 연구권한(RD/RQ/RQD/MSAD)에게만 표시
+        if hasattr(self.current_user, 'has_research_access') and self.current_user.has_research_access():
             self.edit_sample_button = ctk.CTkButton(file_view_header, text=self.texts['edit_sample_count'], width=100, command=self.edit_sample_sent_count)
             self.edit_sample_button.pack(side="right", padx=(5, 0))
 
@@ -1123,7 +1134,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             master=self,
             user=self.current_user,
             app=self.app,
-            on_save_callback=self.load_formulations, # 저장 후 목록 새로고침
+            on_save_callback=self.app.refresh_data_in_all_frames, # 저장 후 앱 전체 새로고침
             formulation_id=formulation_id
         )
         # 신규 작성 시, 현재 폴더 이름을 기본 실험품명으로 설정
@@ -2758,6 +2769,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def increment_sample_sent_count(self):
         """선택된 처방의 샘플 발송 횟수를 1 증가시킵니다."""
+        # 권한 체크: QC는 변경 불가, 연구권한(RD/RQ/RQD/MSAD)만 가능
+        if not getattr(self.current_user, 'has_research_access', None) or not self.current_user.has_research_access():
+            messagebox.showwarning("권한 오류", "샘플 발송 정보는 연구권한 사용자만 수정할 수 있습니다.", parent=self)
+            return
         if not self._selected_formulation_id:
             messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_for_sample'], parent=self)
             return
@@ -2773,11 +2788,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 formulation.sample_delivery_date = datetime.now().date() # 오늘 날짜로 발송일 업데이트
                 session.commit()
                 messagebox.showinfo(self.texts['success'], self.texts['sample_count_updated_msg'].format(count=formulation.sample_sent_count), parent=self)
-                # 목록을 다시 로드하여 화면에 즉시 반영
-                # 선택을 초기화하여 다른 탭의 내용이 지워지는 것을 방지
-                self._selected_formulation_id = None
-                self.update_button_states()
-                self.load_files_in_folder(self.current_folder_name)
+
+                # 1) 현재 트리뷰(처방 목록)의 해당 행만 즉시 업데이트하여 사용자가 바로 변화를 보도록 함
+                selected_iid = str(self._selected_formulation_id)
+                if hasattr(self, 'formulation_tree') and self.formulation_tree.exists(selected_iid):
+                    current_values = list(self.formulation_tree.item(selected_iid, 'values'))
+                    # 컬럼 순서: date, experiment_name, lab_no, revision, sample_sent, sample_delivery_date
+                    new_sample_sent = f"{formulation.sample_sent_count:02d}" if (formulation.sample_sent_count and formulation.sample_sent_count > 0) else ""
+                    new_sample_date = formulation.sample_delivery_date.strftime('%Y-%m-%d') if getattr(formulation, 'sample_delivery_date', None) else ""
+                    # 방어 코드: values 길이 확인
+                    while len(current_values) < 6:
+                        current_values.append("")
+                    current_values[4] = new_sample_sent
+                    current_values[5] = new_sample_date
+                    self.formulation_tree.item(selected_iid, values=tuple(current_values))
+
+                # 2) 물성치/실험일지 탭도 새로고침하여 '샘플 전달' 컬럼 반영
+                if hasattr(self, 'load_lab_journal'):
+                    self.load_lab_journal()
+
+                # 3) 앱의 모든 프레임에 데이터 새로고침을 알립니다.
+                self.app.refresh_data_in_all_frames()
             else:
                 messagebox.showerror(self.texts['error'], self.texts['formulation_not_found'], parent=self)
         except Exception as e:
@@ -2788,6 +2819,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def edit_sample_sent_count(self):
         """선택된 처방의 샘플 발송 횟수를 사용자가 입력한 값으로 수정합니다."""
+        # 권한 체크: QC는 변경 불가, 연구권한(RD/RQ/RQD/MSAD)만 가능
+        if not getattr(self.current_user, 'has_research_access', None) or not self.current_user.has_research_access():
+            messagebox.showwarning("권한 오류", "샘플 발송 정보는 연구권한 사용자만 수정할 수 있습니다.", parent=self)
+            return
         if not self._selected_formulation_id:
             messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_to_edit'], parent=self)
             return
@@ -2799,7 +2834,6 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 messagebox.showerror(self.texts['error'], self.texts['formulation_not_found'], parent=self)
                 return
 
-            # --- 입력 다이얼로그 UI 구성 ---
             dialog = ctk.CTkToplevel(self)
             dialog.title(self.texts['edit_sample_info_title'])
             dialog.transient(self)
@@ -2822,6 +2856,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             date_entry.pack(padx=10, pady=(0, 20), fill="x")
 
             result = {"saved": False}
+
             def save_and_close():
                 try:
                     new_count = int(count_entry.get())
@@ -2832,6 +2867,24 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     formulation.sample_delivery_date = new_date
                     session.commit()
                     messagebox.showinfo(self.texts['success'], self.texts['sample_info_updated_success'], parent=self)
+
+                    # 즉시 트리뷰(처방 목록) 반영
+                    selected_iid = str(self._selected_formulation_id)
+                    if hasattr(self, 'formulation_tree') and self.formulation_tree.exists(selected_iid):
+                        current_values = list(self.formulation_tree.item(selected_iid, 'values'))
+                        while len(current_values) < 6:
+                            current_values.append("")
+                        current_values[4] = f"{new_count:02d}" if (new_count and new_count > 0) else ""
+                        current_values[5] = new_date.strftime('%Y-%m-%d') if new_date else ""
+                        self.formulation_tree.item(selected_iid, values=tuple(current_values))
+
+                    # 물성치/실험일지 탭도 새로고침
+                    if hasattr(self, 'load_lab_journal'):
+                        self.load_lab_journal()
+
+                    # 앱 전역 새로고침
+                    self.app.refresh_data_in_all_frames()
+
                     result["saved"] = True
                     dialog.destroy()
                 except ValueError:
@@ -2840,20 +2893,32 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     session.rollback()
                     messagebox.showerror(self.texts['db_error'], f"{self.texts['update_error_msg']}: {ex}", parent=dialog)
 
-            ctk.CTkButton(main_frame, text=self.texts['save'], command=save_and_close).pack(side="left", padx=10, expand=True)
-            ctk.CTkButton(main_frame, text=self.texts['cancel'], fg_color="gray", command=dialog.destroy).pack(side="right", padx=10, expand=True)
+            def cancel_and_close():
+                dialog.destroy()
 
-            self.wait_window(dialog) # 다이얼로그가 닫힐 때까지 대기
+            button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+            button_frame.pack(fill="x", pady=(10, 0))
 
-            if result["saved"]:
-                self.load_files_in_folder(self.current_folder_name)
+            save_button = ctk.CTkButton(button_frame, text=self.texts['save'], command=save_and_close)
+            save_button.pack(side="left", padx=(0, 5), expand=True, fill="x")
+
+            cancel_button = ctk.CTkButton(button_frame, text=self.texts['cancel'], fg_color="gray", command=cancel_and_close)
+            cancel_button.pack(side="right", padx=(5, 0), expand=True, fill="x")
+
+            dialog.protocol("WM_DELETE_WINDOW", cancel_and_close)
+
+            dialog.update_idletasks()
+            x = self.winfo_x() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
+            y = self.winfo_y() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
+            dialog.geometry(f"+{x}+{y}")
+
+            self.wait_window(dialog)
 
         except Exception as e:
             session.rollback()
             messagebox.showerror(self.texts['db_error'], f"{self.texts['sample_count_edit_error']}: {e}", parent=self)
         finally:
             session.close()
-
     def import_all_formulations(self):
         """
         관리자 전용: 엑셀(다중 시트) 파일에서 처방들을 가져와 DB에 저장합니다.

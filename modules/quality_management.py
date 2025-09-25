@@ -933,10 +933,12 @@ class QualityManagementFrame(ctk.CTkFrame):
             {"id": "14", "item": "미생물(일반세균)", "spec": "100 cfu/ml 이하", "result": "", "note": "화장품의 미생물 한도 기준을 참고. 3M™ Petrifilm Plate법 사용"},
             {"id": "", "item": "미생물(진균(효모/곰팡이))", "spec": "10 cfu/ml 이하", "result": "", "note": ""},
             {"id": "", "item": "미생물(대장균)", "spec": "불검출", "result": "", "note": ""},
-            {"id": "특이사항", "item": "", "spec": "", "result": "", "note": ""},
         ]
         for item_data in initial_items:
             self._add_finished_item_row_with_data(item_data)
+        
+        # 특이사항 줄을 맨 마지막에 추가
+        self._add_special_remarks_row()
 
     def _redraw_finished_product_table(self):
         """완제품 시험성적서 테이블 헤더를 다시 그립니다."""
@@ -948,7 +950,31 @@ class QualityManagementFrame(ctk.CTkFrame):
         if item_data is None:
             item_data = {'id': '', 'item': '', 'spec': '', 'result': '', 'note': ''}
 
-        row_index = len(self.finished_item_rows) + 1
+        # 특이사항 줄이 아닌 경우에만 번호를 부여
+        if item_data.get('id') != "특이사항":
+            # 현재 특이사항 줄을 제외한 행의 개수를 계산
+            non_special_count = 0
+            for row in self.finished_item_rows:
+                if row.get('id_label') and row['id_label'].cget("text") != "특이사항":
+                    non_special_count += 1
+            item_data['id'] = str(non_special_count + 1)
+
+        # 행 인덱스 계산 (특이사항은 항상 마지막에)
+        if item_data.get('id') == "특이사항":
+            row_index = len(self.finished_item_rows) + 1
+        else:
+            # 특이사항 줄이 있다면 그 바로 앞에 삽입
+            special_index = None
+            for i, row in enumerate(self.finished_item_rows):
+                if row.get('id_label') and row['id_label'].cget("text") == "특이사항":
+                    special_index = i
+                    break
+            
+            if special_index is not None:
+                row_index = special_index + 1
+            else:
+                row_index = len(self.finished_item_rows) + 1
+
         widgets = {'selected': ctk.BooleanVar()}
 
         # 체크박스 (column 0)
@@ -967,19 +993,60 @@ class QualityManagementFrame(ctk.CTkFrame):
             entry.grid(row=row_index, column=i, sticky="ew", padx=(1,0), pady=(1,0))
             widgets[key] = entry
 
-        self.finished_item_rows.append(widgets)
+        # 특이사항 줄이 아닌 경우, 특이사항 줄 바로 앞에 삽입
+        if item_data.get('id') != "특이사항" and special_index is not None:
+            self.finished_item_rows.insert(special_index, widgets)
+            # 특이사항 줄과 그 뒤의 모든 행들을 한 칸씩 아래로 이동
+            self._reposition_rows_from_index(special_index + 1)
+        else:
+            self.finished_item_rows.append(widgets)
+            
         if redraw:
             self._update_finished_row_numbers()
+
+    def _reposition_rows_from_index(self, start_index):
+        """지정된 인덱스부터 모든 행들을 한 칸씩 아래로 이동시킵니다."""
+        for i in range(start_index, len(self.finished_item_rows)):
+            row = self.finished_item_rows[i]
+            new_row_index = i + 2  # grid row는 1부터 시작하고 헤더가 있으므로 +2
+            
+            # 각 위젯을 새로운 행 위치로 이동
+            if 'chk' in row:
+                row['chk'].grid(row=new_row_index, column=0, sticky="w", padx=2, pady=2)
+            if 'id_label' in row:
+                row['id_label'].grid(row=new_row_index, column=1, sticky="ew", padx=2, pady=2)
+            
+            for j, key in enumerate(['item', 'spec', 'result', 'note'], start=2):
+                if key in row:
+                    row[key].grid(row=new_row_index, column=j, sticky="ew", padx=(1,0), pady=(1,0))
 
     def _add_finished_item_row_with_data(self, item_data):
         """완제품 시험항목 행을 데이터와 함께 추가합니다."""
         self._add_finished_item_row(item_data, redraw=False)
 
+    def _add_special_remarks_row(self):
+        """특이사항 줄을 맨 마지막에 추가합니다."""
+        if not self._has_special_remarks_row():
+            special_data = {"id": "특이사항", "item": "", "spec": "", "result": "", "note": ""}
+            self._add_finished_item_row(special_data, redraw=False)
+
+    def _has_special_remarks_row(self):
+        """특이사항 줄이 있는지 확인합니다."""
+        for row in self.finished_item_rows:
+            if row.get('id_label') and row['id_label'].cget("text") == "특이사항":
+                return True
+        return False
+
     def _remove_selected_finished_item_row(self):
-        """선택된 완제품 시험항목 행을 제거합니다."""
-        selected_rows = [i for i, row in enumerate(self.finished_item_rows) if row['selected'].get()]
+        """선택된 완제품 시험항목 행을 제거합니다. (특이사항 줄 제외)"""
+        selected_rows = []
+        for i, row in enumerate(self.finished_item_rows):
+            # 특이사항 줄은 삭제 대상에서 제외
+            if row['selected'].get() and row['id_label'].cget("text") != "특이사항":
+                selected_rows.append(i)
+        
         if not selected_rows:
-            messagebox.showwarning("선택 오류", "삭제할 항목을 선택하세요.", parent=self)
+            messagebox.showwarning("선택 오류", "삭제할 항목을 선택하세요. (특이사항 줄은 삭제할 수 없습니다)", parent=self)
             return
 
         for i in sorted(selected_rows, reverse=True):
@@ -987,14 +1054,35 @@ class QualityManagementFrame(ctk.CTkFrame):
                 if hasattr(widget, 'destroy'):
                     widget.destroy()
             del self.finished_item_rows[i]
+        
+        # 삭제 후 모든 행을 다시 배치
+        self._reposition_all_rows()
         self._update_finished_row_numbers()
 
+    def _reposition_all_rows(self):
+        """모든 행을 다시 배치합니다."""
+        for i, row in enumerate(self.finished_item_rows):
+            new_row_index = i + 2  # grid row는 1부터 시작하고 헤더가 있으므로 +2
+            
+            # 각 위젯을 새로운 행 위치로 이동
+            if 'chk' in row:
+                row['chk'].grid(row=new_row_index, column=0, sticky="w", padx=2, pady=2)
+            if 'id_label' in row:
+                row['id_label'].grid(row=new_row_index, column=1, sticky="ew", padx=2, pady=2)
+            
+            for j, key in enumerate(['item', 'spec', 'result', 'note'], start=2):
+                if key in row:
+                    row[key].grid(row=new_row_index, column=j, sticky="ew", padx=(1,0), pady=(1,0))
+
     def _update_finished_row_numbers(self):
-        """완제품 시험항목의 일련번호를 업데이트합니다."""
-        for i, row_widgets in enumerate(self.finished_item_rows, start=1):
+        """완제품 시험항목의 일련번호를 업데이트합니다. (특이사항 줄 제외)"""
+        number = 1
+        for row_widgets in self.finished_item_rows:
             current_id = row_widgets['id_label'].cget("text")
-            if current_id and current_id.isdigit():
-                row_widgets['id_label'].configure(text=str(i))
+            # 특이사항 줄이 아니고 기존에 숫자였던 경우만 번호 업데이트
+            if current_id != "특이사항" and (current_id == "" or current_id.isdigit()):
+                row_widgets['id_label'].configure(text=str(number))
+                number += 1
 
     def clear_finished_product_form(self):
         """완제품 시험성적서 폼을 초기화합니다."""
@@ -1146,8 +1234,10 @@ class QualityManagementFrame(ctk.CTkFrame):
 
     def refresh_data(self):
         """품질 관리 프레임의 데이터를 새로고침합니다."""
-        print("품질 관리 프레임 데이터 새로고침... (현재는 플레이스홀더)")
-        # 향후 이 곳에 COA, MSDS 등 각 탭의 데이터를 다시 조회하고
-        # UI를 업데이트하는 코드를 추가할 수 있습니다.
-        # 예: self.setup_semi_finished_product_tab(self.tab_view.tab(self.texts['semi_finished_product_report']))
-        pass
+        print("품질 관리 프레임 데이터 새로고침...")
+        try:
+            # 각 탭의 UI를 다시 설정하여 데이터를 새로고침합니다.
+            self.setup_ingredient_report_tab(self.tab_view.tab(self.texts['ingredient_report']))
+            self.setup_coa_tab(self.tab_view.tab(self.texts['coa']))
+        except Exception as e:
+            print(f"[오류] 품질 관리 프레임 새로고침 실패: {e}")

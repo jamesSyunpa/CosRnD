@@ -2,9 +2,10 @@
 
 TRANSLATIONS = {
     "korean": {
-        "help": "도움말",
-        "close": "닫기",
-        "save": "저장",
+    "help": "도움말",
+    "close": "닫기",
+    "save": "저장",
+    "cancel": "취소",
         "new": "신규",
         "edit": "수정",
         "delete": "삭제",
@@ -184,8 +185,8 @@ TRANSLATIONS = {
     "ingredient_report": "원료목록보고 자료",
     },
     "english": {
-        # Generic
-        "help": "Help", "close": "Close", "save": "Save", "new": "New", "edit": "Edit", "delete": "Delete", "reset": "Reset", "search": "Search", "import": "Import", "export": "Export",
+    # Generic
+    "help": "Help", "close": "Close", "save": "Save", "cancel": "Cancel", "new": "New", "edit": "Edit", "delete": "Delete", "reset": "Reset", "search": "Search", "import": "Import", "export": "Export",
         "notification": "Notification", "warning": "Warning", "error": "Error", "success": "Success", "db_error": "Database Error", "input_error": "Input Error", "selection_error": "Selection Error", "export_error": "Export Error", "calculation_error": "Calculation Error",
         "import_confirm": "Import Confirmation", "delete_confirm": "Delete Confirmation", "dev_in_progress": "This feature is under development.", "dev_in_progress_short": "In-dev",
         "select_type": "- Select Type -", "select_client": "- Select Client -", "no_clients_found": "- No clients found -",
