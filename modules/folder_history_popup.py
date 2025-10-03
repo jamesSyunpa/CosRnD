@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
 from database.db_manager import db_manager
 from database.models import Formulation, or_
 from datetime import datetime, date
+from utils import center_window_on_mouse_display
 
 class FolderHistoryPopup(ctk.CTkToplevel):
     """
@@ -31,6 +32,10 @@ class FolderHistoryPopup(ctk.CTkToplevel):
 
         self.setup_ui()
         self.load_history()
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
 
     def setup_ui(self):
         """UI 기본 구조를 설정합니다."""

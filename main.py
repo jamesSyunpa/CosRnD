@@ -144,6 +144,7 @@ except Exception as _e:
     print(f"[BUILD-DEBUG] customtkinter import failed: {_e}")
 
 import pprint
+from utils import center_window_on_mouse_display
 print(f"[BUILD-DEBUG] sys._MEIPASS = {getattr(sys, '_MEIPASS', None)}")
 
 _mp = getattr(sys, '_MEIPASS', None)
@@ -269,8 +270,17 @@ class App(ctk.CTk):
         self.texts = get_texts(self.language) # 중앙 번역 객체 생성
         self.title("화장품 연구소 관리 시스템")
 
+        # Tkinter 콜백 예외를 GUI 메시지로 표시하도록 훅 설정
+        try:
+            self.report_callback_exception = self._gui_exception_hook
+        except Exception:
+            pass
+
         # PyInstaller 임시 폴더 관련 오류 처리
         self.handle_pyinstaller_temp_issues()
+
+        # 빌드 런타임 필수 리소스 보강 (아이콘/locale 등)
+        self.ensure_runtime_assets()
 
         self.db_sync_timer = None
         self.db_path_warning_shown = False
@@ -287,6 +297,87 @@ class App(ctk.CTk):
         
         # 앱 시작 시 로딩 스플래시 화면 표시
         self.after(50, self.show_pre_login_splash)
+
+    def ensure_runtime_assets(self):
+        """패키징 런타임에서 누락되면 크래시를 유발하는 리소스를 사전에 보강합니다.
+
+        - CustomTkinter 기본 아이콘이 누락된 경우, 로컬 Icon.ico로 대체 복사
+        - Babel locale-data 존재 여부를 점검하고 없으면 경고 로그(폴백은 개별 위젯 래퍼가 처리)
+        """
+        try:
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                meipass = sys._MEIPASS
+                # 1) CustomTkinter 아이콘 보강
+                try:
+                    ctk_icon_dir = os.path.join(meipass, 'customtkinter', 'assets', 'icons')
+                    ctk_icon_file = os.path.join(ctk_icon_dir, 'CustomTkinter_icon_Windows.ico')
+                    if not os.path.exists(ctk_icon_file):
+                        os.makedirs(ctk_icon_dir, exist_ok=True)
+                        # 앱 리소스에서 아이콘 경로 탐색 후 복사
+                        src_icon = resource_path('Icon.ico')
+                        if src_icon and os.path.exists(src_icon):
+                            import shutil
+                            shutil.copy2(src_icon, ctk_icon_file)
+                            print(f"[RUNTIME-ASSETS] CustomTkinter 아이콘 대체 복사 완료: {ctk_icon_file}")
+                        else:
+                            # 임시 아이콘 생성 후 복사
+                            fallback = create_fallback_icon(meipass)
+                            if fallback and os.path.exists(fallback):
+                                import shutil
+                                shutil.copy2(fallback, ctk_icon_file)
+                                print(f"[RUNTIME-ASSETS] 임시 아이콘을 CustomTkinter 아이콘으로 사용: {ctk_icon_file}")
+                except Exception as e:
+                    print(f"[RUNTIME-ASSETS] CustomTkinter 아이콘 보강 실패(무시): {e}")
+
+                # 2) Babel locale-data 존재 여부 점검 (tkcalendar가 필요로 함)
+                try:
+                    babel_locale_dir = os.path.join(meipass, 'babel', 'locale-data')
+                    if not os.path.isdir(babel_locale_dir):
+                        print("[RUNTIME-ASSETS][경고] Babel locale-data가 패키지에 없음. DateEntry는 안전 래퍼로 폴백됩니다.")
+                        # 여기서 즉시 복구는 어렵기 때문에, UI 쪽 SafeDateEntry가 폴백 처리함.
+                except Exception as e:
+                    print(f"[RUNTIME-ASSETS] Babel locale-data 점검 실패(무시): {e}")
+        except Exception as e:
+            print(f"[RUNTIME-ASSETS] 보강 처리 중 오류(무시): {e}")
+
+    # ---- GUI 예외 처리/로깅 유틸 ----
+    def _log_error(self, text: str) -> str | None:
+        try:
+            base_dir = os.getenv('LOCALAPPDATA') or os.path.expanduser('~')
+            log_dir = os.path.join(base_dir, 'RnD_플랫폼', 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            from datetime import datetime as _dt
+            fname = f"error_{_dt.now().strftime('%Y%m%d_%H%M%S')}.log"
+            path = os.path.join(log_dir, fname)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            return path
+        except Exception:
+            return None
+
+    def _format_friendly_message(self, log_path: str | None) -> str:
+        msg = (
+            "프로그램 실행 중 예기치 않은 오류가 발생했습니다.\n"
+            "작업이 중단되었을 수 있으니, 저장 후 프로그램을 다시 시작해 주세요."
+        )
+        if log_path:
+            msg += f"\n\n오류 로그 위치:\n{log_path}"
+        return msg
+
+    def _gui_exception_hook(self, exctype, value, tb):
+        """Tkinter 콜백 예외를 잡아 사용자에게 안내하고 로그를 남깁니다."""
+        try:
+            import traceback as _tb
+            tb_text = ''.join(_tb.format_exception(exctype, value, tb))
+            log_path = self._log_error(tb_text)
+            message = self._format_friendly_message(log_path)
+            messagebox.showerror('오류', message, parent=self)
+        except Exception:
+            # 최후의 수단: 간단 메시지
+            try:
+                messagebox.showerror('오류', '치명적 오류가 발생했습니다. 프로그램을 종료합니다.', parent=self)
+            except Exception:
+                pass
 
     def handle_pyinstaller_temp_issues(self):
         """PyInstaller 임시 폴더 관련 문제를 처리합니다."""
@@ -389,7 +480,8 @@ class App(ctk.CTk):
         print(f"{datetime.now()}: 첫 로그인 성공")
         
         # 1. 현재 DB 경로를 config.ini에 저장
-        config = configparser.ConfigParser()
+        # interpolation=None으로 설정하여 경로에 '%' 문자가 포함되어도 안전하게 처리
+        config = configparser.ConfigParser(interpolation=None)
         config.read(CONFIG_FILE_PATH, encoding='utf-8')
         
         current_db_path = os.path.join(application_path, 
@@ -399,7 +491,12 @@ class App(ctk.CTk):
         if not config.has_section('Paths'):
             config.add_section('Paths')
             
-        config.set('Paths', 'shared_db_path', current_db_path)
+        # shared_db_path에는 파일 경로가 아닌 디렉토리 경로를 저장하여 일관성 유지
+        try:
+            config.set('Paths', 'shared_db_path', os.path.dirname(current_db_path))
+        except Exception:
+            # 문제 발생 시에도 최소한 파일 경로라도 저장
+            config.set('Paths', 'shared_db_path', current_db_path)
         with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
             config.write(configfile)
             
@@ -425,9 +522,12 @@ class App(ctk.CTk):
         splash.overrideredirect(True)
 
         width, height = 350, 350
-        x = (splash.winfo_screenwidth() // 2) - (width // 2)
-        y = (splash.winfo_screenheight() // 2) - (height // 2)
-        splash.geometry(f'{width}x{height}+{x}+{y}')
+        try:
+            center_window_on_mouse_display(splash, width=width, height=height)
+        except Exception:
+            x = (splash.winfo_screenwidth() // 2) - (width // 2)
+            y = (splash.winfo_screenheight() // 2) - (height // 2)
+            splash.geometry(f'{width}x{height}+{x}+{y}')
         
         splash.lift()
         splash.focus_force()
@@ -653,9 +753,12 @@ class App(ctk.CTk):
         splash.overrideredirect(True)
 
         width, height = 350, 350
-        x = (splash.winfo_screenwidth() // 2) - (width // 2)
-        y = (splash.winfo_screenheight() // 2) - (height // 2)
-        splash.geometry(f'{width}x{height}+{x}+{y}')
+        try:
+            center_window_on_mouse_display(splash, width=width, height=height)
+        except Exception:
+            x = (splash.winfo_screenwidth() // 2) - (width // 2)
+            y = (splash.winfo_screenheight() // 2) - (height // 2)
+            splash.geometry(f'{width}x{height}+{x}+{y}')
         
         splash.lift()
         splash.focus_force()
@@ -824,7 +927,8 @@ class App(ctk.CTk):
 
     def load_app_settings(self):
         """config.ini에서 앱 설정을 로드합니다 (테마, 언어 등)."""
-        config = configparser.ConfigParser()
+        # interpolation=None으로 설정하여 '%' 등의 특수 문자가 포함된 값도 안전하게 처리
+        config = configparser.ConfigParser(interpolation=None)
         try:
             if os.path.exists(CONFIG_FILE_PATH):
                 config.read(CONFIG_FILE_PATH, encoding='utf-8')
@@ -1075,7 +1179,7 @@ class App(ctk.CTk):
 
     def load_recent_actions(self):
         """config.ini에서 현재 사용자의 최근 활동을 불러옵니다."""
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)
         config.read(CONFIG_FILE_PATH, encoding='utf-8')
         section = f"RecentHistory_{self.current_user.username}"
         if config.has_section(section):
@@ -1546,13 +1650,30 @@ class App(ctk.CTk):
         finally:
             # 강제 종료 (모든 스레드와 프로세스 완전 종료)
             try:
+                # 메인 루프 종료 시도
+                self.quit()
+            except:
+                pass
+            try:
                 self.destroy()
             except:
                 pass
+            # Windows 환경에서 드물게 프로세스가 남는 경우를 대비한 최후의 수단
+            try:
+                if os.name == 'nt':
+                    import threading, ctypes
+                    def _force_kill():
+                        try:
+                            ctypes.windll.kernel32.TerminateProcess(ctypes.windll.kernel32.GetCurrentProcess(), 0)
+                        except Exception:
+                            pass
+                    # os._exit 실패/무시 대비해서 0.5초 후 강제 종료 시도
+                    threading.Timer(0.5, _force_kill).start()
+            except Exception:
+                pass
             
-            # 시스템 종료
-            import threading
-            threading.Timer(0.1, lambda: os._exit(0)).start()
+            # 즉시 프로세스 종료 (남아있는 비-데몬 스레드가 있어도 종료)
+            os._exit(0)
 
     def get_config_value(self, section, option, fallback=None):
         """config.ini에서 값을 읽어옵니다."""
@@ -1564,7 +1685,7 @@ class App(ctk.CTk):
         """어플리케이션의 주요 UI 설정을 저장합니다."""
         if not hasattr(self, 'frames') or FRAME_DOCUMENT not in self.frames:
             return
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)
         config.read(CONFIG_FILE_PATH, encoding='utf-8')
         if not config.has_section('Appearance'):
             config.add_section('Appearance')
@@ -1634,7 +1755,8 @@ class App(ctk.CTk):
     def initialize_db_sync_baseline(self):
         """DB 동기화 기준선을 조용히 설정합니다."""
         try:
-            config = configparser.ConfigParser()
+            # interpolation=None으로 설정하여 경로 내 '%' 등으로 인한 파싱 오류 방지
+            config = configparser.ConfigParser(interpolation=None)
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
             shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
@@ -1642,7 +1764,7 @@ class App(ctk.CTk):
             def resolve_shared_file(path):
                 if not path:
                     return None
-                path = path.strip()
+                path = path.strip().strip('"').strip("'")
                 if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
                     return path
                 return os.path.join(path, 'cosmetic.db')
@@ -1689,14 +1811,14 @@ class App(ctk.CTk):
     def update_db_sync_baseline(self):
         """DB 동기화 기준선을 현재 상태로 업데이트합니다 (자체 변경사항 반영용)."""
         try:
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
             shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
             def resolve_shared_file(path):
                 if not path:
                     return None
-                path = path.strip()
+                path = path.strip().strip('"').strip("'")
                 if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
                     return path
                 return os.path.join(path, 'cosmetic.db')
@@ -1715,7 +1837,7 @@ class App(ctk.CTk):
     def check_shared_db(self):
         """공유 DB 파일의 상태를 확인하고, '특정 체크'로 의미 있는 변경 시에만 업데이트를 제안합니다."""
         try:
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
             shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
@@ -1771,7 +1893,7 @@ class App(ctk.CTk):
                 significant_time_change = time_diff > 15
                 
                 if significant_size_change or significant_time_change:
-                    # 특정 체크: change_log가 있으면, 최근 변경이 'formulations' 또는 'formulation_items' 인 경우에만 알림
+                    # 특정 체크: change_log의 최근 변경 테이블을 수집하여 '사용자에게 관련 있는 변경'인지 판별
                     specific_change_detected = True  # 기본값 (change_log 없으면 보수적으로 True)
                     try:
                         import sqlite3
@@ -1782,9 +1904,28 @@ class App(ctk.CTk):
                             last_id = getattr(self, 'last_change_log_id', 0)
                             cur.execute("SELECT id, table_name FROM change_log WHERE id > ? ORDER BY id", (last_id,))
                             rows = cur.fetchall()
-                            relevant_tables = {"formulations", "formulation_items"}
-                            specific_change_detected = any(r[1] in relevant_tables for r in rows)
-                            # 기준선 ID 업데이트
+
+                            # 변경된 테이블 집합
+                            changed_tables = {r[1] for r in rows}
+
+                            # 사용자 권한/사용처에 따른 관심 테이블 구성
+                            interested = set()
+                            try:
+                                if hasattr(self.current_user, 'has_research_access') and self.current_user.has_research_access():
+                                    interested.update({"formulations", "formulation_items"})
+                                if hasattr(self.current_user, 'can_view_material_data') and self.current_user.can_view_material_data():
+                                    interested.update({"materials", "ingredients"})
+                                if hasattr(self.current_user, 'can_view_client_data') and self.current_user.can_view_client_data():
+                                    interested.update({"clients"})
+                                # 사용자 관리 변경은 관리자에게만 의미가 있으므로 관리자에게만 알림
+                                if getattr(self.current_user, 'is_admin', False):
+                                    interested.update({"users"})
+                            except Exception:
+                                pass
+
+                            specific_change_detected = bool(changed_tables & interested)
+
+                            # 기준선 ID 업데이트 (항상 수행)
                             if rows:
                                 self.last_change_log_id = rows[-1][0]
                         conn.close()
@@ -1792,7 +1933,7 @@ class App(ctk.CTk):
                         print(f"[DB동기화] 특정 변경 확인 실패(무시): {e}")
 
                     if not specific_change_detected:
-                        # 관련 없는 변경이면 조용히 기준선만 갱신
+                        # 관련 없는 변경이면 조용히 기준선만 갱신 (사용자에게 메시지/재시동 미제안)
                         print("[DB동기화] 관련 없는 변경 감지 -> 알림 없이 기준선만 갱신")
                         self.last_shared_db_info = current_db_info
                         return
@@ -1991,8 +2132,16 @@ class App(ctk.CTk):
                     print(f"[RESTART] 사용자 정보 전달: {self.current_user.id} (관리자: {self.current_user.is_admin})")
                 
                 # 새 프로세스 시작 (작업 디렉토리 및 환경 변수 명시적 설정)
+                # 개발 환경(non-frozen)에서는 스크립트 경로를 명시적으로 전달해야 함
+                if not getattr(sys, 'frozen', False):
+                    script_path = os.path.abspath(__file__)
+                    cmd = [executable_path, script_path] + sys.argv[1:]
+                else:
+                    # 패키징된 실행 파일은 자체적으로 진입점을 포함하므로 추가 스크립트 경로 불필요
+                    cmd = [executable_path] + sys.argv[1:]
+
                 subprocess.Popen(
-                    [executable_path] + (sys.argv[1:] if not getattr(sys, 'frozen', False) else []),
+                    cmd,
                     cwd=current_dir,  # 작업 디렉토리 명시적 설정
                     env=env,  # 환경 변수 설정
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0

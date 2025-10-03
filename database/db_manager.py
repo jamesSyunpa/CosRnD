@@ -103,7 +103,7 @@ class DBManager:
             return 'data'
             
         try:
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             config.read(self.config_path, encoding='utf-8')
             db_dir = config.get('Paths', 'database_dir', fallback='data')
             print(f"config.ini에서 읽은 database_dir: {db_dir}")
@@ -191,7 +191,7 @@ class DBManager:
             raise ValueError("application_path와 config_path가 필요합니다.")
         
         # 설정 파일 읽기
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)
         config.read(self.config_path, encoding='utf-8')
         
         # 1. 기본 경로 설정
@@ -204,7 +204,8 @@ class DBManager:
         def resolve_shared_file(path):
             if not path:
                 return None
-            path = path.strip()
+            # 따옴표로 감싸진 값 방지 및 공백 제거
+            path = path.strip().strip('"').strip("'")
             # if user or older code stored full file path, accept it
             if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
                 return path
@@ -238,32 +239,51 @@ class DBManager:
                 print(f"[INFO] 공유 DB 파일 확인: {shared_db_file}")
                 self.db_path = shared_db_file
 
-                # 공유 DB 연결 테스트
+                # 공유 DB 연결 엔진 생성
                 test_engine = create_engine(
                     f'sqlite:///{shared_db_file}',
                     connect_args={'check_same_thread': False}
                 )
-                with test_engine.connect() as conn:
-                    # 스키마 버전 확인
+                db_version = None
+                try:
+                    with test_engine.connect() as conn:
+                        try:
+                            db_version = conn.execute(text("SELECT version FROM _schema_version")).scalar()
+                            print(f"[INFO] 공유 DB 스키마 버전 감지: v{db_version}")
+                        except Exception as schema_e:
+                            print(f"[경고] 공유 DB 스키마 버전 확인 실패: {schema_e} (버전 테이블이 없을 수 있음)")
+                except Exception as conn_e:
+                    print(f"[경고] 공유 DB 연결 테스트 실패: {conn_e}")
+                    test_engine.dispose()
+                    raise
+
+                # 엔진 채택 후 마이그레이션/트리거 보장 진행 (버전 불일치여도 시도)
+                self.engine = test_engine
+                try:
+                    self._check_and_run_migrations()
+                except Exception as mig_e:
+                    print(f"[경고] 공유 DB 버전/마이그레이션 처리 실패(무시): {mig_e}")
                     try:
-                        result = conn.execute(text("SELECT version FROM _schema_version")).scalar()
-                        if result == SCHEMA_VERSION:
-                            print(f"[INFO] 스키마 버전 일치: v{result}")
-                            self.engine = test_engine
-                            self.Session = sessionmaker(bind=self.engine)
-                            print(f"[INFO] 공유 DB 연결 성공")
-                            self._save_init_state(True)
-                            return
-                        else:
-                            print(f"[경고] 공유 DB 스키마 버전 불일치 (발견: v{result}, 필요: v{SCHEMA_VERSION})")
-                            test_engine.dispose()
-                    except Exception as schema_e:
-                        print(f"[경고] 스키마 버전 확인 실패: {schema_e}")
-                        test_engine.dispose()
+                        # 최소한 누락 컬럼 보수 시도
+                        self._run_migrations()
+                    except Exception as mig2:
+                        print(f"[경고] 공유 DB 보수 마이그레이션 2차 실패(무시): {mig2}")
+                try:
+                    self.ensure_change_tracking()
+                except Exception as trg_e:
+                    print(f"[경고] 공유 DB 트리거 보장 실패(무시): {trg_e}")
+
+                self.Session = sessionmaker(bind=self.engine)
+                print(f"[INFO] 공유 DB 연결 성공 (마이그레이션/트리거 보장 완료)")
+                self._save_init_state(True)
+                return
             except Exception as e:
                 print(f"[경고] 공유 DB 연결 실패: {e}")
                 if 'test_engine' in locals():
-                    test_engine.dispose()
+                    try:
+                        test_engine.dispose()
+                    except Exception:
+                        pass
         
         # 4. 로컬 DB 사용
         print("\n=== 로컬 DB 설정 시작 ===")
@@ -442,9 +462,11 @@ class DBManager:
                         if column.name not in existing_columns:
                             from sqlalchemy.schema import CreateColumn
                             column.default = None
-                            add_column_ddl = str(CreateColumn(column).compile(self.engine))
+                            # SQLite에서는 ALTER TABLE ... ADD COLUMN 구문이 필요
+                            col_def = str(CreateColumn(column).compile(self.engine))
+                            alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_def}"
                             with connection.begin() as trans:
-                                connection.execute(text(add_column_ddl))
+                                connection.execute(text(alter_sql))
                                 print(f"테이블 '{table_name}'에 누락된 컬럼 '{column.name}' 추가 완료.")
                 except Exception as e:
                     if "no such table" in str(e).lower():
@@ -514,7 +536,7 @@ class DBManager:
             return
             
         try:
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             config.read(self.config_path, encoding='utf-8')
             
             if not config.has_section('Database'):
@@ -535,7 +557,7 @@ class DBManager:
             return False
             
         try:
-            config = configparser.ConfigParser()
+            config = configparser.ConfigParser(interpolation=None)
             config.read(self.config_path, encoding='utf-8')
             return config.getboolean('Database', 'initialized', fallback=False)
         except Exception as e:
@@ -790,9 +812,9 @@ class DBManager:
         """시스템에 관리자 권한 사용자가 이미 존재하는지 확인합니다."""
         session = self.get_session()
         try:
-            # is_admin=True이거나 role이 'MSAD'인 사용자 확인
+            # is_admin=True이거나 role이 'MSAD' 또는 'RQD'인 사용자 확인 (정책: RQD=마스터)
             admin_count = session.query(User).filter(
-                or_(User.is_admin == True, User.role == 'MSAD')
+                or_(User.is_admin == True, User.role.in_(['MSAD', 'RQD']))
             ).count()
             return admin_count > 0
         except Exception as e:

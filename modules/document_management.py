@@ -18,6 +18,7 @@ from modules import excel_handler
 from modules.comparison_popup import FormulationComparisonPopup
 from modules.folder_history_popup import FolderHistoryPopup
 from modules.ui_components import HelpPopup, CustomErrorDialog, CustomDropdown, AddMaterialDialog, try_convert_to_float
+from utils import center_window_on_mouse_display
 from modules.translation import get_texts
 from modules.formulation_popup import FormulationEditPopup, to_decimal, decimal_to_str_full # FormulationEditPopup은 그대로 둡니다.
 from decimal import Decimal
@@ -49,6 +50,10 @@ class ClipboardErrorDialog(ctk.CTkToplevel):
 
         close_button = ctk.CTkButton(main_frame, text="확인", command=self.destroy)
         close_button.pack(pady=(10, 0))
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
 
 class AddMaterialDialog(ctk.CTkToplevel):
     """처방에 원료를 추가하기 위한 팝업창"""
@@ -117,6 +122,10 @@ class AddMaterialDialog(ctk.CTkToplevel):
         ctk.CTkButton(button_frame, text="닫기", fg_color="gray50", hover_color="gray35", command=self.destroy).pack(side="left", padx=10)
 
         self.search_materials() # 초기 전체 목록 로드
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
 
     def reset_search(self):
         """검색창을 비우고 전체 목록을 다시 불러옵니다."""
@@ -1740,7 +1749,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         top_control_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         top_control_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 
-        ctk.CTkButton(top_control_frame, text=self.texts['create_all_lists'], command=self.generate_all_ingredient_lists).pack(side="left")
+        # 생성 버튼은 강제 생성(force=True)으로 호출하여 탭 활성화 여부와 무관하게 생성되도록 함
+        ctk.CTkButton(top_control_frame, text=self.texts['create_all_lists'], command=lambda: self.generate_all_ingredient_lists(force=True)).pack(side="left")
         ctk.CTkButton(top_control_frame, text=self.texts['export_to_excel'], command=self.export_all_ingredient_lists).pack(side="left", padx=(10, 0))
 
         # --- 열 선택 메뉴 버튼 (컨트롤 프레임에 추가) ---
@@ -1797,16 +1807,22 @@ class DocumentManagementFrame(ctk.CTkFrame):
         else:
             self.column_selection_button.pack_forget()
 
-    def generate_all_ingredient_lists(self):
-        """모든 종류의 전성분 목록을 한 번에 생성합니다."""
-        # 처방이 선택되었을 때만 목록 생성
-        if self._selected_formulation_id:
-            self.generate_raw_material_ingredient_list()
-            self.generate_summed_ingredient_list()
-            self.generate_single_ingredient_list()
-            self.generate_design_ingredient_list()
-        else:
-            # 처방 선택이 해제되면 모든 목록을 비웁니다.
+    def _is_ingredient_main_tab_active(self) -> bool:
+        """현재 '전성분' 메인 서브 탭이 활성화되어 있는지 확인합니다."""
+        try:
+            label_map = {"korean": "전성분", "english": "Ingredient List"}
+            expected = label_map.get(getattr(self.app, 'language', 'korean'), "전성분")
+            return hasattr(self, 'formulation_sub_tab_view') and self.formulation_sub_tab_view.get() == expected
+        except Exception:
+            return False
+
+    def generate_all_ingredient_lists(self, force: bool = False):
+        """모든 종류의 전성분 목록을 한 번에 생성합니다.
+        - force=False일 때는 '전성분' 탭이 활성화된 경우에만 생성합니다.
+        - 처방 선택이 해제된 경우에는 항상 모든 목록을 비웁니다.
+        """
+        # 선택 해제 시에는 언제나 정리
+        if not self._selected_formulation_id:
             for tree in [self.raw_material_ingredient_tree, self.summed_ingredient_tree, self.single_ingredient_tree]:
                 tree.delete(*tree.get_children())
             self.raw_material_rm_ratio_total_label.configure(text="0.0000")
@@ -1815,6 +1831,17 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.single_total_ratio_label.configure(text="0")
             self.design_ko_textbox.delete("1.0", "end")
             self.design_en_textbox.delete("1.0", "end")
+            return
+
+        # 전성분 탭이 비활성 상태이고 강제 생성이 아니면 조용히 종료 (다른 탭 조작 시 불필요한 생성 방지)
+        if not force and not self._is_ingredient_main_tab_active():
+            return
+
+        # 생성 수행
+        self.generate_raw_material_ingredient_list()
+        self.generate_summed_ingredient_list()
+        self.generate_single_ingredient_list()
+        self.generate_design_ingredient_list()
 
     def export_all_ingredient_lists(self):
         """생성된 모든 전성분 목록을 하나의 엑셀 파일에 여러 시트로 내보냅니다."""
@@ -2907,10 +2934,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             dialog.protocol("WM_DELETE_WINDOW", cancel_and_close)
 
-            dialog.update_idletasks()
-            x = self.winfo_x() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
-            y = self.winfo_y() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
-            dialog.geometry(f"+{x}+{y}")
+            try:
+                center_window_on_mouse_display(dialog)
+            except Exception:
+                dialog.update_idletasks()
+                x = self.winfo_x() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
+                y = self.winfo_y() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
+                dialog.geometry(f"+{x}+{y}")
 
             self.wait_window(dialog)
 

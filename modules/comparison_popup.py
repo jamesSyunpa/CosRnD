@@ -12,6 +12,7 @@ from database.db_manager import db_manager
 from sqlalchemy.orm import joinedload
 from database.models import Formulation
 from decimal import Decimal
+from utils import center_window_on_mouse_display
 
 class FormulationComparisonPopup(ctk.CTkToplevel):
     """두 처방을 비교하여 차이점을 보여주는 팝업 창"""
@@ -29,6 +30,10 @@ class FormulationComparisonPopup(ctk.CTkToplevel):
 
         self.setup_ui()
         self.load_and_compare(formulation_id1, formulation_id2)
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
 
     def setup_ui(self):
         """UI 기본 구조를 설정합니다."""
