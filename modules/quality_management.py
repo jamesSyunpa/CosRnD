@@ -8,6 +8,12 @@ import tkinter.filedialog as fd
 from modules import excel_handler
 
 from modules.translation import get_texts
+from database.db_manager import db_manager
+from database.models import (
+    IngredientReport, IngredientReportItem,
+    SemiFinishedCOA, SemiFinishedCOAItem,
+    FinishedProductCOA, FinishedProductCOAItem,
+)
 
 class QualityManagementFrame(ctk.CTkFrame):
     """품질 관리 관련 기능을 포함하는 프레임"""
@@ -48,7 +54,8 @@ class QualityManagementFrame(ctk.CTkFrame):
 
     def setup_ingredient_report_tab(self, tab_frame):
         """원료목록보고 탭의 UI를 설정합니다."""
-        self.saved_products = []  # 저장된 제품 데이터 리스트
+        self.saved_products = []  # 저장된 제품 데이터 리스트 (엑셀용 버퍼)
+        self.current_ingredient_report_id = None  # DB 로드 시 편집 중인 ID
         
         self.cosmetic_type_map = {
             "가": {"name": "만 3세 이하 영유아용 제품류", "items": {"가1": "영유아용 샴푸, 린스", "가2": "영유아용 로션, 크림", "가3": "영유아용 오일", "가4": "영유아용 인체 세정용 제품", "가5": "영유아용 목욕용 제품"}},
@@ -152,7 +159,21 @@ class QualityManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(button_frame, text="초기화", command=self.clear_ingredient_report_form, 
                      fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
 
+        # DB 저장/불러오기 UI
+        db_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
+        db_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+        db_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkButton(db_frame, text="DB 저장", command=self.save_ingredient_report_to_db,
+                      fg_color="#2FA572", hover_color="#106A43", width=120).grid(row=0, column=0, padx=(0, 8))
+        self.ingredient_report_picker = ctk.CTkComboBox(db_frame, values=[], width=500)
+        self.ingredient_report_picker.grid(row=0, column=1, padx=(0, 8), sticky="ew")
+        ctk.CTkButton(db_frame, text="불러오기", command=self.load_selected_ingredient_report,
+                      fg_color="#4C9AFF", hover_color="#1F6AA5", width=100).grid(row=0, column=2)
+
         self._redraw_report_table()
+        # 최근 저장 목록 로드
+        self.refresh_ingredient_report_list()
 
     def _update_subcategory_combo(self, selected_main_category):
         main_code = selected_main_category.split(" : ")[0]
@@ -239,7 +260,189 @@ class QualityManagementFrame(ctk.CTkFrame):
         self.bulk_ingredient_entry.delete("1.0", "end")
         self._redraw_report_table()
         self.saved_products.clear()  # 저장된 제품 목록도 초기화
+        self.current_ingredient_report_id = None
         messagebox.showinfo("알림", "폼이 초기화되었습니다.", parent=self)
+
+    def _collect_current_ingredient_report_data(self):
+        """현재 화면 또는 저장 버퍼의 원료목록 데이터를 수집합니다.
+        반환: 리스트[dict]: 각 제품 단위의 헤더 및 아이템 목록
+        """
+        collected = []
+        if self.saved_products:
+            # 여러 제품 버퍼를 각각 하나의 보고서로 저장
+            for product in self.saved_products:
+                collected.append({
+                    'product_name': product.get("제품명", ""),
+                    'type_code': product.get("유형표시", ""),
+                    'functional_type_code': product.get("기능성화장품유형", ""),
+                    'functional_code': product.get("기능성화장품품목코드", ""),
+                    'manufacturer': product.get("제조업자상호", ""),
+                    'usage': product.get("용도", ""),
+                    'custom_content': product.get("맞춤형내용물", ""),
+                    'ingredients': product.get("원료성분명", [])
+                })
+        else:
+            # 현재 화면 데이터로 단일 저장
+            pasted_text = self.bulk_ingredient_entry.get("1.0", "end-1c").strip()
+            if ', ' in pasted_text:
+                pasted_ingredients = pasted_text.split(', ')
+            elif ',' in pasted_text:
+                pasted_ingredients = pasted_text.split(',')
+            else:
+                pasted_ingredients = pasted_text.split('\n')
+            pasted_ingredients = [line.strip() for line in pasted_ingredients if line.strip()]
+
+            if not self.report_entries["제품명"].get() or not pasted_ingredients:
+                return []
+
+            type_selected = self.report_entries["유형표시"].get()
+            type_code = type_selected.split(" : ")[0] if " : " in type_selected else type_selected
+            functional_selected = self.report_entries["기능성화장품유형"].get()
+            functional_type_code = functional_selected.split(" : ")[0] if " : " in functional_selected else ""
+
+            collected.append({
+                'product_name': self.report_entries["제품명"].get(),
+                'type_code': type_code,
+                'functional_type_code': functional_type_code,
+                'functional_code': self.report_entries["기능성화장품품목코드"].get(),
+                'manufacturer': self.report_entries["제조업자상호"].get(),
+                'usage': self.report_entries.get("용도").get() if self.report_entries.get("용도") else "",
+                'custom_content': self.report_entries.get("맞춤형내용물").get() if self.report_entries.get("맞춤형내용물") else "",
+                'ingredients': pasted_ingredients
+            })
+        return collected
+
+    def save_ingredient_report_to_db(self):
+        """원료목록보고 현재 데이터를 DB에 저장하거나 업데이트합니다."""
+        data_list = self._collect_current_ingredient_report_data()
+        if not data_list:
+            messagebox.showwarning("입력 오류", "제품명과 원료성분명을 확인해주세요.", parent=self)
+            return
+
+        session = db_manager.get_session()
+        try:
+            saved_count = 0
+            # 편집 중인 단일 레코드가 있는 경우 업데이트, 아니면 새로 생성
+            if self.current_ingredient_report_id and len(data_list) == 1:
+                header = session.query(IngredientReport).filter_by(id=self.current_ingredient_report_id).first()
+                if not header:
+                    self.current_ingredient_report_id = None  # fallback to create
+                else:
+                    d = data_list[0]
+                    header.product_name = d['product_name']
+                    header.manufacturer = d['manufacturer']
+                    header.type_code = d['type_code']
+                    header.functional_type_code = d['functional_type_code']
+                    header.functional_code = d['functional_code']
+                    header.usage = d['usage']
+                    header.custom_content = d['custom_content']
+                    # replace items
+                    header.items.clear()
+                    for idx, ing in enumerate(d['ingredients'], start=1):
+                        header.items.append(IngredientReportItem(row_no=idx, ingredient_name=ing))
+                    session.commit()
+                    saved_count = 1
+            if saved_count == 0:
+                # 새 레코드(들) 생성
+                for d in data_list:
+                    header = IngredientReport(
+                        product_name=d['product_name'], manufacturer=d['manufacturer'],
+                        type_code=d['type_code'], functional_type_code=d['functional_type_code'],
+                        functional_code=d['functional_code'], usage=d['usage'], custom_content=d['custom_content']
+                    )
+                    for idx, ing in enumerate(d['ingredients'], start=1):
+                        header.items.append(IngredientReportItem(row_no=idx, ingredient_name=ing))
+                    session.add(header)
+                    saved_count += 1
+                session.commit()
+
+            self.refresh_ingredient_report_list()
+            messagebox.showinfo("저장 완료", f"원료목록보고 {saved_count}건 저장되었습니다.", parent=self)
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror("오류", f"DB 저장 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
+
+    def refresh_ingredient_report_list(self):
+        """최근 저장된 원료목록보고 목록을 콤보에 로드."""
+        try:
+            session = db_manager.get_session()
+            recs = session.query(IngredientReport).order_by(IngredientReport.created_at.desc()).limit(50).all()
+            values = [f"{r.id} | {r.product_name} | {r.manufacturer or ''} | {r.created_at.strftime('%Y-%m-%d %H:%M')}" for r in recs]
+            self.ingredient_report_picker.configure(values=values)
+            if values:
+                self.ingredient_report_picker.set(values[0])
+        except Exception as e:
+            print(f"[경고] 원료목록보고 목록 로드 실패: {e}")
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    def load_selected_ingredient_report(self):
+        """콤보에서 선택된 원료목록보고를 폼에 로드합니다."""
+        sel = self.ingredient_report_picker.get()
+        if not sel or '|' not in sel:
+            messagebox.showwarning("선택 필요", "불러올 항목을 선택하세요.", parent=self)
+            return
+        try:
+            report_id = int(sel.split('|')[0].strip())
+        except Exception:
+            messagebox.showwarning("선택 오류", "선택된 항목을 해석할 수 없습니다.", parent=self)
+            return
+        session = db_manager.get_session()
+        try:
+            header = session.query(IngredientReport).filter_by(id=report_id).first()
+            if not header:
+                messagebox.showwarning("오류", "선택한 데이터가 존재하지 않습니다.", parent=self)
+                return
+            # 폼 채우기
+            self.report_entries["제품명"].delete(0, 'end'); self.report_entries["제품명"].insert(0, header.product_name or '')
+            self.report_entries["제조업자상호"].delete(0, 'end'); self.report_entries["제조업자상호"].insert(0, header.manufacturer or '')
+            # 유형표시 콤보 값 구성과 세팅
+            # 대분류는 유지, 소분류 코드만 있는 경우 그대로 세팅 시도
+            try:
+                # 소분류 전체 값 목록
+                main_selected = self.report_entries["유형표시_대분류"].get()
+                # 대분류 변경 없이 소분류 값 직접 세팅
+                if header.type_code:
+                    # value는 "코드 : 이름" 형식이지만 직접 코드만 세팅해도 표시됨
+                    self.report_entries["유형표시"].set(header.type_code)
+            except Exception:
+                pass
+            if header.functional_type_code:
+                self.report_entries["기능성화장품유형"].set(header.functional_type_code)
+            self.report_entries["기능성화장품품목코드"].delete(0, 'end'); self.report_entries["기능성화장품품목코드"].insert(0, header.functional_code or '')
+            self.report_entries["용도"].set(header.usage or '')
+            self.report_entries["맞춤형내용물"].set(header.custom_content or '')
+
+            # 테이블
+            for row_widgets in self.report_item_rows:
+                for key, widget in row_widgets.items():
+                    if hasattr(widget, 'destroy'):
+                        widget.destroy()
+            self.report_item_rows.clear()
+            for idx, item in enumerate(sorted(header.items, key=lambda x: (x.row_no or 0, x.id)) , start=1):
+                self._add_report_item_row_with_data(
+                    row_number=idx,
+                    product_name=header.product_name or '',
+                    type_code=header.type_code or '',
+                    functional_type=header.functional_type_code or '',
+                    functional_code=header.functional_code or '',
+                    manufacturer=header.manufacturer or '',
+                    ingredient=item.ingredient_name or '',
+                    usage=header.usage or '',
+                    custom_content=header.custom_content or ''
+                )
+            self.current_ingredient_report_id = header.id
+            self.saved_products.clear()
+            messagebox.showinfo("불러오기 완료", "원료목록보고 데이터가 로드되었습니다.", parent=self)
+        except Exception as e:
+            messagebox.showerror("오류", f"불러오기 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
 
     def save_and_continue_report(self):
         """현재 제품 데이터를 저장하고 폼을 초기화하여 다음 제품을 입력받습니다."""
@@ -580,6 +783,7 @@ class QualityManagementFrame(ctk.CTkFrame):
 
         self.semi_product_entries = {}
         self.coa_item_rows = [] 
+        self.current_semi_coa_id = None
 
         info_frame = ctk.CTkFrame(scrollable_frame)
         info_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 20))
@@ -621,7 +825,19 @@ class QualityManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(button_frame, text=self.texts['create_excel_report'], command=self.generate_semi_product_report).pack(side="left", padx=5)
         ctk.CTkButton(button_frame, text=self.texts['reset'], command=self.clear_semi_product_form, fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
 
+        # DB 저장/불러오기 UI
+        db_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
+        db_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+        db_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkButton(db_frame, text="DB 저장", command=self.save_semi_coa_to_db,
+                      fg_color="#2FA572", hover_color="#106A43", width=120).grid(row=0, column=0, padx=(0, 8))
+        self.semi_coa_picker = ctk.CTkComboBox(db_frame, values=[], width=500)
+        self.semi_coa_picker.grid(row=0, column=1, padx=(0, 8), sticky="ew")
+        ctk.CTkButton(db_frame, text="불러오기", command=self.load_selected_semi_coa,
+                      fg_color="#4C9AFF", hover_color="#1F6AA5", width=100).grid(row=0, column=2)
+
         self._redraw_coa_table()
+        self.refresh_semi_coa_list()
 
     def _redraw_coa_table(self, initial_items=None):
         for row_widgets in self.coa_item_rows:
@@ -711,7 +927,149 @@ class QualityManagementFrame(ctk.CTkFrame):
         
         self._redraw_coa_table(initial_items=None)
 
+        self.current_semi_coa_id = None
         messagebox.showinfo(self.texts['notification'], self.texts['form_cleared'], parent=self)
+
+    def _collect_semi_coa_data(self):
+        return {
+            'product_name': self.semi_product_entries.get("제 품 명").get(),
+            'lot_no': self.semi_product_entries.get("LOT").get(),
+            'manufacture_date': self.semi_product_entries.get("제조일자").get(),
+            'test_date': self.semi_product_entries.get("시험일자").get(),
+            'examiner': self.semi_product_entries.get("시험자").get(),
+            'overall_result': self.semi_product_entries.get("종합판정").get(),
+            'items': [
+                {
+                    'seq_no': i+1,
+                    'item_name': row['name'].get(),
+                    'spec': row['criteria'].get(),
+                    'result': row['result'].get(),
+                    'remark': row['remarks'].get(),
+                }
+                for i, row in enumerate(self.coa_item_rows)
+            ]
+        }
+
+    def save_semi_coa_to_db(self):
+        data = self._collect_semi_coa_data()
+        if not data.get('product_name') or not data.get('overall_result'):
+            messagebox.showwarning(self.texts['input_error'], self.texts['required_fields_missing'], parent=self)
+            return
+        from datetime import datetime
+        def to_date(s):
+            try:
+                # 허용 가능한 몇 가지 포맷 시도
+                for fmt in ("%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d", "%Y%m%d"):
+                    try:
+                        return datetime.strptime(s.strip(), fmt).date()
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            return None
+        session = db_manager.get_session()
+        try:
+            if self.current_semi_coa_id:
+                header = session.query(SemiFinishedCOA).filter_by(id=self.current_semi_coa_id).first()
+                if not header:
+                    self.current_semi_coa_id = None
+                else:
+                    header.product_name = data['product_name']
+                    header.lot_no = data['lot_no']
+                    header.manufacture_date = to_date(data['manufacture_date']) if data['manufacture_date'] else None
+                    header.test_date = to_date(data['test_date']) if data['test_date'] else None
+                    header.examiner = data['examiner']
+                    header.overall_result = data['overall_result']
+                    header.items.clear()
+                    for it in data['items']:
+                        header.items.append(SemiFinishedCOAItem(**it))
+                    session.commit()
+                    messagebox.showinfo(self.texts['success'], "DB에 업데이트되었습니다.", parent=self)
+                    self.refresh_semi_coa_list()
+                    return
+            # create new
+            header = SemiFinishedCOA(
+                product_name=data['product_name'], lot_no=data['lot_no'],
+                manufacture_date=to_date(data['manufacture_date']) if data['manufacture_date'] else None,
+                test_date=to_date(data['test_date']) if data['test_date'] else None,
+                examiner=data['examiner'], overall_result=data['overall_result']
+            )
+            for it in data['items']:
+                header.items.append(SemiFinishedCOAItem(**it))
+            session.add(header)
+            session.commit()
+            self.current_semi_coa_id = header.id
+            self.refresh_semi_coa_list()
+            messagebox.showinfo(self.texts['success'], "DB에 저장되었습니다.", parent=self)
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror(self.texts['error'], f"DB 저장 중 오류: {e}", parent=self)
+        finally:
+            session.close()
+
+    def refresh_semi_coa_list(self):
+        try:
+            session = db_manager.get_session()
+            recs = session.query(SemiFinishedCOA).order_by(SemiFinishedCOA.created_at.desc()).limit(50).all()
+            values = [f"{r.id} | {r.product_name} | {r.lot_no or ''} | {r.created_at.strftime('%Y-%m-%d %H:%M')}" for r in recs]
+            self.semi_coa_picker.configure(values=values)
+            if values:
+                self.semi_coa_picker.set(values[0])
+        except Exception as e:
+            print(f"[경고] 반제품 COA 목록 로드 실패: {e}")
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    def load_selected_semi_coa(self):
+        sel = self.semi_coa_picker.get()
+        if not sel or '|' not in sel:
+            messagebox.showwarning("선택 필요", "불러올 항목을 선택하세요.", parent=self)
+            return
+        try:
+            header_id = int(sel.split('|')[0].strip())
+        except Exception:
+            messagebox.showwarning("선택 오류", "선택된 항목을 해석할 수 없습니다.", parent=self)
+            return
+        session = db_manager.get_session()
+        try:
+            header = session.query(SemiFinishedCOA).filter_by(id=header_id).first()
+            if not header:
+                messagebox.showwarning("오류", "선택한 데이터가 존재하지 않습니다.", parent=self)
+                return
+            # 기본 정보
+            for key, entry in self.semi_product_entries.items():
+                entry.delete(0, 'end')
+            self.semi_product_entries["제 품 명"].insert(0, header.product_name or '')
+            self.semi_product_entries["LOT"].insert(0, header.lot_no or '')
+            self.semi_product_entries["제조일자"].insert(0, header.manufacture_date.strftime('%Y-%m-%d') if header.manufacture_date else '')
+            self.semi_product_entries["시험일자"].insert(0, header.test_date.strftime('%Y-%m-%d') if header.test_date else '')
+            self.semi_product_entries["시험자"].insert(0, header.examiner or '')
+            self.semi_product_entries["종합판정"].insert(0, header.overall_result or '')
+
+            # 테이블 재구성
+            for row_widgets in self.coa_item_rows:
+                for widget in row_widgets.values():
+                    if isinstance(widget, (ctk.CTkEntry, ctk.CTkLabel, ctk.CTkCheckBox)):
+                        widget.destroy()
+            self.coa_item_rows.clear()
+            for i, it in enumerate(header.items):
+                self._add_coa_item_row({
+                    'num': str(it.seq_no) if it.seq_no else '',
+                    'name': it.item_name or '',
+                    'criteria': it.spec or '',
+                    'result': it.result or '',
+                    'remarks': it.remark or ''
+                }, redraw=False)
+            self._update_coa_row_numbers()
+            self.current_semi_coa_id = header.id
+            messagebox.showinfo("불러오기 완료", "반제품 시험성적서가 로드되었습니다.", parent=self)
+        except Exception as e:
+            messagebox.showerror("오류", f"불러오기 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
 
     def generate_semi_product_report(self):
         """입력된 데이터를 기반으로 동적 행을 포함한 엑셀 파일을 생성합니다."""
@@ -849,6 +1207,7 @@ class QualityManagementFrame(ctk.CTkFrame):
 
         self.finished_product_entries = {}
         self.finished_item_rows = []
+        self.current_finished_coa_id = None
 
         # 상단 기본 정보
         info_frame = ctk.CTkFrame(scrollable_frame)
@@ -908,11 +1267,23 @@ class QualityManagementFrame(ctk.CTkFrame):
         button_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         button_frame.grid(row=1, column=0, sticky="e", padx=10, pady=10)
         ctk.CTkButton(button_frame, text="엑셀 보고서 생성", command=self.generate_finished_product_report, 
-                     fg_color="#3B8ED0", hover_color="#1F6AA5").pack(side="left", padx=5)
+                      fg_color="#3B8ED0", hover_color="#1F6AA5").pack(side="left", padx=5)
         ctk.CTkButton(button_frame, text="초기화", command=self.clear_finished_product_form, 
-                     fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
+                      fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
+
+        # DB 저장/불러오기 UI
+        db_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
+        db_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+        db_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkButton(db_frame, text="DB 저장", command=self.save_finished_coa_to_db,
+                      fg_color="#2FA572", hover_color="#106A43", width=120).grid(row=0, column=0, padx=(0, 8))
+        self.finished_coa_picker = ctk.CTkComboBox(db_frame, values=[], width=500)
+        self.finished_coa_picker.grid(row=0, column=1, padx=(0, 8), sticky="ew")
+        ctk.CTkButton(db_frame, text="불러오기", command=self.load_selected_finished_coa,
+                      fg_color="#4C9AFF", hover_color="#1F6AA5", width=100).grid(row=0, column=2)
 
         self._redraw_finished_product_table()
+        self.refresh_finished_coa_list()
 
     def _create_initial_finished_product_rows(self):
         """완제품 시험성적서의 초기 시험 항목들을 생성합니다."""
@@ -1096,6 +1467,7 @@ class QualityManagementFrame(ctk.CTkFrame):
         self.finished_item_rows.clear()
 
         self._create_initial_finished_product_rows()
+        self.current_finished_coa_id = None
         messagebox.showinfo("알림", "양식이 초기화되었습니다.", parent=self)
 
     def generate_finished_product_report(self):
@@ -1218,6 +1590,164 @@ class QualityManagementFrame(ctk.CTkFrame):
 
         except Exception as e:
             messagebox.showerror("오류", f"보고서 생성 중 오류가 발생했습니다:\n{e}", parent=self)
+
+    def _collect_finished_coa_data(self):
+        info = {k: e.get() for k, e in self.finished_product_entries.items()}
+        items = []
+        for row in self.finished_item_rows:
+            items.append({
+                'item_id': row['id_label'].cget('text'),
+                'item_name': row['item'].get(),
+                'spec': row['spec'].get(),
+                'result': row['result'].get(),
+                'note': row['note'].get(),
+            })
+        return info, items
+
+    def save_finished_coa_to_db(self):
+        info, items = self._collect_finished_coa_data()
+        if not info.get('제 품 명') or not info.get('완제품제조번호(LOT)') or not info.get('종합판정'):
+            messagebox.showwarning("입력 오류", "제품명, 완제품 LOT, 종합판정은 필수입니다.", parent=self)
+            return
+        from datetime import datetime
+        def to_date(s):
+            try:
+                for fmt in ("%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d", "%Y%m%d"):
+                    try:
+                        return datetime.strptime(s.strip(), fmt).date()
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            return None
+        session = db_manager.get_session()
+        try:
+            if self.current_finished_coa_id:
+                header = session.query(FinishedProductCOA).filter_by(id=self.current_finished_coa_id).first()
+                if header:
+                    header.product_name = info.get('제 품 명')
+                    header.semi_mfg_date = to_date(info.get('반제품 제조일자') or '')
+                    header.semi_lot_no = info.get('반제품제조번호(LOT)')
+                    header.pack_date = to_date(info.get('포장 일자') or '')
+                    header.finished_lot_no = info.get('완제품제조번호(LOT)')
+                    header.expiry_date = to_date(info.get('사용 기한') or '')
+                    try:
+                        header.unit_volume_ml = float(info.get('단위 용량 (ml)') or 0)
+                    except Exception:
+                        header.unit_volume_ml = None
+                    header.sampling_method = info.get('샘플링 방법')
+                    header.test_date = to_date(info.get('시험 일자') or '')
+                    header.examiner = info.get('시험자')
+                    header.reviewer = info.get('검토자')
+                    header.overall_result = info.get('종합판정')
+                    header.items.clear()
+                    for it in items:
+                        header.items.append(FinishedProductCOAItem(**it))
+                    session.commit()
+                    self.refresh_finished_coa_list()
+                    messagebox.showinfo("저장 완료", "DB에 업데이트되었습니다.", parent=self)
+                    return
+                else:
+                    self.current_finished_coa_id = None
+
+            header = FinishedProductCOA(
+                product_name=info.get('제 품 명'),
+                semi_mfg_date=to_date(info.get('반제품 제조일자') or ''),
+                semi_lot_no=info.get('반제품제조번호(LOT)'),
+                pack_date=to_date(info.get('포장 일자') or ''),
+                finished_lot_no=info.get('완제품제조번호(LOT)'),
+                expiry_date=to_date(info.get('사용 기한') or ''),
+                unit_volume_ml=float(info.get('단위 용량 (ml)')) if (info.get('단위 용량 (ml)') or '').strip().replace('.', '', 1).isdigit() else None,
+                sampling_method=info.get('샘플링 방법'),
+                test_date=to_date(info.get('시험 일자') or ''),
+                examiner=info.get('시험자'),
+                reviewer=info.get('검토자'),
+                overall_result=info.get('종합판정')
+            )
+            for it in items:
+                header.items.append(FinishedProductCOAItem(**it))
+            session.add(header)
+            session.commit()
+            self.current_finished_coa_id = header.id
+            self.refresh_finished_coa_list()
+            messagebox.showinfo("저장 완료", "DB에 저장되었습니다.", parent=self)
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror("오류", f"DB 저장 중 오류: {e}", parent=self)
+        finally:
+            session.close()
+
+    def refresh_finished_coa_list(self):
+        try:
+            session = db_manager.get_session()
+            recs = session.query(FinishedProductCOA).order_by(FinishedProductCOA.created_at.desc()).limit(50).all()
+            values = [f"{r.id} | {r.product_name} | {r.finished_lot_no or ''} | {r.created_at.strftime('%Y-%m-%d %H:%M')}" for r in recs]
+            self.finished_coa_picker.configure(values=values)
+            if values:
+                self.finished_coa_picker.set(values[0])
+        except Exception as e:
+            print(f"[경고] 완제품 COA 목록 로드 실패: {e}")
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    def load_selected_finished_coa(self):
+        sel = self.finished_coa_picker.get()
+        if not sel or '|' not in sel:
+            messagebox.showwarning("선택 필요", "불러올 항목을 선택하세요.", parent=self)
+            return
+        try:
+            header_id = int(sel.split('|')[0].strip())
+        except Exception:
+            messagebox.showwarning("선택 오류", "선택된 항목을 해석할 수 없습니다.", parent=self)
+            return
+        session = db_manager.get_session()
+        try:
+            header = session.query(FinishedProductCOA).filter_by(id=header_id).first()
+            if not header:
+                messagebox.showwarning("오류", "선택한 데이터가 존재하지 않습니다.", parent=self)
+                return
+            # 입력 초기화
+            for entry in self.finished_product_entries.values():
+                entry.delete(0, 'end')
+            # 헤더 채우기
+            self.finished_product_entries['제 품 명'].insert(0, header.product_name or '')
+            self.finished_product_entries['반제품 제조일자'].insert(0, header.semi_mfg_date.strftime('%Y-%m-%d') if header.semi_mfg_date else '')
+            self.finished_product_entries['반제품제조번호(LOT)'].insert(0, header.semi_lot_no or '')
+            self.finished_product_entries['포장 일자'].insert(0, header.pack_date.strftime('%Y-%m-%d') if header.pack_date else '')
+            self.finished_product_entries['완제품제조번호(LOT)'].insert(0, header.finished_lot_no or '')
+            self.finished_product_entries['사용 기한'].insert(0, header.expiry_date.strftime('%Y-%m-%d') if header.expiry_date else '')
+            self.finished_product_entries['단위 용량 (ml)'].insert(0, str(header.unit_volume_ml or ''))
+            self.finished_product_entries['샘플링 방법'].insert(0, header.sampling_method or '')
+            self.finished_product_entries['시험 일자'].insert(0, header.test_date.strftime('%Y-%m-%d') if header.test_date else '')
+            self.finished_product_entries['시험자'].insert(0, header.examiner or '')
+            self.finished_product_entries['검토자'].insert(0, header.reviewer or '')
+            self.finished_product_entries['종합판정'].insert(0, header.overall_result or '')
+
+            # 테이블 재구성
+            for row_widgets in self.finished_item_rows[:]:
+                for widget in row_widgets.values():
+                    if hasattr(widget, 'destroy'):
+                        widget.destroy()
+            self.finished_item_rows.clear()
+            for it in header.items:
+                self._add_finished_item_row_with_data({
+                    'id': it.item_id or '',
+                    'item': it.item_name or '',
+                    'spec': it.spec or '',
+                    'result': it.result or '',
+                    'note': it.note or '',
+                })
+            if not any(r.get('id_label') and r['id_label'].cget('text') == '특이사항' for r in self.finished_item_rows):
+                self._add_special_remarks_row()
+            self.current_finished_coa_id = header.id
+            messagebox.showinfo("불러오기 완료", "완제품 시험성적서가 로드되었습니다.", parent=self)
+        except Exception as e:
+            messagebox.showerror("오류", f"불러오기 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
 
     def setup_placeholder_tab(self, tab_frame, tab_name):
         """개발 예정인 탭의 플레이스홀더 UI를 설정합니다."""
