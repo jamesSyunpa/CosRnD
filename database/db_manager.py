@@ -500,21 +500,41 @@ class DBManager:
         """변경 추적용 change_log 테이블과 트리거를 생성합니다 (존재하지 않으면)."""
         try:
             with self.engine.connect() as conn:
-                # change_log 테이블 생성
+                # change_log 테이블 생성 (확장 컬럼 포함)
                 conn.execute(text(
                     """
                     CREATE TABLE IF NOT EXISTS change_log (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         table_name TEXT NOT NULL,
                         operation TEXT NOT NULL,
+                        entity_id INTEGER,
+                        entity_name TEXT,
                         changed_at TEXT NOT NULL DEFAULT (datetime('now'))
                     )
                     """
                 ))
 
-                tracked_tables = [
-                    'users', 'clients', 'materials', 'ingredients', 'formulations', 'formulation_items'
-                ]
+                # 확장 컬럼이 없으면 추가
+                try:
+                    res = conn.execute(text("PRAGMA table_info(change_log)")).fetchall()
+                    cols = {r[1] for r in res}
+                    if 'entity_id' not in cols:
+                        conn.execute(text("ALTER TABLE change_log ADD COLUMN entity_id INTEGER"))
+                    if 'entity_name' not in cols:
+                        conn.execute(text("ALTER TABLE change_log ADD COLUMN entity_name TEXT"))
+                except Exception as e:
+                    print(f"[경고] change_log 확장 컬럼 추가 실패(무시): {e}")
+
+                # 각 테이블별 이름 컬럼 매핑
+                name_cols = {
+                    'users': 'username',
+                    'clients': 'name',
+                    'materials': 'name',
+                    'ingredients': 'name_ko',
+                    'formulations': 'experiment_name',
+                    'formulation_items': 'material_name'
+                }
+                tracked_tables = list(name_cols.keys())
                 operations = [
                     ('ai', 'AFTER INSERT', 'INSERT'),
                     ('au', 'AFTER UPDATE', 'UPDATE'),
@@ -522,13 +542,26 @@ class DBManager:
                 ]
 
                 for table in tracked_tables:
+                    # 기존 트리거 제거 후 재생성 (이름/ID 기록을 위해)
+                    for suffix, _, _ in operations:
+                        trigger_name = f"trg_{table}_{suffix}"
+                        try:
+                            conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+                        except Exception:
+                            pass
+                    name_col = name_cols.get(table, None)
                     for suffix, timing, op in operations:
                         trigger_name = f"trg_{table}_{suffix}"
+                        # INSERT/UPDATE는 NEW, DELETE는 OLD 참조
+                        ref = 'NEW' if op in ('INSERT', 'UPDATE') else 'OLD'
+                        entity_id_expr = f"{ref}.id"
+                        entity_name_expr = f"{ref}.{name_col}" if name_col else "NULL"
                         sql = f"""
-                            CREATE TRIGGER IF NOT EXISTS {trigger_name}
+                            CREATE TRIGGER {trigger_name}
                             {timing} ON {table}
                             BEGIN
-                                INSERT INTO change_log(table_name, operation) VALUES('{table}', '{op}');
+                                INSERT INTO change_log(table_name, operation, entity_id, entity_name)
+                                VALUES('{table}', '{op}', {entity_id_expr}, {entity_name_expr});
                             END;
                         """
                         conn.execute(text(sql))

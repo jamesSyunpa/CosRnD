@@ -229,10 +229,12 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.data_loading = False  # 데이터 로딩 중 플래그
 
         self.title(self.texts['formulation_popup_title'])
-        self.geometry("1400x900") # 창 크기를 더 크게 설정
+        # 창 크기: 기존 대비 20% 더 축소
+        self.geometry("1120x720")
         self.transient(master)
         self.resizable(True, True) # 크기 조절 활성화
-        self.minsize(1000, 700) # 최소 크기 설정
+        # 최소 크기도 동일 비율로 축소
+        self.minsize(800, 560)
         self.grab_set()
 
         # UI 구성

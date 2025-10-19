@@ -175,8 +175,41 @@ else:
     # 일반 Python 스크립트로 실행된 경우
     application_path = os.path.dirname(os.path.abspath(__file__))
 
-# config.ini는 실행 파일과 같은 폴더에 위치하도록 경로를 설정합니다.
-CONFIG_FILE_PATH = os.path.join(application_path, 'config.ini')
+def get_persistent_config_path(app_dir_name: str = 'RnD_플랫폼') -> str:
+    """사용자 쓰기 가능한 위치(LOCALAPPDATA)에 영속 config.ini 경로를 제공합니다.
+
+    - 최초 실행 시 exe 옆의 config.ini가 있다면 사용자 폴더로 1회 마이그레이션합니다.
+    - PyInstaller 임시 폴더(_MEIPASS)와 무관하게 항상 동일 경로를 사용합니다.
+    """
+    try:
+        base_dir = os.getenv('LOCALAPPDATA')
+        if not base_dir:
+            # Windows가 아닐 수 있는 극히 예외적인 상황 대비
+            base_dir = os.path.expanduser('~')
+        appdata_dir = os.path.join(base_dir, app_dir_name)
+        os.makedirs(appdata_dir, exist_ok=True)
+
+        target_config = os.path.join(appdata_dir, 'config.ini')
+        legacy_config = os.path.join(application_path, 'config.ini')
+
+        # 마이그레이션: 사용자 영역에 파일이 없고, exe 폴더에 기존 파일이 있으면 복사
+        if not os.path.exists(target_config) and os.path.exists(legacy_config):
+            try:
+                import shutil
+                shutil.copy2(legacy_config, target_config)
+                print(f"[CONFIG] exe 폴더의 기존 설정을 사용자 폴더로 마이그레이션: {target_config}")
+            except Exception as mig_e:
+                print(f"[CONFIG] 설정 마이그레이션 실패(무시): {mig_e}")
+
+        return target_config
+    except Exception as e:
+        # 문제가 있으면 기존 동작(실행 경로)을 사용
+        print(f"[CONFIG] 사용자 설정 경로 확보 실패, exe 폴더 사용: {e}")
+        return os.path.join(application_path, 'config.ini')
+
+# config.ini는 사용자 폴더의 고정 경로를 사용 (임시 폴더 _MEIPASS와 분리)
+CONFIG_FILE_PATH = get_persistent_config_path()
+print(f"[CONFIG] 설정 파일 경로: {CONFIG_FILE_PATH}")
 
 
 from sqlalchemy import text
@@ -1275,8 +1308,34 @@ class App(ctk.CTk):
             return
         
         self.frames[frame_name].tkraise()
+        # 홈으로 전환 시, 최신 변경 이력과 카드 섹션을 즉시 새로고침하여 방금 변경한 내용이 보이도록 함
+        try:
+            if frame_name == FRAME_HOME and hasattr(self.frames[FRAME_HOME], 'refresh_data'):
+                self.frames[FRAME_HOME].refresh_data()
+        except Exception as e:
+            print(f"[경고] 홈 새로고침 실패: {e}")
         if tab_name and hasattr(self.frames[frame_name], 'switch_to_tab'):
             self.frames[frame_name].switch_to_tab(tab_name)
+
+    def open_material_by_id(self, material_id: int):
+        """데이터 관리 > 성분 관리로 이동하여 해당 원료를 선택합니다."""
+        try:
+            # 먼저 데이터 관리/성분 관리 탭으로 이동
+            self.select_frame_by_name('data/ingredient_mgt')
+            # 프레임이 준비될 시간을 소폭 준 뒤 포커스 시도
+            def _do_focus():
+                try:
+                    data_frame = self.frames.get(FRAME_DATA)
+                    if data_frame and hasattr(data_frame, 'focus_material_by_id'):
+                        ok = data_frame.focus_material_by_id(material_id)
+                        if not ok:
+                            # 한번 더 재시도 (목록 갱신 타이밍 대비)
+                            self.after(100, lambda: data_frame.focus_material_by_id(material_id))
+                except Exception as e:
+                    print(f"[경고] 원료 열기 실패: {e}")
+            self.after(50, _do_focus)
+        except Exception as e:
+            print(f"[경고] 성분 화면 이동 실패: {e}")
 
     def update_treeview_style(self):
         """현재 테마에 맞게 모든 Treeview의 스타일을 업데이트합니다."""
@@ -1668,12 +1727,27 @@ class App(ctk.CTk):
                         except Exception:
                             pass
                     # os._exit 실패/무시 대비해서 0.5초 후 강제 종료 시도
-                    threading.Timer(0.5, _force_kill).start()
+                    t = threading.Timer(0.5, _force_kill)
+                    t.daemon = True  # 종료 방해하지 않도록 데몬 스레드로 실행
+                    t.start()
             except Exception:
                 pass
             
-            # 즉시 프로세스 종료 (남아있는 비-데몬 스레드가 있어도 종료)
-            os._exit(0)
+            # 즉시/지연 이중 종료 보장
+            try:
+                # 1) 짧게 지연된 강제 종료 (데몬 타이머)
+                import threading
+                t2 = threading.Timer(0.2, lambda: os._exit(0))
+                t2.daemon = True
+                t2.start()
+            except Exception:
+                pass
+            try:
+                # 2) 정상 종료 시도
+                sys.exit(0)
+            except Exception:
+                # 3) 최후의 수단: 즉시 종료 (남아있는 비-데몬 스레드가 있어도 종료)
+                os._exit(0)
 
     def get_config_value(self, section, option, fallback=None):
         """config.ini에서 값을 읽어옵니다."""
@@ -1902,11 +1976,42 @@ class App(ctk.CTk):
                         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
                         if cur.fetchone():
                             last_id = getattr(self, 'last_change_log_id', 0)
-                            cur.execute("SELECT id, table_name FROM change_log WHERE id > ? ORDER BY id", (last_id,))
+                            cur.execute("SELECT id, table_name, operation, entity_name FROM change_log WHERE id > ? ORDER BY id", (last_id,))
                             rows = cur.fetchall()
 
                             # 변경된 테이블 집합
                             changed_tables = {r[1] for r in rows}
+
+                            # 변경 요약(성분/거래처 이름 표시)
+                            changed_names = {
+                                'ingredients': [],
+                                'clients': []
+                            }
+                            for _id, tbl, op, ename in rows:
+                                if tbl in changed_names and ename:
+                                    changed_names[tbl].append(str(ename))
+
+                            def summarize_names(names, limit=5):
+                                uniq = []
+                                seen = set()
+                                for n in names:
+                                    if n not in seen:
+                                        uniq.append(n)
+                                        seen.add(n)
+                                if not uniq:
+                                    return None
+                                if len(uniq) > limit:
+                                    return ", ".join(uniq[:limit]) + f" 외 {len(uniq)-limit}건"
+                                return ", ".join(uniq)
+
+                            ing_summary = summarize_names(changed_names['ingredients'])
+                            cli_summary = summarize_names(changed_names['clients'])
+                            change_human = []
+                            if ing_summary:
+                                change_human.append(f"성분: {ing_summary}")
+                            if cli_summary:
+                                change_human.append(f"거래처: {cli_summary}")
+                            changes_summary_text = "\n".join(change_human) if change_human else ""
 
                             # 사용자 권한/사용처에 따른 관심 테이블 구성
                             interested = set()
@@ -1945,12 +2050,16 @@ class App(ctk.CTk):
                         # 관리자의 경우 더 큰 변경이거나 오래된 변경일 때만 알림 (더 보수적)
                         if time_diff > 60 or abs(self.last_shared_db_info[0] - current_db_info[0]) > 20480:  # 1분 이상 또는 20KB 이상
                             self.last_shared_db_info = current_db_info
-                            if messagebox.askyesno("데이터베이스 업데이트", 
-                                                 f"공유 데이터베이스에 외부 변경사항이 감지되었습니다.\n"
-                                                 f"(크기 변경: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)\n\n"
-                                                 f"최신 데이터로 동기화하시겠습니까?\n\n"
-                                                 f"※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.\n"
-                                                 f"※ 동기화 후 프로그램이 재시작됩니다.", parent=self):
+                            details_text = (
+                                f"공유 데이터베이스에 외부 변경사항이 감지되었습니다.\n"
+                                f"(크기 변경: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)"
+                            )
+                            if changes_summary_text:
+                                details_text += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
+                            details_text += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
+                                              "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.\n"
+                                              "※ 동기화 후 프로그램이 재시작됩니다.")
+                            if messagebox.askyesno("데이터베이스 업데이트", details_text, parent=self):
                                 self.sync_with_shared_db_safe(shared_db_path)
                         else:
                             # 관리자의 경우 작은 변경은 자신의 변경으로 간주하고 조용히 업데이트
@@ -1959,11 +2068,13 @@ class App(ctk.CTk):
                     else:
                         # 일반 사용자의 경우 모든 변경에 대해 알림
                         self.last_shared_db_info = current_db_info
-                        if messagebox.askyesno("데이터베이스 업데이트", 
-                                             "관리자에 의해 데이터가 변경되었습니다.\n"
-                                             "최신 데이터로 동기화하시겠습니까?\n\n"
-                                             "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.\n"
-                                             "※ 동기화 후 프로그램이 재시작됩니다.", parent=self):
+                        user_details = "관리자에 의해 데이터가 변경되었습니다."
+                        if changes_summary_text:
+                            user_details += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
+                        user_details += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
+                                         "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.\n"
+                                         "※ 동기화 후 프로그램이 재시작됩니다.")
+                        if messagebox.askyesno("데이터베이스 업데이트", user_details, parent=self):
                             self.sync_with_shared_db_safe(shared_db_file)
                 else:
                     # 미미한 변경사항은 무시하고 정보만 업데이트

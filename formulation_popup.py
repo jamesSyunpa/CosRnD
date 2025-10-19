@@ -8,6 +8,7 @@ from database.models import Client, Formulation, FormulationItem, Material, User
 from datetime import datetime
 from modules import excel_handler
 from modules.ui_components import CustomErrorDialog
+from utils import center_window_on_mouse_display
 
 # document_management.py에서 클래스들을 가져옵니다.
 from modules.document_management import CustomDropdown, AddMaterialDialog
@@ -123,11 +124,25 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.texts = get_texts(self.language)
 
         self.title(self.texts['formulation_popup_title'])
-        # self.geometry("1200x800") # 크기 고정 해제
         self.transient(master)
         self.resizable(True, True) # 크기 조절 활성화
-        self.minsize(1000, 700) # 최소 크기 설정
+        # 전체 크기를 다소 줄이고, 최소 크기도 낮춥니다
+        self.minsize(850, 600) # 최소 크기 축소
         self.grab_set()
+
+        # 초기 표시 크기를 이전보다 작게 설정하고, 마우스가 있는 디스플레이 중앙에 배치
+        try:
+            init_w, init_h = 1000, 680  # 기존보다 전반적으로 축소된 초기 크기
+            center_window_on_mouse_display(self, width=init_w, height=init_h)
+        except Exception:
+            try:
+                sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+                w, h = 1000, 680
+                x = (sw // 2) - (w // 2)
+                y = (sh // 2) - (h // 2)
+                self.geometry(f"{w}x{h}+{x}+{y}")
+            except Exception:
+                pass
 
         self.setup_ui()
         if formulation_id:
