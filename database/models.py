@@ -229,6 +229,51 @@ class FormulationItem(Base):
     formulation = relationship("Formulation", back_populates="items")
     material = relationship("Material") # material_id가 NULL일 수 있으므로 outer join
 
+# ---------------------------------------------------------------------------
+# 생산 처방 (확정 레시피)
+# ---------------------------------------------------------------------------
+
+class ProductionFormulation(Base):
+    __tablename__ = 'production_formulations'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_formulation_id = Column(Integer, ForeignKey('formulations.id'), nullable=False)
+    product_name = Column(String(255), nullable=False)
+    lab_no = Column(String(50))
+    revision = Column(String(50))
+    base_weight_g = Column(Float)  # 기준 중량(g)
+    status = Column(String(50), default='확정')  # 상태: 초안/검토중/확정 등
+    effective_date = Column(Date)
+    approved_by_user_id = Column(Integer, ForeignKey('users.id'))
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # 레시피 스냅샷(JSON): order, phase, code, name, ratio, amount 등 고정 저장
+    items_snapshot = Column(Text)
+
+    # 관계
+    source_formulation = relationship('Formulation')
+    approved_by = relationship('User')
+    # 단계(공정) 관계
+    steps = relationship('ProductionStep', back_populates='production', cascade='all, delete-orphan', order_by='ProductionStep.step_no')
+
+class ProductionStep(Base):
+    __tablename__ = 'production_steps'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    production_formulation_id = Column(Integer, ForeignKey('production_formulations.id', ondelete='CASCADE'), nullable=False)
+    step_no = Column(Integer)  # 단계 번호
+    phase = Column(String(50))  # 구분(Phase)
+    instruction = Column(Text)  # 작업 지시/절차
+    temperature = Column(String(50))  # 온도(예: 70~75℃)
+    time_min = Column(Float)  # 시간(분)
+    rpm = Column(String(50))  # 교반 속도 또는 범위
+    equipment = Column(String(255))  # 장비/용기
+    notes = Column(Text)  # 비고
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    production = relationship('ProductionFormulation', back_populates='steps')
+
 # ----------------------------------------------------------------------------
 # 품질관리 저장용 테이블들 (원료목록보고, 반제품/완제품 COA)
 # ----------------------------------------------------------------------------
@@ -328,3 +373,53 @@ class FinishedProductCOAItem(Base):
     note = Column(String(255))  # 비고/특이사항
 
     header = relationship('FinishedProductCOA', back_populates='items')
+
+# ---------------------------------------------------------------------------
+# 통합 문서 패키지 (생산 처방 관련 자료 일괄 저장)
+# ---------------------------------------------------------------------------
+
+class DocumentPackage(Base):
+    __tablename__ = 'document_packages'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    formulation_id = Column(Integer, ForeignKey('formulations.id'), nullable=True)
+    production_formulation_id = Column(Integer, ForeignKey('production_formulations.id'), nullable=True)
+    product_name = Column(String(255))
+    revision = Column(String(50))
+    created_by_user_id = Column(Integer, ForeignKey('users.id'))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    notes = Column(Text)
+
+    # 스냅샷(JSON 문자열) 저장: 전성분/견적 등 구조화 데이터를 Text로 저장
+    ingredient_snapshot = Column(Text)   # 모든 전성분 뷰의 내용 스냅샷(JSON)
+    quotation_snapshot = Column(Text)    # 견적 상세 스냅샷(JSON)
+
+    # 관계
+    formulation = relationship('Formulation')
+    production_formulation = relationship('ProductionFormulation')
+    created_by = relationship('User')
+    links = relationship('DocumentPackageLink', back_populates='package', cascade='all, delete-orphan')
+    attachments = relationship('DocumentAttachment', back_populates='package', cascade='all, delete-orphan')
+
+class DocumentPackageLink(Base):
+    __tablename__ = 'document_package_links'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    package_id = Column(Integer, ForeignKey('document_packages.id', ondelete='CASCADE'), nullable=False)
+    doc_type = Column(String(50), nullable=False)  # 예: 'IngredientReport', 'SemiFinishedCOA', 'FinishedProductCOA', 'SPEC'
+    ref_id = Column(Integer, nullable=False)       # 참조 테이블의 PK
+
+    package = relationship('DocumentPackage', back_populates='links')
+
+class DocumentAttachment(Base):
+    __tablename__ = 'document_attachments'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    package_id = Column(Integer, ForeignKey('document_packages.id', ondelete='CASCADE'), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_path = Column(Text, nullable=False)
+    attachment_type = Column(String(50))  # 예: 'MSDS', 'SPEC', 'OTHER'
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    package = relationship('DocumentPackage', back_populates='attachments')

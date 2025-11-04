@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 14
 
 class DBManager:
     _instance = None

@@ -1,7 +1,8 @@
 # modules/ui_components.py
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
+import json
 from database.db_manager import db_manager
 from utils import center_window_on_mouse_display
 from modules.translation import get_texts
@@ -337,3 +338,182 @@ def try_convert_to_float(value):
         return float(value)
     except (ValueError, TypeError):
         return value
+
+
+class ProductionPreviewPane(ctk.CTkFrame):
+    """생산처방 미리보기용 재사용 가능한 두-컬럼(좌 레시피 / 우 도식) 패널.
+
+    - production: ProductionFormulation ORM 인스턴스 (items_snapshot, base_weight_g 사용)
+    - steps: List[ProductionStep] (step_no 순으로 전달 권장)
+    - on_export_json: JSON 내보내기 콜백 (호출 시 외부 로직 실행)
+    """
+    def __init__(self, master, production, steps, on_export_json=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.production = production
+        self.steps = steps or []
+        self.on_export_json = on_export_json
+
+        # 스타일(카드 느낌)
+        self.configure(fg_color="transparent")
+
+        # 상단 툴바
+        toolbar = ctk.CTkFrame(self, fg_color="transparent")
+        toolbar.pack(fill="x", padx=0, pady=(0, 6))
+        if self.on_export_json:
+            ctk.CTkButton(toolbar, text="JSON 내보내기", width=120, command=self.on_export_json).pack(side="left")
+
+        # 분할(좌/우) - PanedWindow 사용으로 너비 조절 가능
+        # 주의: CTk의 'transparent' 색상은 tkinter에선 유효하지 않으므로 bg 지정 생략
+        paned = tk.PanedWindow(self, orient=tk.HORIZONTAL, sashwidth=8)
+        paned.pack(fill="both", expand=True)
+
+        # 좌측 카드
+        left_card = ctk.CTkFrame(paned, corner_radius=10)
+        left_card.grid_columnconfigure(0, weight=1)
+        left_card.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(left_card, text="레시피(처방내용)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(10,4))
+        left_wrap = ctk.CTkFrame(left_card, fg_color="transparent")
+        left_wrap.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0,8))
+        rcols = ("order","phase","code","name","ratio","amount","calc_g")
+        self.recipe_tree = ttk.Treeview(left_wrap, columns=rcols, show="headings")
+        self.recipe_tree.heading("order", text="순번"); self.recipe_tree.column("order", width=60, anchor="e")
+        self.recipe_tree.heading("phase", text="구분"); self.recipe_tree.column("phase", width=80)
+        self.recipe_tree.heading("code", text="코드"); self.recipe_tree.column("code", width=120)
+        self.recipe_tree.heading("name", text="원료명"); self.recipe_tree.column("name", width=240, stretch=True)
+        self.recipe_tree.heading("ratio", text="함량(%)"); self.recipe_tree.column("ratio", width=90, anchor="e")
+        self.recipe_tree.heading("amount", text="중량(실험)"); self.recipe_tree.column("amount", width=100, anchor="e")
+        self.recipe_tree.heading("calc_g", text="중량(g)@기준"); self.recipe_tree.column("calc_g", width=110, anchor="e")
+        self.recipe_tree.grid(row=0, column=0, sticky="nsew")
+        rscroll = ttk.Scrollbar(left_wrap, orient="vertical", command=self.recipe_tree.yview)
+        rscroll.grid(row=0, column=1, sticky="ns")
+        self.recipe_tree.configure(yscrollcommand=rscroll.set)
+
+        # 우측 카드(도식)
+        right_card = ctk.CTkFrame(paned, corner_radius=10)
+        right_card.grid_columnconfigure(0, weight=1)
+        right_card.grid_rowconfigure(2, weight=1)
+        # 도식 툴바(줌 + PNG)
+        diagram_toolbar = ctk.CTkFrame(right_card, fg_color="transparent")
+        diagram_toolbar.grid(row=0, column=0, sticky="ew", padx=10, pady=(10,6))
+        ctk.CTkLabel(diagram_toolbar, text="도식", font=ctk.CTkFont(weight="bold")).pack(side="left")
+        ctk.CTkLabel(diagram_toolbar, text="배율").pack(side="right", padx=(0,6))
+        self._scale_var = tk.DoubleVar(value=1.0)
+        zoom = ctk.CTkSlider(diagram_toolbar, from_=0.6, to=1.6, number_of_steps=10, variable=self._scale_var,
+                             command=lambda v: self.render_diagram())
+        zoom.pack(side="right", padx=(0,10))
+        ctk.CTkButton(diagram_toolbar, text="PNG 내보내기", width=110, command=self.export_diagram_png).pack(side="right", padx=(0,10))
+
+        # 캔버스 + 스크롤바
+        self.diagram_canvas = tk.Canvas(right_card, background="#ffffff", highlightthickness=1, highlightbackground="#ddd")
+        self.diagram_canvas.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0,10))
+        diag_v = ttk.Scrollbar(right_card, orient="vertical", command=self.diagram_canvas.yview)
+        diag_v.grid(row=2, column=1, sticky="ns", pady=(0,10))
+        diag_h = ttk.Scrollbar(right_card, orient="horizontal", command=self.diagram_canvas.xview)
+        diag_h.grid(row=3, column=0, sticky="ew", padx=8)
+        self.diagram_canvas.configure(yscrollcommand=diag_v.set, xscrollcommand=diag_h.set)
+
+        # PanedWindow에 카드 추가
+        paned.add(left_card)
+        paned.add(right_card)
+        try:
+            paned.sash_place(0, int(self.winfo_screenwidth()*0.28), 0)
+        except Exception:
+            pass
+
+        # 초기 렌더
+        self.render_recipe()
+        self.render_diagram()
+
+    def set_data(self, production, steps):
+        self.production = production
+        self.steps = steps or []
+        self.render_recipe()
+        self.render_diagram()
+
+    def render_recipe(self):
+        # 트리 초기화
+        for i in self.recipe_tree.get_children():
+            self.recipe_tree.delete(i)
+        # 데이터 채우기
+        try:
+            items = json.loads(self.production.items_snapshot) if getattr(self.production, 'items_snapshot', None) else []
+        except Exception:
+            items = []
+        base_w = getattr(self.production, 'base_weight_g', 0) or 0
+        for it in sorted(items, key=lambda x: (x.get('order') or 0)):
+            ratio = it.get('ratio') or 0
+            calc_g = (base_w * float(ratio) / 100.0) if base_w and isinstance(ratio, (int, float)) else ""
+            try:
+                calc_g_disp = f"{calc_g:,.1f}" if isinstance(calc_g, (int, float)) else ""
+            except Exception:
+                calc_g_disp = str(calc_g) if calc_g is not None else ""
+            self.recipe_tree.insert("", "end", values=(
+                it.get('order') or "",
+                it.get('phase') or "",
+                it.get('material_code') or "",
+                it.get('material_name') or "",
+                f"{(ratio or 0):.4f}" if isinstance(ratio, (int, float)) else (ratio or ""),
+                it.get('amount') or "",
+                calc_g_disp,
+            ))
+
+    def export_diagram_png(self):
+        toplevel = self.winfo_toplevel()
+        file_path = filedialog.asksaveasfilename(parent=toplevel, title="도식 PNG로 내보내기", defaultextension=".png",
+                                                 filetypes=[("PNG Files", "*.png"), ("All Files", "*.*")])
+        if not file_path:
+            return
+        try:
+            from PIL import ImageGrab
+            toplevel.update_idletasks()
+            x = self.diagram_canvas.winfo_rootx()
+            y = self.diagram_canvas.winfo_rooty()
+            w = x + self.diagram_canvas.winfo_width()
+            h = y + self.diagram_canvas.winfo_height()
+            img = ImageGrab.grab(bbox=(x, y, w, h))
+            img.save(file_path)
+            messagebox.showinfo("완료", "도식이 PNG로 저장되었습니다.", parent=toplevel)
+        except Exception:
+            try:
+                ps_path = file_path.rsplit('.', 1)[0] + '.ps'
+                self.diagram_canvas.postscript(file=ps_path, colormode='color')
+                messagebox.showinfo("완료", f"PNG 저장 실패. 대신 PS 파일로 저장했습니다:\n{ps_path}", parent=toplevel)
+            except Exception as ex2:
+                messagebox.showerror("오류", f"도식 내보내기 실패: {ex2}", parent=toplevel)
+
+    def render_diagram(self):
+        self.diagram_canvas.delete("all")
+        scale = float(self._scale_var.get()) if hasattr(self, "_scale_var") else 1.0
+        # 레이아웃 파라미터(스케일 적용)
+        margin_x = int(40 * scale)
+        margin_y = int(30 * scale)
+        box_w = int(760 * scale)
+        box_h = int(70 * scale)
+        gap = int(24 * scale)
+        arrow_gap = int(10 * scale)
+        font_title = ("Arial", max(9, int(10 * scale)), "bold")
+        font_sub = ("Arial", max(8, int(9 * scale)))
+
+        y = margin_y
+        for idx, st in enumerate(self.steps, start=1):
+            title = f"{st.step_no if st.step_no is not None else idx}. [{st.phase or '-'}]"
+            instr = (st.instruction or "").strip().splitlines()[0] if (st.instruction or "").strip() else "(작업 지시 없음)"
+            max_chars = max(30, int(60 * scale))
+            if len(instr) > max_chars:
+                instr = instr[:max_chars-3] + "..."
+            # 가벼운 그림자
+            x1, y1 = margin_x, y
+            x2, y2 = margin_x + box_w, y + box_h
+            self.diagram_canvas.create_rectangle(x1+2, y1+2, x2+2, y2+2, outline="", fill="#ececf6")
+            # 메인 박스
+            self.diagram_canvas.create_rectangle(x1, y1, x2, y2, outline="#666", width=1, fill="#f9f9ff")
+            self.diagram_canvas.create_text(x1 + int(10*scale), y1 + int(16*scale), anchor="w", text=title, font=font_title, fill="#333")
+            self.diagram_canvas.create_text(x1 + int(10*scale), y1 + int(40*scale), anchor="w", text=instr, font=font_sub, fill="#555")
+            # 연결 화살표 (다음 항목이 있을 때)
+            if idx < len(self.steps):
+                cx = (x1 + x2) // 2
+                self.diagram_canvas.create_line(cx, y2, cx, y2 + gap, arrow=tk.LAST, fill="#888")
+            y += box_h + gap + arrow_gap
+
+        # 스크롤 영역 업데이트
+        self.diagram_canvas.configure(scrollregion=(0, 0, margin_x + box_w + margin_x, y + margin_y))
