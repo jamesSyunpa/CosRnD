@@ -66,12 +66,10 @@ class HomeFrame(ctk.CTkFrame):
 
         ctk.CTkLabel(changes_frame, text="최근 성분 변경 이력", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, padx=15, pady=10, sticky="w")
 
-        # 가로 카드 레이아웃 컨테이너
+        # 변경 이력 리스트 컨테이너 (행 단위로 2단 색상 적용)
         self.changes_panel = ctk.CTkFrame(changes_frame, fg_color="transparent")
         self.changes_panel.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
-        # 2열 레이아웃: [원료명] [변경된 항목들(콤마로 나열)]
-        self.changes_panel.grid_columnconfigure(0, weight=0)
-        self.changes_panel.grid_columnconfigure(1, weight=1)
+        self.changes_panel.grid_columnconfigure(0, weight=1)
 
         self.refresh_cards()
         self.load_recent_material_changes()
@@ -143,41 +141,54 @@ class HomeFrame(ctk.CTkFrame):
                 empty = ctk.CTkLabel(self.changes_panel, text="최근 성분 변경 이력이 없습니다.", text_color="gray")
                 empty.grid(row=0, column=0, padx=6, pady=6, sticky="w")
             else:
-                # 행 구성: [원료명] [변경된 항목들을 콤마(,)로 나열]
+                # 행 구성: 각 행은 2단(좌/우) 구역을 가진 컨테이너로 만들고, 교차 배경색 적용
                 for r_idx, (material, info) in enumerate(rows):
                     ts = info.get('timestamp') or ''
                     action = info.get('action') or ''
                     count = info.get('count') or 0
                     header_text = f"[{ts}] {action} • {material.name or ''} ({count}건)".strip()
 
-                    # 왼쪽: 타임스탬프/액션/원료명/건수 (클릭 가능)
-                    name_label = ctk.CTkLabel(
-                        self.changes_panel,
+                    left_color, right_color, hover_tint = self._get_dual_tone_colors(r_idx)
+
+                    # 행 컨테이너 (모서리 둥글게, 살짝 여백)
+                    row_container = ctk.CTkFrame(self.changes_panel, corner_radius=10, fg_color="transparent")
+                    row_container.grid(row=r_idx, column=0, sticky="ew", pady=(0, 8))
+                    row_container.grid_columnconfigure(0, weight=0)
+                    row_container.grid_columnconfigure(1, weight=1)
+
+                    # 좌측 영역 (타임스탬프/액션/원료명)
+                    left_cell = ctk.CTkFrame(row_container, fg_color=left_color, corner_radius=10, cursor="hand2")
+                    left_cell.grid(row=0, column=0, sticky="nsw")
+                    left_label = ctk.CTkLabel(
+                        left_cell,
                         text=header_text,
                         font=ctk.CTkFont(size=13, weight="bold"),
-                        cursor="hand2"
+                        anchor="w"
                     )
-                    name_label.grid(row=r_idx, column=0, padx=(6, 10), pady=6, sticky="w")
+                    left_label.pack(padx=10, pady=8)
 
-                    # 오른쪽: 변경된 항목 요약 (클릭 가능)
-                    changes_label = ctk.CTkLabel(
-                        self.changes_panel,
+                    # 우측 영역 (요약)
+                    right_cell = ctk.CTkFrame(row_container, fg_color=right_color, corner_radius=10, cursor="hand2")
+                    right_cell.grid(row=0, column=1, sticky="nsew")
+                    right_label = ctk.CTkLabel(
+                        right_cell,
                         text=info.get('summary', ''),
                         font=ctk.CTkFont(size=12),
                         text_color="gray70",
                         wraplength=520,
                         justify="left",
-                        cursor="hand2"
+                        anchor="w"
                     )
-                    changes_label.grid(row=r_idx, column=1, padx=(0, 6), pady=6, sticky="w")
+                    right_label.pack(padx=10, pady=8)
 
-                    # 클릭 시 해당 원료 상세로 이동
-                    for w in (name_label, changes_label):
-                        w.bind("<Button-1>", lambda e, mid=material.id: self._open_material(mid))
+                    # 클릭: 행 전체 어느 영역을 눌러도 이동
+                    self._bind_click_open([row_container, left_cell, left_label, right_cell, right_label], material.id)
 
-                # 각 행 높이 균등 확장은 필요 없으나, 두 번째 열은 넓게 사용
-                for r in range(len(rows)):
-                    self.changes_panel.grid_rowconfigure(r, weight=0)
+                    # 호버: 살짝 강조감 (배경색을 미묘하게 바꿔줌)
+                    self._bind_hover_tint([left_cell, right_cell], [left_color, right_color], hover_tint)
+
+                # 레이아웃 늘림
+                self.changes_panel.grid_rowconfigure(tuple(range(len(rows))), weight=0)
 
         except Exception as e:
             print(f"최근 성분 변경 이력 로드 중 오류: {e}")
@@ -305,6 +316,52 @@ class HomeFrame(ctk.CTkFrame):
         except Exception as e:
             print(f"변경 메타 추출 실패: {e}")
             return None
+
+    # ------------------------- 스타일 & 바인딩 헬퍼 -------------------------
+    def _get_dual_tone_colors(self, index: int):
+        """행 인덱스에 따라 좌/우 셀 배경색을 다르게(2단 색상) 반환합니다.
+        - 모드별(light/dark) 팔레트 지정
+        - 짝/홀수 행 교차 색상
+        반환: (left_color, right_color, hover_tint)
+        """
+        mode = ctk.get_appearance_mode() or "Light"
+        if mode == "Dark":
+            palette_a = ("#2C313C", "#232730")  # 좌/우
+            palette_b = ("#2A2F39", "#20242C")
+            hover_tint = "#3A3F4A"
+        else:
+            palette_a = ("#F4F6FA", "#E9EFF7")
+            palette_b = ("#F0F3F8", "#E6ECF5")
+            hover_tint = "#DDE7F4"
+        return (palette_a if index % 2 == 0 else palette_b) + (hover_tint,)
+
+    def _bind_click_open(self, widgets, material_id: int):
+        for w in widgets:
+            try:
+                w.bind("<Button-1>", lambda e, mid=material_id: self._open_material(mid))
+            except Exception:
+                pass
+
+    def _bind_hover_tint(self, cells, base_colors, hover_tint: str):
+        """셀들에 동일한 hover 효과를 주어 인터랙션을 강조합니다."""
+        def on_enter(_):
+            for c in cells:
+                try:
+                    c.configure(fg_color=hover_tint)
+                except Exception:
+                    pass
+        def on_leave(_):
+            for c, base in zip(cells, base_colors):
+                try:
+                    c.configure(fg_color=base)
+                except Exception:
+                    pass
+        for c in cells:
+            try:
+                c.bind("<Enter>", on_enter)
+                c.bind("<Leave>", on_leave)
+            except Exception:
+                pass
     def _summarize_material_changes(self, material: Material, max_items: int = 6, lookback_blocks: int = 1) -> str:
         """가장 최근 변경 블록에서 실제 바뀐 내용만 간단히 콤마로 나열합니다.
 

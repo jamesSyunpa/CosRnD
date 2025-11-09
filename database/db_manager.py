@@ -8,9 +8,9 @@ from sqlalchemy.orm import sessionmaker, joinedload, subqueryload
 from datetime import datetime
 from types import SimpleNamespace
 
-from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem
+from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem, ProductionFormulation, ProductionStep, ProductionRun
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 17
 
 class DBManager:
     _instance = None
@@ -532,7 +532,11 @@ class DBManager:
                     'materials': 'name',
                     'ingredients': 'name_ko',
                     'formulations': 'experiment_name',
-                    'formulation_items': 'material_name'
+                    'formulation_items': 'material_name',
+                    # 생산 관련 테이블 변경 추적 추가
+                    'production_formulations': 'product_name',
+                    'production_steps': None,
+                    'production_runs': None
                 }
                 tracked_tables = list(name_cols.keys())
                 operations = [

@@ -498,6 +498,12 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.formulation_item_tree.bind("<Control-Up>", self.move_item_up)
         self.formulation_item_tree.bind("<Return>", self.edit_selected_item_ratio)
         self.formulation_item_tree.bind("<Control-Down>", self.move_item_down)
+        
+        # 드래그 앤 드롭 기능 추가
+        self.drag_data = {"item": None, "index": None}
+        self.formulation_item_tree.bind("<ButtonPress-1>", self.on_drag_start)
+        self.formulation_item_tree.bind("<B1-Motion>", self.on_drag_motion)
+        self.formulation_item_tree.bind("<ButtonRelease-1>", self.on_drag_release)
 
         # --- 처방 내용 Treeview 스크롤바 ---
         tree_scrollbar = ttk.Scrollbar(content_pane, orient="vertical", command=self.formulation_item_tree.yview) # content_pane을 부모로 사용
@@ -546,7 +552,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 사용자 활동 감지를 위한 이벤트 바인딩
         self.bind_activity_events()
 
-def bind_activity_events(self):
+    def bind_activity_events(self):
         """사용자 활동 감지를 위한 이벤트를 바인딩합니다"""
         try:
             # 마우스 및 키보드 활동 감지
@@ -568,7 +574,7 @@ def bind_activity_events(self):
         except Exception as e:
             print(f"이벤트 바인딩 중 오류: {e}")
 
-def update_lab_no(self, event=None):
+    def update_lab_no(self, event=None):
         """고유번호, 실험일, 차수가 모두 있을 때만 LAB NO.를 자동으로 생성합니다."""
         unique_code = self.exp_code_entry.get().strip().upper()
         revision = self.revision_entry.get().strip().upper()
@@ -593,7 +599,7 @@ def update_lab_no(self, event=None):
         self.lab_no_entry.insert(0, lab_no)
         self.lab_no_entry.configure(state="disabled")
 
-def clear_form(self):
+    def clear_form(self):
         """상세 정보 폼의 모든 입력 필드를 초기화합니다."""
         self.formulation_id = None
 
@@ -647,7 +653,7 @@ def clear_form(self):
         self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
         self.update_lab_no() # 폼 초기화 후 LAB NO. 업데이트
 
-def load_formulation_details(self, formulation_id):
+    def load_formulation_details(self, formulation_id):
         """특정 처방의 상세 정보를 불러와 폼에 채웁니다."""
         if self.data_loading:
             print("이미 데이터 로딩 중입니다.")
@@ -761,7 +767,7 @@ def load_formulation_details(self, formulation_id):
             # UI 업데이트 강제
             self.update_idletasks()
             
-def clear_form_fields(self):
+    def clear_form_fields(self):
         """폼의 모든 필드를 클리어합니다 (clear_form과 달리 기본값 설정 안함)"""
         # 타겟 정보 클리어
         self.target_sample_name_entry.delete(0, "end")
@@ -789,7 +795,7 @@ def clear_form_fields(self):
         # 총 실험량 클리어
         self.main_total_amount_entry.delete(0, "end")
             
-def get_manager_code_from_form(self, form, session):
+    def get_manager_code_from_form(self, form, session):
         """폼에서 담당번호를 추출합니다"""
         if form.manager_code:
             return form.manager_code
@@ -817,7 +823,7 @@ def get_manager_code_from_form(self, form, session):
                     return self.current_user.manager_code
         return None
     
-def get_manager_display_name(self, manager_value):
+    def get_manager_display_name(self, manager_value):
         """담당자 필드의 값을 표시용 이름으로 변환합니다"""
         if not manager_value or not manager_value.strip():
             return self.current_user.real_name or self.current_user.username or ""
@@ -844,7 +850,7 @@ def get_manager_display_name(self, manager_value):
         # 이미 이름인 경우 그대로 반환
         return manager_value
         
-def load_change_log(self, form):
+    def load_change_log(self, form):
         """변경 이력을 로드합니다"""
         self.change_log_textbox.configure(state="normal")
         self.change_log_textbox.delete("1.0", "end")
@@ -854,7 +860,7 @@ def load_change_log(self, form):
             self.change_log_textbox.insert("1.0", "저장된 변경 이력이 없습니다.")
         self.change_log_textbox.configure(state="disabled")
         
-def load_client_info(self, client):
+    def load_client_info(self, client):
         """거래처 정보를 로드합니다"""
         try:
             # 거래처 타입 설정
@@ -872,7 +878,7 @@ def load_client_info(self, client):
             import traceback
             traceback.print_exc()
             
-def load_formulation_items(self, form):
+    def load_formulation_items(self, form):
         """처방 아이템들을 로드합니다"""
         # 기존 아이템들 삭제
         for item in self.formulation_item_tree.get_children():
@@ -882,18 +888,23 @@ def load_formulation_items(self, form):
             print(f"처방 아이템 {len(form.items)}개 로딩 중...")
             total_amount = Decimal('0')
             
-            # 정렬: 1차로 phase(구분) 순서, 2차로 order 순서
-            # None 값들은 마지막에 오도록 튜플 키로 안전하게 정렬합니다.
-            def sort_key(item):
-                # phase를 숫자로 변환하여 정렬
-                if item.phase is None:
-                    return (1, 999, item.order if item.order is not None else 0)
+            # 정렬: order 필드로만 정렬 (저장 시 순서대로 order가 부여되므로)
+            # phase로 정렬하면 줄내림(phase="")이 맨 뒤로 밀려나는 문제 발생
+            def _to_int_safe(v, default=10**9):
                 try:
-                    phase_num = int(item.phase)
-                    return (0, phase_num, item.order if item.order is not None else 0)
-                except (ValueError, TypeError):
-                    # 숫자가 아닌 경우 문자열로 정렬
-                    return (0, str(item.phase), item.order if item.order is not None else 0)
+                    if v is None:
+                        return default
+                    # "12", 12, "12.0" 등 처리
+                    s = str(v).strip()
+                    if s == "":
+                        return default
+                    # 소수로 들어오면 버림
+                    return int(float(s))
+                except Exception:
+                    return default
+
+            def sort_key(item):
+                return _to_int_safe(getattr(item, 'order', None))
             
             sorted_items = sorted(form.items, key=sort_key)
             
@@ -902,17 +913,25 @@ def load_formulation_items(self, form):
                 material_code = str(item.material_code) if item.material_code else "---"
                 material_name = str(item.material_name) if item.material_name else "---"
                 
-                # 비율과 양 처리 - None 값 체크 개선
-                if item.ratio is not None:
-                    ratio_str = decimal_to_str_full(to_decimal(item.ratio))
+                # 줄내림 체크: material_code가 "---"이면 줄내림으로 처리
+                is_separator = material_code.strip() in ["---", "-", "--", "―", "ㅡ"]
+                
+                if is_separator:
+                    # 줄내림인 경우 비율과 양을 빈 문자열로
+                    ratio_str = ""
+                    amount_str = ""
                 else:
-                    ratio_str = "0"
-                    
-                if item.amount is not None:
-                    amount_str = decimal_to_str_full(to_decimal(item.amount))
-                    total_amount += to_decimal(item.amount)
-                else:
-                    amount_str = "0"
+                    # 일반 원료인 경우
+                    if item.ratio is not None:
+                        ratio_str = decimal_to_str_full(to_decimal(item.ratio))
+                    else:
+                        ratio_str = "0"
+                        
+                    if item.amount is not None:
+                        amount_str = decimal_to_str_full(to_decimal(item.amount))
+                        total_amount += to_decimal(item.amount)
+                    else:
+                        amount_str = "0"
                 
                 self.formulation_item_tree.insert("", "end", values=(
                     phase, material_code, material_name, ratio_str, amount_str
@@ -934,7 +953,7 @@ def load_formulation_items(self, form):
         # 요약 정보 업데이트
         self.update_formulation_summary()
         
-def set_lab_no(self, form):
+    def set_lab_no(self, form):
         """LAB NO.를 설정합니다"""
         if form.lab_no:
             try:
@@ -952,7 +971,7 @@ def set_lab_no(self, form):
             
 
 
-def save_formulation(self):
+    def save_formulation(self):
         """폼 데이터를 DB에 저장 (신규/수정)"""
         # 저장 직전에 LAB NO.를 다시 한번 업데이트하여 최신 상태를 보장합니다.
         self.update_lab_no()
@@ -1178,11 +1197,11 @@ def save_formulation(self):
         finally:
             session.close()
 
-def open_add_material_dialog(self):
+    def open_add_material_dialog(self):
         """원료 추가 팝업창을 엽니다."""
         AddMaterialDialog(self, self.add_material_to_formulation, self.add_line_break_to_formulation)
 
-def add_material_to_formulation(self, material_id):
+    def add_material_to_formulation(self, material_id):
         """선택된 원료를 처방 내용 Treeview에 추가합니다."""
         session = db_manager.get_session()
         try:
@@ -1193,25 +1212,46 @@ def add_material_to_formulation(self, material_id):
                 amount = Decimal('0')
                 # 태그 추가
                 tag = 'oddrow' if len(self.formulation_item_tree.get_children()) % 2 == 0 else 'evenrow'
-                self.formulation_item_tree.insert("", "end", tags=(tag,), values=(
-                    "", material.code, material.name, decimal_to_str_full(ratio), decimal_to_str_full(amount)
-                ))
+                
+                # 선택된 아이템이 있으면 그 위에, 없으면 맨 끝에 추가
+                selected_item = self.formulation_item_tree.focus()
+                if selected_item:
+                    # 선택된 아이템의 인덱스를 가져와서 그 위에 삽입
+                    index = self.formulation_item_tree.index(selected_item)
+                    self.formulation_item_tree.insert("", index, tags=(tag,), values=(
+                        "", material.code, material.name, decimal_to_str_full(ratio), decimal_to_str_full(amount)
+                    ))
+                else:
+                    # 선택된 항목이 없으면 맨 끝에 추가
+                    self.formulation_item_tree.insert("", "end", tags=(tag,), values=(
+                        "", material.code, material.name, decimal_to_str_full(ratio), decimal_to_str_full(amount)
+                    ))
+                
                 self.update_phase_numbers()
                 # 안내 메시지 숨기기 (아이템이 추가되었으므로)
                 self.empty_message_label.grid_remove()
         finally:
             session.close()
 
-def add_line_break_to_formulation(self):
+    def add_line_break_to_formulation(self):
         """처방 내용에 빈 줄(구분선)을 추가합니다."""
-        # 태그 추가
+        # 선택된 아이템이 있으면 그 위에, 없으면 맨 끝에 추가
+        selected_item = self.formulation_item_tree.focus()
         tag = 'oddrow' if len(self.formulation_item_tree.get_children()) % 2 == 0 else 'evenrow'
-        self.formulation_item_tree.insert("", "end", tags=(tag,), values=("", "---", "---", "---", "---"))
+        
+        if selected_item:
+            # 선택된 아이템의 인덱스를 가져와서 그 위에 삽입
+            index = self.formulation_item_tree.index(selected_item)
+            self.formulation_item_tree.insert("", index, tags=(tag,), values=("", "---", "---", "---", "---"))
+        else:
+            # 선택된 항목이 없으면 맨 끝에 추가
+            self.formulation_item_tree.insert("", "end", tags=(tag,), values=("", "---", "---", "---", "---"))
+        
         self.update_phase_numbers()
         # 안내 메시지 숨기기 (아이템이 추가되었으므로)
         self.empty_message_label.grid_remove()
 
-def delete_selected_item(self):
+    def delete_selected_item(self):
         """처방 내용 Treeview에서 선택된 항목을 삭제합니다."""
         selected_item = self.formulation_item_tree.selection()
         if not selected_item:
@@ -1224,7 +1264,7 @@ def delete_selected_item(self):
         if not self.formulation_item_tree.get_children():
             self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
-def edit_item_ratio(self, event):
+    def edit_item_ratio(self, event):
         """Treeview의 '함량' 셀을 더블클릭하여 수정합니다."""
         if self.edit_entry: self.edit_entry.destroy()
         region = self.formulation_item_tree.identify("region", event.x, event.y)
@@ -1233,11 +1273,11 @@ def edit_item_ratio(self, event):
         selected_item = self.formulation_item_tree.focus()
         self.start_ratio_editing(selected_item, "#4")
 
-def edit_selected_item_ratio(self, event=None):
+    def edit_selected_item_ratio(self, event=None):
         selected_item = self.formulation_item_tree.focus()
         if selected_item: self.start_ratio_editing(selected_item, "#4")
 
-def start_ratio_editing(self, selected_item, column_id):
+    def start_ratio_editing(self, selected_item, column_id):
         if not selected_item: return
         item_values = self.formulation_item_tree.item(selected_item, "values")
         if item_values and item_values[1] == "---": return
@@ -1253,7 +1293,7 @@ def start_ratio_editing(self, selected_item, column_id):
         self.edit_entry.bind("<Return>", lambda e: self.on_edit_entry_commit(selected_item))
         self.edit_entry.bind("<FocusOut>", lambda e: self.on_edit_entry_commit(selected_item))
     
-def on_edit_entry_commit(self, item_id):
+    def on_edit_entry_commit(self, item_id):
         if not self.edit_entry: return
         try:
             # Decimal로 안전하게 변환
@@ -1270,7 +1310,7 @@ def on_edit_entry_commit(self, item_id):
             self.edit_entry = None
             self.update_formulation_summary()
 
-def set_ratio_to_100(self):
+    def set_ratio_to_100(self):
         selected_item_id = self.formulation_item_tree.focus()
         if not selected_item_id:
             messagebox.showwarning(self.texts['selection_error'], self.texts['select_material_for_to100'], parent=self)
@@ -1299,7 +1339,7 @@ def set_ratio_to_100(self):
         self.formulation_item_tree.item(selected_item_id, values=tuple(current_values))
         self.update_formulation_summary()
 
-def move_item_up(self, event=None):
+    def move_item_up(self, event=None):
         selected_item = self.formulation_item_tree.focus()
         if not selected_item: return
         prev_item = self.formulation_item_tree.prev(selected_item)
@@ -1310,7 +1350,7 @@ def move_item_up(self, event=None):
             self.update_phase_numbers()
         return 'break'
 
-def move_item_down(self, event=None):
+    def move_item_down(self, event=None):
         selected_item = self.formulation_item_tree.focus()
         if not selected_item: return
         next_item = self.formulation_item_tree.next(selected_item)
@@ -1323,7 +1363,40 @@ def move_item_down(self, event=None):
             self.formulation_item_tree.move(selected_item, "", "end")
             self.update_phase_numbers()
 
-def calculate_single_amount(self, ratio) -> str:
+    def on_drag_start(self, event):
+        """드래그 시작 - 클릭한 아이템 저장"""
+        item = self.formulation_item_tree.identify_row(event.y)
+        if item:
+            self.drag_data["item"] = item
+            self.drag_data["index"] = self.formulation_item_tree.index(item)
+
+    def on_drag_motion(self, event):
+        """드래그 중 - 현재 위치 표시"""
+        target_item = self.formulation_item_tree.identify_row(event.y)
+        if target_item and self.drag_data["item"]:
+            # 드래그 중인 아이템을 시각적으로 표시하기 위해 선택
+            self.formulation_item_tree.selection_set(target_item)
+
+    def on_drag_release(self, event):
+        """드래그 종료 - 아이템 이동"""
+        if not self.drag_data["item"]:
+            return
+        
+        target_item = self.formulation_item_tree.identify_row(event.y)
+        drag_item = self.drag_data["item"]
+        
+        if target_item and drag_item != target_item:
+            # 타겟 아이템의 위치로 이동
+            target_index = self.formulation_item_tree.index(target_item)
+            self.formulation_item_tree.move(drag_item, "", target_index)
+            self.formulation_item_tree.focus(drag_item)
+            self.formulation_item_tree.selection_set(drag_item)
+            self.update_phase_numbers()
+        
+        # 드래그 데이터 초기화
+        self.drag_data = {"item": None, "index": None}
+
+    def calculate_single_amount(self, ratio) -> str:
         try:
             total_amount = to_decimal(self.main_total_amount_entry.get())
             ratio_dec = to_decimal(ratio)
@@ -1332,7 +1405,7 @@ def calculate_single_amount(self, ratio) -> str:
         except Exception:
             return "0"
 
-def calculate_item_amounts(self, event=None):
+    def calculate_item_amounts(self, event=None):
         try:
             total_amount = to_decimal(self.main_total_amount_entry.get())
         except (InvalidOperation, ValueError, TypeError):
@@ -1349,7 +1422,7 @@ def calculate_item_amounts(self, event=None):
                     continue
         self.update_formulation_summary()
 
-def update_phase_numbers(self):
+    def update_phase_numbers(self):
         i = 1
         for item_id in self.formulation_item_tree.get_children():
             current_values = list(self.formulation_item_tree.item(item_id, "values"))
@@ -1361,7 +1434,7 @@ def update_phase_numbers(self):
             self.formulation_item_tree.item(item_id, values=tuple(current_values))
         self.update_formulation_summary()
 
-def update_formulation_summary(self):
+    def update_formulation_summary(self):
         total_ratio = Decimal('0')
         total_amount = Decimal('0')
         for item_id in self.formulation_item_tree.get_children():
@@ -1375,7 +1448,7 @@ def update_formulation_summary(self):
         self.total_ratio_label.configure(text=f"{decimal_to_str_full(total_ratio)} %")
         self.total_amount_label.configure(text=f"{decimal_to_str_full(total_amount)} g")
 
-def sort_items_by_phase(self):
+    def sort_items_by_phase(self):
         """처방 내용 아이템들을 구분(phase) 순서로 정렬합니다."""
         # 현재 Treeview의 모든 아이템 정보를 수집
         items_data = []
@@ -1408,7 +1481,7 @@ def sort_items_by_phase(self):
         # phase 번호 업데이트
         self.update_phase_numbers()
 
-def toggle_target_info(self):
+    def toggle_target_info(self):
         if self.target_info_var.get():
             self.target_fields_frame.pack(fill="x", expand=True, padx=10, pady=5)
         else:
@@ -1416,7 +1489,7 @@ def toggle_target_info(self):
 
     # update_target_client_combo 메서드는 더 이상 필요 없으므로 삭제합니다.
 
-def update_formulation_client_combo(self, selected_type: str):
+    def update_formulation_client_combo(self, selected_type: str):
         self.formulation_client_name_combo.set(self.texts['select_client'])
         if selected_type == self.texts['select_type']:
             self.formulation_client_name_combo.configure(values=[self.texts['select_client']])
@@ -1430,7 +1503,7 @@ def update_formulation_client_combo(self, selected_type: str):
             self.formulation_client_name_combo.configure(values=values)
         finally: session.close()
 
-def on_client_select(self, selected_name: str):
+    def on_client_select(self, selected_name: str):
         if selected_name in [self.texts['select_client'], self.texts['no_clients_found']]:
             self.client_details_label.configure(text="")
             return
@@ -1447,7 +1520,7 @@ def on_client_select(self, selected_name: str):
         except Exception as e: print(f"거래처 상세 정보 로드 중 오류: {e}")
         finally: session.close()
 
-def export_formulation_to_excel(self): # noqa
+    def export_formulation_to_excel(self): # noqa
         # 내보내기 직전에 LAB NO.를 다시 한번 업데이트하여 최신 상태를 보장합니다.
         self.update_lab_no()
 
@@ -1515,7 +1588,7 @@ def export_formulation_to_excel(self): # noqa
 
         excel_handler.export_formulation_template(formulation_data, default_filename)
 
-def _apply_imported_data_to_ui(self, formulation_data):
+    def _apply_imported_data_to_ui(self, formulation_data):
         try:
             # '가져오기'는 항상 '신규' 처방으로 처리합니다.
             # 기존에 수정 중이던 ID가 있더라도 이를 무시하고 None으로 설정하여
@@ -1606,18 +1679,27 @@ def _apply_imported_data_to_ui(self, formulation_data):
             for item in items:
                 # 기존 try_convert_to_float 유지하되 Decimal로 변환하여 포맷
                 ratio_val = try_convert_to_float(item.get("함량(%)", "0"))
-                ratio_dec = to_decimal(ratio_val)
-                ratio_str = decimal_to_str_full(ratio_dec)
-
-                # 총 실험량과 함량을 기반으로 실험량을 다시 계산합니다.
-                if total_amount > Decimal('0'):
-                    amount_val = (total_amount * ratio_dec) / Decimal('100')
-                    amount_str = decimal_to_str_full(amount_val)
+                
+                # 줄내림 체크: 코드가 "---"이면 줄내림으로 처리
+                code_val = item.get("코드", "")
+                if isinstance(code_val, str) and code_val.strip() in ["---", "-", "--", "―", "ㅡ"]:
+                    # 줄내림인 경우
+                    ratio_str = ""
+                    amount_str = ""
                 else:
-                    amount_str = "0"
+                    # 일반 원료인 경우
+                    ratio_dec = to_decimal(ratio_val)
+                    ratio_str = decimal_to_str_full(ratio_dec)
+
+                    # 총 실험량과 함량을 기반으로 실험량을 다시 계산합니다.
+                    if total_amount > Decimal('0'):
+                        amount_val = (total_amount * ratio_dec) / Decimal('100')
+                        amount_str = decimal_to_str_full(amount_val)
+                    else:
+                        amount_str = "0"
 
                 self.formulation_item_tree.insert("", "end", values=(
-                    item.get("구분") or "", item.get("코드") or "", item.get("원료명") or "",
+                    item.get("구분") or "", code_val or "", item.get("원료명") or "",
                     ratio_str, amount_str
                 ))
             
@@ -1634,18 +1716,18 @@ def _apply_imported_data_to_ui(self, formulation_data):
         except Exception as e:
             CustomErrorDialog(self, title="가져오기 오류", error_message=f"데이터를 적용하는 중 오류가 발생했습니다:\n\n{e}") # noqa
 
-def import_formulation_from_excel(self):
+    def import_formulation_from_excel(self):
         if not messagebox.askyesno(self.texts['import_confirm'], self.texts['import_formulation_confirm_msg'], parent=self):
             return
         formulation_data = excel_handler.import_formulation_template()
         if formulation_data:
             self._apply_imported_data_to_ui(formulation_data)
-
-def start_refresh_timer(self):
+    
+    def start_refresh_timer(self):
         """데이터 새로고침 타이머를 시작합니다 (5분마다)"""
         self.refresh_timer = self.after(300000, self.refresh_data_periodically)  # 5분 = 300,000ms
         
-def refresh_data_periodically(self):
+    def refresh_data_periodically(self):
         """주기적으로 데이터를 새로고침합니다"""
         try:
             # 데이터 로딩 중이거나 편집 중인 경우 새로고침 건너뛰기
@@ -1670,7 +1752,7 @@ def refresh_data_periodically(self):
             # 오류가 발생해도 타이머는 계속 실행
             self.start_refresh_timer()
     
-def refresh_formulation_data(self):
+    def refresh_formulation_data(self):
         """처방 데이터를 새로고침합니다"""
         try:
             # 현재 편집 중인 경우에는 새로고침하지 않음
@@ -1710,7 +1792,7 @@ def refresh_formulation_data(self):
             import traceback
             traceback.print_exc()
     
-def load_essential_data_only(self, form):
+    def load_essential_data_only(self, form):
         """필수 데이터만 로드합니다 (사용자 입력 필드는 건드리지 않음)"""
         try:
             # 변경 이력만 업데이트 (사용자가 직접 수정하지 않는 필드)
@@ -1730,7 +1812,7 @@ def load_essential_data_only(self, form):
         except Exception as e:
             print(f"필수 데이터 로드 중 오류: {e}")
     
-def get_current_form_values(self):
+    def get_current_form_values(self):
         """현재 폼의 입력값들을 저장합니다"""
         try:
             return {
@@ -1760,7 +1842,7 @@ def get_current_form_values(self):
             print(f"현재 폼 값 저장 중 오류: {e}")
             return {}
     
-def restore_user_inputs(self, values):
+    def restore_user_inputs(self, values):
         """사용자 입력값들을 복원합니다"""
         try:
             if not values:
@@ -1820,12 +1902,12 @@ def restore_user_inputs(self, values):
         except Exception as e:
             print(f"사용자 입력값 복원 중 오류: {e}")
     
-def on_user_activity(self, event=None):
+    def on_user_activity(self, event=None):
         """사용자 활동 시간을 업데이트합니다"""
         self.last_activity_time = time.time()
         # print(f"사용자 활동 감지: {datetime.fromtimestamp(self.last_activity_time).strftime('%H:%M:%S')}")
         
-def destroy(self):
+    def destroy(self):
         """창 종료 시 타이머 정리"""
         if self.refresh_timer:
             self.after_cancel(self.refresh_timer)
@@ -1842,46 +1924,4 @@ def destroy(self):
             except Exception:
                 pass
 
-# --- 메서드 바인딩 (위에서 클래스 범위가 끊어진 함수들을 클래스 메서드로 연결) ---
-FormulationEditPopup.bind_activity_events = bind_activity_events
-FormulationEditPopup.update_lab_no = update_lab_no
-FormulationEditPopup.clear_form = clear_form
-FormulationEditPopup.load_formulation_details = load_formulation_details
-FormulationEditPopup.clear_form_fields = clear_form_fields
-FormulationEditPopup.get_manager_code_from_form = get_manager_code_from_form
-FormulationEditPopup.get_manager_display_name = get_manager_display_name
-FormulationEditPopup.load_change_log = load_change_log
-FormulationEditPopup.load_client_info = load_client_info
-FormulationEditPopup.load_formulation_items = load_formulation_items
-FormulationEditPopup.set_lab_no = set_lab_no
-FormulationEditPopup.save_formulation = save_formulation
-FormulationEditPopup.open_add_material_dialog = open_add_material_dialog
-FormulationEditPopup.add_material_to_formulation = add_material_to_formulation
-FormulationEditPopup.add_line_break_to_formulation = add_line_break_to_formulation
-FormulationEditPopup.delete_selected_item = delete_selected_item
-FormulationEditPopup.edit_item_ratio = edit_item_ratio
-FormulationEditPopup.edit_selected_item_ratio = edit_selected_item_ratio
-FormulationEditPopup.start_ratio_editing = start_ratio_editing
-FormulationEditPopup.on_edit_entry_commit = on_edit_entry_commit
-FormulationEditPopup.set_ratio_to_100 = set_ratio_to_100
-FormulationEditPopup.move_item_up = move_item_up
-FormulationEditPopup.move_item_down = move_item_down
-FormulationEditPopup.calculate_single_amount = calculate_single_amount
-FormulationEditPopup.calculate_item_amounts = calculate_item_amounts
-FormulationEditPopup.update_phase_numbers = update_phase_numbers
-FormulationEditPopup.update_formulation_summary = update_formulation_summary
-FormulationEditPopup.sort_items_by_phase = sort_items_by_phase
-FormulationEditPopup.toggle_target_info = toggle_target_info
-FormulationEditPopup.update_formulation_client_combo = update_formulation_client_combo
-FormulationEditPopup.on_client_select = on_client_select
-FormulationEditPopup.export_formulation_to_excel = export_formulation_to_excel
-FormulationEditPopup._apply_imported_data_to_ui = _apply_imported_data_to_ui
-FormulationEditPopup.import_formulation_from_excel = import_formulation_from_excel
-FormulationEditPopup.start_refresh_timer = start_refresh_timer
-FormulationEditPopup.refresh_data_periodically = refresh_data_periodically
-FormulationEditPopup.refresh_formulation_data = refresh_formulation_data
-FormulationEditPopup.load_essential_data_only = load_essential_data_only
-FormulationEditPopup.get_current_form_values = get_current_form_values
-FormulationEditPopup.restore_user_inputs = restore_user_inputs
-FormulationEditPopup.on_user_activity = on_user_activity
-FormulationEditPopup.destroy = destroy
+# --- 메서드 바인딩 제거 (모든 함수가 이제 클래스 메서드로 제대로 정의됨) ---
