@@ -12,6 +12,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from tkcalendar import DateEntry
+import configparser
+from datetime import datetime, timedelta, date
 from database.db_manager import db_manager
 from database.models import (
     Client,
@@ -270,7 +272,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.prod_catalog_tree.heading("pcode", text="생산코드"); self.prod_catalog_tree.column("pcode", width=120)
         self.prod_catalog_tree.heading("revision", text="차수"); self.prod_catalog_tree.column("revision", width=80)
         self.prod_catalog_tree.heading("status", text="상태"); self.prod_catalog_tree.column("status", width=80)
-        self.prod_catalog_tree.heading("eff", text="적용일"); self.prod_catalog_tree.column("eff", width=120)
+        self.prod_catalog_tree.heading("eff", text="제조일"); self.prod_catalog_tree.column("eff", width=120)
         self.prod_catalog_tree.heading("base", text="생산량(kg)"); self.prod_catalog_tree.column("base", width=120, anchor="e")
         self.prod_catalog_tree.heading("created", text="생성일"); self.prod_catalog_tree.column("created", width=140)
         self.prod_catalog_tree.heading("lab", text="LAB NO."); self.prod_catalog_tree.column("lab", width=120)
@@ -874,7 +876,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.production_tree.heading("name", text="제품명/차수"); self.production_tree.column("name", width=260, stretch=True)
         self.production_tree.heading("pcode", text="생산코드"); self.production_tree.column("pcode", width=120)
         self.production_tree.heading("client", text="업체"); self.production_tree.column("client", width=160, stretch=True)
-        self.production_tree.heading("eff", text="적용일"); self.production_tree.column("eff", width=120)
+        self.production_tree.heading("eff", text="제조일"); self.production_tree.column("eff", width=120)
         self.production_tree.heading("status", text="상태"); self.production_tree.column("status", width=80)
         self.production_tree.heading("approver", text="승인자"); self.production_tree.column("approver", width=120)
         self.production_tree.heading("base", text="생산량(kg)"); self.production_tree.column("base", width=120, anchor="e")
@@ -1528,7 +1530,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             info_left.pack(side="left", fill="x", expand=True)
             
             meta_line1 = f"제품명: {prod.product_name or ''} | 차수: {prod.revision or ''} | 생산코드: {prod.production_code or ''}"
-            meta_line2 = f"생산량(kg): {((prod.base_weight_g or 0)/1000):.1f} | 적용일: {prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else ''} | 상태: {prod.status or ''}"
+            meta_line2 = f"생산량(kg): {((prod.base_weight_g or 0)/1000):.1f} | 제조일: {prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else ''} | 상태: {prod.status or ''}"
             
             ctk.CTkLabel(info_left, text=meta_line1, font=ctk.CTkFont(size=12)).pack(anchor="w")
             ctk.CTkLabel(info_left, text=meta_line2, font=ctk.CTkFont(size=11), text_color="gray").pack(anchor="w", pady=(2,0))
@@ -1576,7 +1578,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
             
             # Treeview for recipe items (제조공정/공정검사 포함)
             rcols = ("phase","order","code","name","ratio","amount","calc_g","process","inspection")
-            recipe_tree = ttk.Treeview(recipe_list_wrap, columns=rcols, show="headings")
+            # 전역 Treeview 스타일을 오염시키지 않기 위해 전용 스타일 사용
+            recipe_tree = ttk.Treeview(recipe_list_wrap, columns=rcols, show="headings", style="Recipe.Treeview")
             recipe_tree.heading("phase", text="Ph."); recipe_tree.column("phase", width=50, anchor="center")
             recipe_tree.heading("order", text="구분"); recipe_tree.column("order", width=50, anchor="center")
             recipe_tree.heading("code", text="코드"); recipe_tree.column("code", width=100)
@@ -1590,9 +1593,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
             
             # Phase별 시각적 그룹화를 위한 태그 스타일 설정
             style = ttk.Style()
-            
-            # 전체 행 높이를 충분히 크게 설정하여 여러 줄 텍스트 표시 가능
-            style.configure("Treeview", rowheight=60)  # 기본 높이를 60픽셀로 증가
+
+            # 전용 스타일로 행 높이 조정 (기존 전역 "Treeview" 스타일에 영향 주지 않음)
+            style.configure("Recipe.Treeview", rowheight=60)
             
             recipe_tree.tag_configure("phase_first", background="#2b2b2b")  # 첫 행 - 진한 배경
             recipe_tree.tag_configure("phase_rest", background="#1a1a1a")   # 나머지 행 - 약간 어두운 배경
@@ -1914,22 +1917,86 @@ class DocumentManagementFrame(ctk.CTkFrame):
             except Exception:
                 base_e.insert(0, "1.0")
 
-            ctk.CTkLabel(frm, text="적용일").grid(row=5, column=0, sticky="w", pady=4)
-            eff_e = ctk.CTkEntry(frm)
-            eff_e.grid(row=5, column=1, sticky="ew", pady=4)
-            eff_e.insert(0, datetime.now().strftime('%Y-%m-%d'))
+            # 날짜 유틸: 휴일 로드 + 다음 영업일 계산 (주말 + config.ini Holidays.dates)
+            def _load_holidays():
+                hol = set()
+                try:
+                    from modules.excel_handler import CONFIG_FILE_PATH
+                except Exception:
+                    CONFIG_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config.ini')
+                try:
+                    cfg = configparser.ConfigParser(); cfg.read(CONFIG_FILE_PATH, encoding='utf-8')
+                    dates_str = cfg.get('Holidays', 'dates', fallback='').strip()
+                    if dates_str:
+                        for s in dates_str.split(','):
+                            s = s.strip()
+                            try:
+                                hol.add(datetime.strptime(s, '%Y-%m-%d').date())
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                return hol
 
-            ctk.CTkLabel(frm, text="상태").grid(row=6, column=0, sticky="w", pady=4)
+            HOLIDAYS = _load_holidays()
+
+            def _is_business_day(d: date) -> bool:
+                # 월=0..일=6, 주말(토/일) 제외 + 설정된 휴일 제외
+                if d.weekday() >= 5:
+                    return False
+                if d in HOLIDAYS:
+                    return False
+                return True
+
+            def _next_business_day(start: date) -> date:
+                # start 다음날부터 체크하여 영업일 반환
+                cur = start + timedelta(days=1)
+                while not _is_business_day(cur):
+                    cur += timedelta(days=1)
+                return cur
+
+            # 지시일(달력) + 제조일(달력, 자동계산되나 수정 가능)
+            ctk.CTkLabel(frm, text="지시일").grid(row=5, column=0, sticky="w", pady=4)
+            directive_de = DateEntry(frm, date_pattern='yyyy-mm-dd', state='normal')
+            directive_de.grid(row=5, column=1, sticky="w", pady=4)
+            directive_de.set_date(datetime.now().date())
+
+            ctk.CTkLabel(frm, text="제조일").grid(row=6, column=0, sticky="w", pady=4)
+            mfg_de = DateEntry(frm, date_pattern='yyyy-mm-dd', state='normal')
+            mfg_de.grid(row=6, column=1, sticky="w", pady=4)
+            try:
+                mfg_de.set_date(_next_business_day(datetime.now().date()))
+            except Exception:
+                mfg_de.set_date(datetime.now().date())
+
+            def on_directive_changed(_evt=None):
+                try:
+                    d = directive_de.get_date()
+                    mfg_de.set_date(_next_business_day(d))
+                except Exception:
+                    pass
+
+            # 달력 선택 이벤트 + 수동 입력 포커스 아웃에도 동작
+            try:
+                directive_de.bind('<<DateEntrySelected>>', on_directive_changed)
+            except Exception:
+                pass
+            try:
+                directive_de.bind('<FocusOut>', on_directive_changed)
+            except Exception:
+                pass
+
+            ctk.CTkLabel(frm, text="상태").grid(row=7, column=0, sticky="w", pady=4)
             status_var = tk.StringVar(value='확정')
             status_opt = ctk.CTkOptionMenu(frm, values=['초안','검토중','확정'], variable=status_var)
-            status_opt.grid(row=6, column=1, sticky="w", pady=4)
+            status_opt.grid(row=7, column=1, sticky="w", pady=4)
 
-            ctk.CTkLabel(frm, text="비고").grid(row=7, column=0, sticky="nw", pady=4)
+            ctk.CTkLabel(frm, text="비고").grid(row=8, column=0, sticky="nw", pady=4)
             notes_t = ctk.CTkTextbox(frm, height=80)
-            notes_t.grid(row=7, column=1, sticky="nsew", pady=4)
+            notes_t.grid(row=8, column=1, sticky="nsew", pady=4)
 
             btns = ctk.CTkFrame(frm, fg_color="transparent")
-            btns.grid(row=8, column=0, columnspan=2, sticky="e", pady=(10,0))
+            btns.grid(row=9, column=0, columnspan=2, sticky="e", pady=(10,0))
             # 저장 중복 방지 플래그
             save_in_progress = {"flag": False}
 
@@ -1947,7 +2014,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 except Exception:
                     base_w_kg = 1.0
                 try:
-                    eff_date = datetime.strptime(eff_e.get().strip(), '%Y-%m-%d').date() if eff_e.get().strip() else None
+                    try:
+                        eff_date = mfg_de.get_date()
+                    except Exception:
+                        eff_date = None
                 except Exception:
                     eff_date = None
 
@@ -2219,7 +2289,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 "차수": prod.revision or "",
                 "거래처": client_name or "",
                 "생산량(kg)": f"{(base_w/1000):,.1f} kg" if isinstance(base_w, (int, float)) else (base_w or ""),
-                "적용일": prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else "",
+                "제조일": prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else "",
                 "상태": prod.status or "",
                 "승인자": approver_name or "",
                 "비고": (prod.notes or "").strip(),
@@ -2265,7 +2335,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 f"차수: {prod.revision or ''}",
                 f"LAB NO.: {prod.lab_no or ''}",
                 f"생산코드: {prod.production_code or ''}",
-                f"적용일: {prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else ''}",
+                f"제조일: {prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else ''}",
                 f"상태: {prod.status or ''}",
                 f"생산량(kg): {((prod.base_weight_g or 0)/1000):.1f}",
             ]
@@ -2427,7 +2497,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 "차수": prod.revision or "",
                 "거래처": client_name or "",
                 "생산량(kg)": f"{(base_w/1000):,.1f} kg" if isinstance(base_w, (int, float)) else (base_w or ""),
-                "적용일": prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else "",
+                "제조일": prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else "",
                 "상태": prod.status or "",
                 "승인자": approver_name or "",
                 "비고": (prod.notes or "").strip(),
