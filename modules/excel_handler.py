@@ -203,7 +203,8 @@ def export_production_formulation_revised_to_excel(
     default_font = Font(name='맑은 고딕', size=10, color='2C3E50')
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left = Alignment(horizontal='left', vertical='center', wrap_text=True)
-    left_top = Alignment(horizontal='left', vertical='top', wrap_text=True)
+    # 본문(내용목록) 셀은 위아래 정렬을 '센터'로 통일
+    left_top = Alignment(horizontal='left', vertical='center', wrap_text=True)
     right = Alignment(horizontal='right', vertical='center', wrap_text=True)
     header_fill = PatternFill(start_color="E8F4F8", end_color="E8F4F8", fill_type="solid")
     table_header_fill = PatternFill(start_color="5B9BD5", end_color="5B9BD5", fill_type="solid")
@@ -470,7 +471,8 @@ def export_production_formulation_revised_to_excel(
                             pass
                         cell.alignment = right
                     else:
-                        cell.alignment = left_top
+                        # 내용목록 텍스트 셀도 세로 중앙 정렬
+                        cell.alignment = left
                 current += 1
 
             # A열, H열, I열을 그룹 단위로 병합 후 값/정렬 적용 (제조공정/공정검사 위치 이동)
@@ -489,22 +491,28 @@ def export_production_formulation_revised_to_excel(
                 if start_row < end_row:
                     ws.merge_cells(start_row=start_row, start_column=8, end_row=end_row, end_column=8)
                 g_cell = ws.cell(row=start_row, column=8, value=group_proc_wrapped)
-                g_cell.alignment = left_top; g_cell.border = thin_border; g_cell.font = default_font
+                g_cell.alignment = left; g_cell.border = thin_border; g_cell.font = default_font
 
                 # I열 병합 및 텍스트 (공정검사)
                 if start_row < end_row:
                     ws.merge_cells(start_row=start_row, start_column=9, end_row=end_row, end_column=9)
                 h_cell = ws.cell(row=start_row, column=9, value=group_insp_wrapped)
-                h_cell.alignment = left_top; h_cell.border = thin_border; h_cell.font = default_font
+                h_cell.alignment = left; h_cell.border = thin_border; h_cell.font = default_font
 
-        # 6) 합계 행 (병합 없이 표시)
+        # 6) 합계 행 (A:D 병합)
         sum_row = current
         ws.row_dimensions[sum_row].height = 22
+        # 전체 셀 채움/테두리 적용
         for col in range(1, 10):
             c = ws.cell(row=sum_row, column=col)
             c.fill = table_header_fill
             c.border = medium_border
-        ws.cell(row=sum_row, column=1, value="합계 (Total)").font = header_font_white
+        # A:D 병합 및 라벨 중앙 정렬
+        ws.merge_cells(start_row=sum_row, start_column=1, end_row=sum_row, end_column=4)
+        sl = ws.cell(row=sum_row, column=1, value="합계 (Total)")
+        sl.font = header_font_white
+        sl.alignment = center
+        # 합계 값(E열)
         sr = ws.cell(row=sum_row, column=5, value=total_ratio)
         sr.font = header_font_white
         sr.number_format = '0.0000'
@@ -629,7 +637,8 @@ def export_production_formulation_original_to_excel(
     default_font = Font(name='맑은 고딕', size=10, color='2C3E50')
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left = Alignment(horizontal='left', vertical='center', wrap_text=True)
-    left_top = Alignment(horizontal='left', vertical='top', wrap_text=True)
+    # 본문(내용목록) 셀은 위아래 정렬을 '센터'로 통일
+    left_top = Alignment(horizontal='left', vertical='center', wrap_text=True)
     right = Alignment(horizontal='right', vertical='center')
     header_fill = PatternFill(start_color="E8F4F8", end_color="E8F4F8", fill_type="solid")
     label_fill = PatternFill(start_color="D5E8F0", end_color="D5E8F0", fill_type="solid")
@@ -809,7 +818,8 @@ def export_production_formulation_original_to_excel(
                     if val:
                         cleaned = str(val).replace('"','').replace("'", '')
                         cell.value = cleaned
-                    cell.alignment = left_top
+                    # 내용목록 텍스트 셀도 세로 중앙 정렬
+                    cell.alignment = left
             ws.row_dimensions[current].height = 16
             current += 1
 
@@ -825,9 +835,9 @@ def export_production_formulation_original_to_excel(
                 ws.merge_cells(start_row=start_row, start_column=1, end_row=end_row, end_column=1)
                 mc = ws.cell(row=start_row, column=1); mc.value = phase_val; mc.alignment = center; mc.border = thin_border; mc.font = header_font
                 ws.merge_cells(start_row=start_row, start_column=8, end_row=end_row, end_column=8)
-                pc = ws.cell(row=start_row, column=8); pc.alignment = left_top; pc.border = thin_border
+                pc = ws.cell(row=start_row, column=8); pc.alignment = left; pc.border = thin_border
                 ws.merge_cells(start_row=start_row, start_column=9, end_row=end_row, end_column=9)
-                ic = ws.cell(row=start_row, column=9); ic.alignment = left_top; ic.border = thin_border
+                ic = ws.cell(row=start_row, column=9); ic.alignment = left; ic.border = thin_border
             else:
                 ws.row_dimensions[start_row].height = total_h
 

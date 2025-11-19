@@ -136,6 +136,7 @@ hiddenimports = [
     'openpyxl.worksheet.worksheet',
     'openpyxl.workbook.workbook',
     'et_xmlfile',
+    'jdcal',
     # Tkinter 관련
     'tkinter', 
     'tkinter.messagebox', 
@@ -146,6 +147,8 @@ hiddenimports = [
     'customtkinter',
     'customtkinter.windows',
     'customtkinter.widgets',
+    # Pillow 추가 컴포넌트 (미리보기에서 truetype 사용)
+    'PIL.ImageFont',
     # 프로젝트 모듈들
     'database',
     'database.db_manager',
@@ -162,6 +165,7 @@ hiddenimports = [
     'modules.material_management',
     'modules.formulation_popup',
     'modules.excel_handler',
+    'modules.print_preview',
     'modules.ui_components',
     'modules.comparison_popup',
     'modules.history_popup',

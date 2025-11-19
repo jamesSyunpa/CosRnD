@@ -209,7 +209,12 @@ class DataManagementFrame(ctk.CTkFrame):
         tab_frame.grid_columnconfigure(1, weight=1) # 우측 리스트 (가변 너비)
         tab_frame.grid_rowconfigure(0, weight=1)
 
-        user_form_frame = ctk.CTkFrame(tab_frame)
+        # 좌측 폼 영역에 세로 스크롤이 가능하도록 ScrollableFrame 적용
+        user_scrollable = ctk.CTkScrollableFrame(tab_frame, fg_color="transparent")
+        user_scrollable.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        user_scrollable.grid_columnconfigure(0, weight=1)
+
+        user_form_frame = ctk.CTkFrame(user_scrollable)
         user_form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         user_form_frame.grid_columnconfigure(1, weight=1) # 입력 필드가 너비를 채우도록 설정
         
