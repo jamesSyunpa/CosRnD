@@ -509,8 +509,12 @@ class SettingsManagementFrame(ctk.CTkFrame):
             db_backup_path = f"{local_db_path}.backup"
             shutil.copy2(local_db_path, db_backup_path)
             
-            # 파일 이동
-            shutil.move(local_db_path, new_db_path)
+            # 대상 디렉토리가 없으면 생성
+            os.makedirs(os.path.dirname(new_db_path), exist_ok=True)
+            
+            # 파일 이동 (copy + delete 방식으로 변경하여 크로스 드라이브 이동 지원)
+            shutil.copy2(local_db_path, new_db_path)
+            os.remove(local_db_path)
             
             # 설정 저장 및 재시작
             self._save_and_restart(new_db_path, new_excel_path, 
@@ -572,22 +576,27 @@ class SettingsManagementFrame(ctk.CTkFrame):
                  if engine: engine.dispose()
                  return
 
-            # 2b. 스키마 버전 값 확인
+            # 2b. 스키마 버전 값 확인 (호환 모드)
             with engine.connect() as conn:
                 try:
                     result = conn.execute(text("SELECT version FROM _schema_version")).scalar()
                     if result != SCHEMA_VERSION:
-                        messagebox.showerror("오류", 
-                                           f"DB 스키마 버전이 일치하지 않습니다.\n"
-                                           f"필요한 버전: {SCHEMA_VERSION}\n"
-                                           f"발견된 버전: {result}", 
-                                           parent=self)
-                        if engine: engine.dispose()
-                        return
+                        # 버전이 다르면 마이그레이션 안내
+                        version_msg = f"DB 버전: v{result}\n프로그램 버전: v{SCHEMA_VERSION}\n\n"
+                        if result < SCHEMA_VERSION:
+                            version_msg += "구버전 DB입니다. 연결 시 자동으로 업데이트됩니다."
+                        else:
+                            version_msg += "최신 버전 DB입니다. 호환 모드로 실행됩니다."
+                        
+                        response = messagebox.askyesno("버전 확인", 
+                                                      version_msg + "\n\n계속 진행하시겠습니까?",
+                                                      parent=self)
+                        if not response:
+                            if engine: engine.dispose()
+                            return
                 except Exception as e:
-                    messagebox.showerror("오류", f"DB 스키마 버전을 확인할 수 없습니다: {e}", parent=self)
-                    if engine: engine.dispose()
-                    return
+                    print(f"[정보] 스키마 버전 확인 불가: {e} - 마이그레이션 시 자동 생성됩니다")
+                    # 스키마 버전 테이블이 없어도 허용
             
             # 2c. 필수 테이블 확인
             required_tables = {'users', 'materials', 'clients', 'formulations'}
@@ -744,25 +753,21 @@ class SettingsManagementFrame(ctk.CTkFrame):
                     test_engine = create_engine(f"sqlite:///{db_file_path}", 
                                               connect_args={'check_same_thread': False})
                     with test_engine.connect() as conn:
-                        # 스키마 버전 확인
+                        # 스키마 버전 확인 (호환 모드)
                         try:
                             result = conn.execute(text("SELECT version FROM _schema_version")).scalar()
-                            if result != SCHEMA_VERSION:
-                                test_engine.dispose()
-                                return {
-                                    'valid': False,
-                                    'error': f"DB 스키마 버전이 맞지 않습니다.\n\n"
-                                           f"현재 프로그램 버전: {SCHEMA_VERSION}\n"
-                                           f"DB 파일 버전: {result}\n\n"
-                                           f"DB 파일: {db_file_path}"
-                                }
-                            print(f"[DEBUG] 스키마 버전 확인됨: v{result}")
+                            if result is None:
+                                print(f"[경고] 스키마 버전 테이블이 비어있음")
+                            elif result != SCHEMA_VERSION:
+                                if result > SCHEMA_VERSION:
+                                    print(f"[정보] DB가 최신 버전입니다 (DB: v{result}, 코드: v{SCHEMA_VERSION}) - 호환 모드")
+                                else:
+                                    print(f"[정보] DB가 구버전입니다 (DB: v{result}, 코드: v{SCHEMA_VERSION}) - 자동 마이그레이션 예정")
+                            else:
+                                print(f"[DEBUG] 스키마 버전 일치: v{result}")
                         except Exception as schema_e:
-                            test_engine.dispose()
-                            return {
-                                'valid': False,
-                                'error': f"DB 스키마 정보를 확인할 수 없습니다:\n{str(schema_e)}\n\nDB 파일: {db_file_path}"
-                            }
+                            # 스키마 버전 테이블이 없어도 허용 (마이그레이션에서 생성)
+                            print(f"[정보] 스키마 버전 확인 불가: {schema_e} - 마이그레이션 시 생성 예정")
                         
                         # 필수 테이블 확인
                         inspector = inspect(test_engine)

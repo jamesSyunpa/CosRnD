@@ -454,30 +454,53 @@ class DBManager:
     def _run_migrations(self):
         print("데이터베이스 스키마 확인 및 업데이트 시작...")
         inspector = inspect(self.engine)
+        
+        # 기존 DB의 모든 테이블 확인
+        existing_tables = set(inspector.get_table_names())
+        print(f"[정보] 기존 테이블: {', '.join(sorted(existing_tables)) if existing_tables else '없음'}")
+        
         with self.engine.connect() as connection:
             for table_name, table in Base.metadata.tables.items():
                 try:
+                    if table_name not in existing_tables:
+                        # 테이블이 없으면 전체 생성
+                        print(f"[정보] 테이블 '{table_name}' 생성 중...")
+                        table.create(self.engine)
+                        print(f"[완료] 테이블 '{table_name}' 생성 완료")
+                        continue
+                    
+                    # 테이블이 있으면 컬럼 비교
                     existing_columns = {c['name'] for c in inspector.get_columns(table_name)}
+                    
                     for column in table.c:
                         if column.name not in existing_columns:
-                            from sqlalchemy.schema import CreateColumn
-                            column.default = None
-                            # SQLite에서는 ALTER TABLE ... ADD COLUMN 구문이 필요
-                            col_def = str(CreateColumn(column).compile(self.engine))
-                            alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_def}"
-                            with connection.begin() as trans:
-                                connection.execute(text(alter_sql))
-                                print(f"테이블 '{table_name}'에 누락된 컬럼 '{column.name}' 추가 완료.")
+                            try:
+                                from sqlalchemy.schema import CreateColumn
+                                # 기본값 처리
+                                column.default = None
+                                
+                                # SQLite에서는 ALTER TABLE ... ADD COLUMN 구문 사용
+                                col_def = str(CreateColumn(column).compile(self.engine))
+                                # "CREATE TABLE ... (" 부분 제거하고 순수 컬럼 정의만 추출
+                                col_def = col_def.replace('CREATE TABLE ', '').replace(f'{table_name} (', '').rstrip(')')
+                                
+                                alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_def}"
+                                with connection.begin() as trans:
+                                    connection.execute(text(alter_sql))
+                                    print(f"[완료] 테이블 '{table_name}'에 컬럼 '{column.name}' 추가")
+                            except Exception as col_e:
+                                # 컬럼 추가 실패는 경고만 출력 (이미 있거나 호환 불가)
+                                print(f"[경고] 컬럼 '{table_name}.{column.name}' 추가 실패: {col_e}")
+                    
+                    # DB에만 있고 코드에 없는 컬럼 확인 (정보성)
+                    code_columns = {c.name for c in table.c}
+                    extra_columns = existing_columns - code_columns
+                    if extra_columns:
+                        print(f"[정보] 테이블 '{table_name}'의 추가 컬럼 (백업 DB용): {', '.join(sorted(extra_columns))}")
+                        
                 except Exception as e:
-                    if "no such table" in str(e).lower():
-                        print(f"테이블 '{table_name}'이(가) 아직 생성되지 않았습니다. create_all에서 생성됩니다.")
-                    else:
-                        print(f"테이블 '{table_name}' 스키마 업데이트 중 오류 발생: {e}")
-        # 누락된 테이블 생성 보장 (공유 DB 경로에서도 동작하도록)
-        try:
-            Base.metadata.create_all(self.engine)
-        except Exception as e:
-            print(f"[경고] create_all 수행 중 오류(무시): {e}")
+                    print(f"[오류] 테이블 '{table_name}' 스키마 업데이트 실패: {e}")
+        
         print("데이터베이스 스키마 확인 및 업데이트 완료.")
 
     def _check_and_run_migrations(self):
@@ -488,11 +511,21 @@ class DBManager:
                     result = connection.execute(text("SELECT version FROM _schema_version")).scalar_one_or_none()
                     db_version = result if result is not None else 0
 
-                    if db_version < SCHEMA_VERSION:
-                        print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 마이그레이션 시작.")
+                    if db_version != SCHEMA_VERSION:
+                        if db_version > SCHEMA_VERSION:
+                            print(f"[경고] DB 스키마 버전이 코드보다 최신입니다 (DB: v{db_version}, 코드: v{SCHEMA_VERSION})")
+                            print(f"[정보] 기존 데이터를 유지하며 호환 모드로 실행합니다.")
+                        else:
+                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 마이그레이션 시작.")
+                        
+                        # 버전과 관계없이 누락된 컬럼 추가 (기존 데이터 보존)
                         self._run_migrations()
-                        connection.execute(text("DELETE FROM _schema_version"))
-                        connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                        
+                        # 버전 업데이트 (낮은 버전만)
+                        if db_version < SCHEMA_VERSION:
+                            connection.execute(text("DELETE FROM _schema_version"))
+                            connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                            print(f"스키마 버전 업데이트: v{db_version} → v{SCHEMA_VERSION}")
             except Exception as e:
                 print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
 

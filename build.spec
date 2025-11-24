@@ -9,10 +9,51 @@ import customtkinter
 # 이 spec 파일이 프로젝트 루트에 있다고 가정합니다.
 project_root = os.path.dirname(os.path.abspath(sys.argv[0]))
 
+# --- 앱 버전 문자열 결정: VERSION 파일 > 환경변수(APP_VERSION) > 오늘날짜(YYYYMMDD) ---
+try:
+    version_str = None
+    version_file = os.path.join(project_root, 'VERSION')
+    if os.path.exists(version_file):
+        with open(version_file, 'r', encoding='utf-8') as vf:
+            version_str = vf.read().strip()
+    if not version_str:
+        version_str = os.environ.get('APP_VERSION')
+    if not version_str:
+        from datetime import datetime as _dt
+        version_str = _dt.now().strftime('%Y%m%d')
+except Exception:
+    from datetime import datetime as _dt
+    version_str = _dt.now().strftime('%Y%m%d')
+
 # --- 데이터 파일 수집 ---
+# Tcl/Tk 라이브러리 파일들을 먼저 포함 (중요!)
+import tkinter
+tk_path = os.path.dirname(tkinter.__file__)
+tcl_path = os.path.join(tk_path, 'tcl')
+tk_lib_path = os.path.join(tk_path, 'tk')
+
+datas = []
+
+# Tcl/Tk 라이브러리 파일 추가
+if os.path.exists(tcl_path):
+    datas += [(tcl_path, '_tcl_data')]
+    print(f"[SPEC] Tcl 라이브러리 추가: {tcl_path}")
+
+if os.path.exists(tk_lib_path):
+    datas += [(tk_lib_path, '_tk_data')]
+    print(f"[SPEC] Tk 라이브러리 추가: {tk_lib_path}")
+
+# Python DLLs 폴더의 tcl/tk DLL 파일들도 포함
+python_dlls = os.path.join(os.path.dirname(sys.executable), 'DLLs')
+for tcl_dll in ['tcl86t.dll', 'tk86t.dll', 'tcl86.dll', 'tk86.dll']:
+    dll_path = os.path.join(python_dlls, tcl_dll)
+    if os.path.exists(dll_path):
+        datas += [(dll_path, '.')]
+        print(f"[SPEC] Tcl/Tk DLL 추가: {tcl_dll}")
+
 # customtkinter 패키지의 모든 데이터 파일을 안전하게 수집합니다.
 # collect_data_files는 패키지 내부의 assets 등 필요한 리소스를 모두 반환합니다.
-datas = collect_data_files('customtkinter', include_py_files=False)
+datas += collect_data_files('customtkinter', include_py_files=False)
 
 # tkcalendar 패키지에서 필요한 리소스가 있는 경우 포함 (안전망)
 try:
@@ -112,7 +153,11 @@ hiddenimports = [
     'sqlalchemy.dialects.sqlite.base',
     # 암호화 및 보안
     'bcrypt',
-    '_bcrypt',
+    'cryptography',
+    'cryptography.fernet',
+    'cryptography.hazmat',
+    'cryptography.hazmat.primitives',
+    'cryptography.hazmat.backends',
     # 설정 관리
     'configparser',
     # Pillow 관련
@@ -223,8 +268,15 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[os.path.join(project_root, 'hooks')],
-    hooksconfig={},
+    hooksconfig={
+        # Tcl/Tk 데이터 파일 경로를 명시적으로 설정
+        'tk': {
+            'tcl_library': '_tcl_data',
+            'tk_library': '_tk_data'
+        }
+    },
     runtime_hooks=[
+        os.path.join(project_root, 'hooks', 'pyi_rth_tkinter.py'),  # Tcl/Tk 초기화 (가장 먼저)
         os.path.join(project_root, 'hooks', 'pyi_rth_sqlite.py'),
         os.path.join(project_root, 'hooks', 'pyi_rth_gui_excepthook.py'),
     ],
@@ -259,7 +311,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='RnD_Management_System',
+    name=f'CoRQD_{version_str}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
