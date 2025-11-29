@@ -4,6 +4,7 @@ from openpyxl import Workbook
 from tkinter import filedialog, messagebox
 from openpyxl.styles import Border, Side, Alignment, Font, PatternFill
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.utils import get_column_letter
 import configparser
 from datetime import datetime
 import os
@@ -174,7 +175,6 @@ def export_production_formulation_revised_to_excel(
     if file_path is None:
         if open_print_preview:
             # tempfile 대신 프로젝트 폴더의 data 디렉토리 사용
-            import time
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
             os.makedirs(temp_dir, exist_ok=True)
@@ -269,7 +269,6 @@ def export_production_formulation_revised_to_excel(
                 tw, th = drw.textbbox((0,0), txt, font=f_bold)[2:4]
                 drw.text((x0 + (col_w - tw)//2, (header_h - th)//2), txt, fill='#2C3E50', font=f_bold)
             # tempfile 대신 프로젝트 폴더 사용
-            import time
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
             os.makedirs(temp_dir, exist_ok=True)
@@ -277,15 +276,7 @@ def export_production_formulation_revised_to_excel(
             img.save(temp_img_path, 'PNG')
             return temp_img_path
 
-        # G/H 폭을 기준으로 이미지 너비 산정 (엑셀 폭 단위를 픽셀로 근사: *7)
-        gh_px = int((26 + 22) * 7)  # G=26, H=22 (fixed widths). 여백 없이 정확히 맞춤
-        ap_img_path = create_approval_image_v2(gh_px)
-        ap_img = XLImage(ap_img_path)
-        ap_img.anchor = 'G1'
-        ws.add_image(ap_img)
-        # 행 높이 보정(이미지를 수용)
-        ws.row_dimensions[1].height = 90
-        ws.row_dimensions[2].height = 0
+        # 결재 이미지는 컬럼 폭이 확정된 뒤 추가해야 정확히 맞출 수 있으므로 여기서는 생성 함수만 정의합니다.
 
         # 3) 기본정보 (ui.py 배치 준용)
         details = production_data.get('details', {})
@@ -543,6 +534,36 @@ def export_production_formulation_revised_to_excel(
         for col, w in fixed_widths.items():
             ws.column_dimensions[col].width = w
 
+    # 컬럼 폭 확정 이후 결재 이미지 처리: 기본은 페이지 머리글 '중앙'에 이미지로 삽입(Excel COM),
+    # COM 불가 시 워크시트에 직접 삽입(A1)으로 폴백.
+        ap_img_path = None
+        approval_img_width = None
+        use_com_header = False
+        try:
+            # COM 사용 가능 여부 확인
+            import win32com.client as _win32  # type: ignore
+            use_com_header = True
+        except Exception:
+            use_com_header = False
+        try:
+            # 전체 페이지 폭(A~I) 기준으로 결재 이미지를 생성해 헤더 중앙에 넣는다
+            total_width_px = 0
+            for col_idx in range(1, 10):  # A..I
+                col_letter = get_column_letter(col_idx)
+                col_w = ws.column_dimensions[col_letter].width or 8
+                total_width_px += col_w * 7
+            approval_img_width = int(total_width_px)
+            ap_img_path = create_approval_image_v2(approval_img_width)
+            if not use_com_header:
+                ap_img = XLImage(ap_img_path)
+                ap_img.anchor = "A1"
+                ws.add_image(ap_img)
+                # 상단 영역 높이 확보(이미지 높이 ≈ 140px)
+                ws.row_dimensions[1].height = 90
+                ws.row_dimensions[2].height = 50
+        except Exception:
+            pass
+
         # 9) 인쇄 설정 (세로 + 여백 축소) + 머리글/바닥글 + 타이틀 행 반복/인쇄 영역
         try:
             ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
@@ -573,7 +594,76 @@ def export_production_formulation_revised_to_excel(
         except Exception:
             pass
 
-        wb.save(file_path)
+        # 파일 저장 시도 (파일이 열려있으면 처리)
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                wb.save(file_path)
+                break
+            except PermissionError:
+                if attempt < max_attempts - 1:
+                    # 파일이 열려있음
+                    response = messagebox.askyesno(
+                        "파일 사용 중",
+                        f"파일이 다른 프로그램에서 사용 중입니다:\n{os.path.basename(file_path)}\n\n"
+                        "파일을 닫고 다시 시도하시겠습니까?",
+                        icon='warning'
+                    )
+                    if response:
+                        # 사용자가 예를 선택 - 잠시 대기 후 재시도
+                        time.sleep(1)
+                        continue
+                    else:
+                        # 사용자가 아니오 선택 - 저장 취소
+                        messagebox.showinfo("저장 취소", "파일 저장이 취소되었습니다.")
+                        return
+                else:
+                    # 마지막 시도에서도 실패
+                    messagebox.showerror(
+                        "저장 실패",
+                        f"파일을 저장할 수 없습니다.\n파일이 다른 프로그램에서 열려있는지 확인하세요."
+                    )
+                    return
+            except Exception as e:
+                messagebox.showerror("저장 오류", f"파일 저장 중 오류 발생:\n{e}")
+                return
+
+        # 저장 후, COM 헤더 이미지 삽입 시도 (머리글 중앙)
+        if use_com_header and ap_img_path and os.path.exists(ap_img_path):
+            try:
+                import win32com.client as win32  # type: ignore
+                excel = win32.Dispatch("Excel.Application")
+                excel.Visible = bool(open_print_preview)
+                wb_com = excel.Workbooks.Open(os.path.abspath(file_path))
+                ws_com = wb_com.ActiveSheet
+                # 헤더 중앙 그림 지정
+                ws_com.PageSetup.CenterHeader = "&G"
+                ws_com.PageSetup.CenterHeaderPicture.Filename = os.path.abspath(ap_img_path)
+                # 폭을 대략 px->pt(0.75배)로 변환하여 지정
+                try:
+                    if approval_img_width:
+                        ws_com.PageSetup.CenterHeaderPicture.Width = int(approval_img_width * 0.75)
+                except Exception:
+                    pass
+                # 저장(미리보기여도 반영을 위해 저장)
+                wb_com.Save()
+                # 미리보기 요청 시 프린트 미리보기 실행
+                if open_print_preview:
+                    try:
+                        ws_com.PrintPreview()
+                    except Exception:
+                        pass
+                wb_com.Close(SaveChanges=False)
+                excel.Quit()
+            except Exception:
+                # 실패 시 워크시트에 직접 삽입으로 폴백 (이미 저장은 완료되었으므로, 다음 번 내보내기에서 반영됨)
+                pass
+            finally:
+                try:
+                    if os.path.exists(ap_img_path):
+                        os.remove(ap_img_path)
+                except Exception:
+                    pass
 
         # 미리보기/출력 처리
         if open_print_preview:
@@ -690,7 +780,6 @@ def export_production_formulation_original_to_excel(
             sy = header_h + (height - header_h)//2 + 15
             draw.text((xr, sy), "(인)", fill='#95A5A6', font=font_small, anchor='rm')
         # tempfile 대신 프로젝트 폴더 사용
-        import time
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
         os.makedirs(temp_dir, exist_ok=True)
@@ -709,19 +798,7 @@ def export_production_formulation_original_to_excel(
         tc.value = "생산처방서\nProduction Formulation Sheet"
         tc.font = title_font; tc.alignment = center
         tc.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-        try:
-            g_w = ws.column_dimensions['G'].width or 26.25
-            h_w = ws.column_dimensions['H'].width or 17.25
-            gh_px = int((float(g_w) + float(h_w)) * 7 + 4)
-        except Exception:
-            gh_px = 300
-        approval_img_path = create_approval_image(canvas_width=gh_px, scale=4/3)
-        img = XLImage(approval_img_path)
-        img.anchor = 'G1'
-        ws.add_image(img)
-        ws.row_dimensions[1].height = 70
-        ws.row_dimensions[2].height = 0
-        ws.row_dimensions[3].height = 10
+        # 결재 이미지는 컬럼 너비 산정 후 추가(오른쪽을 I열 경계에 맞춤)
 
         # 기본정보
         details = production_data.get('details', {})
@@ -906,6 +983,31 @@ def export_production_formulation_original_to_excel(
                 max_w = min(max_w, 20)
             ws.column_dimensions[col_letter].width = max_w
 
+        # 결재 이미지: 기본은 페이지 머리글 오른쪽(Excel COM), COM 불가 시 워크시트 G1 폴백
+        approval_img_path = None
+        full_px = None
+        use_com_header = False
+        try:
+            import win32com.client as _win32  # type: ignore
+            use_com_header = True
+        except Exception:
+            use_com_header = False
+        try:
+            g_w = float(ws.column_dimensions['G'].width or 12)
+            h_w = float(ws.column_dimensions['H'].width or 26)
+            i_w = float(ws.column_dimensions['I'].width or 17.25)
+            full_px = int((g_w + h_w + i_w) * 7)
+            approval_img_path = create_approval_image(canvas_width=full_px, scale=4/3)
+            if not use_com_header:
+                img = XLImage(approval_img_path)
+                img.anchor = 'G1'
+                ws.add_image(img)
+                ws.row_dimensions[1].height = 70
+                ws.row_dimensions[2].height = 0
+                ws.row_dimensions[3].height = 10
+        except Exception:
+            pass
+
         # 인쇄 설정
         try:
             ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
@@ -921,10 +1023,38 @@ def export_production_formulation_original_to_excel(
         # 요청에 따라 엑셀 내보내기 시 추가 시트(제조공정, 원료 환산)는 생성하지 않습니다.
 
         wb.save(file_path)
-        try:
-            if os.path.exists(approval_img_path): os.remove(approval_img_path)
-        except Exception:
-            pass
+
+        # 저장 후, COM 헤더 이미지 삽입 시도
+        if use_com_header and approval_img_path and os.path.exists(approval_img_path):
+            try:
+                import win32com.client as win32  # type: ignore
+                excel = win32.Dispatch("Excel.Application")
+                excel.Visible = bool(open_print_preview)
+                wb_com = excel.Workbooks.Open(os.path.abspath(file_path))
+                ws_com = wb_com.ActiveSheet
+                ws_com.PageSetup.RightHeader = "&G"
+                ws_com.PageSetup.RightHeaderPicture.Filename = os.path.abspath(approval_img_path)
+                try:
+                    if full_px:
+                        ws_com.PageSetup.RightHeaderPicture.Width = int(full_px * 0.75)
+                except Exception:
+                    pass
+                wb_com.Save()
+                if open_print_preview:
+                    try:
+                        ws_com.PrintPreview()
+                    except Exception:
+                        pass
+                wb_com.Close(SaveChanges=False)
+                excel.Quit()
+            except Exception:
+                pass
+            finally:
+                try:
+                    if os.path.exists(approval_img_path):
+                        os.remove(approval_img_path)
+                except Exception:
+                    pass
 
         if open_print_preview:
             try:
