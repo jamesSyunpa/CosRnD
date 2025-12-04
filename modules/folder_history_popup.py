@@ -23,19 +23,32 @@ class FolderHistoryPopup(ctk.CTkToplevel):
         self.folder_name = folder_name
 
         self.title(f"'{folder_name}' 전체 이력")
-        self.geometry("800x700")
-        self.transient(master)
+        self.geometry("800x700")  # 메인 창보다 작음
+        self.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
+        self.minsize(600, 500)  # 최소 크기만 제한
+        # self.transient(master)  # 최대화 버튼을 활성화하기 위해 transient 제거
         self.grab_set()
+        self.after(100, lambda: print(f"[WINDOW SIZE] '{folder_name}' 전체 이력 | geometry: {self.winfo_width()}x{self.winfo_height()} | requested: 800x700"))
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1) # 스크롤 프레임을 위한 행
 
         self.setup_ui()
         self.load_history()
-        try:
-            center_window_on_mouse_display(self)
-        except Exception:
-            pass
+        
+        # 메인 창 중앙에 배치
+        self.update_idletasks()
+        parent = master
+        if parent:
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            self.geometry(f"+{x}+{y}")
 
     def setup_ui(self):
         """UI 기본 구조를 설정합니다."""
@@ -90,6 +103,11 @@ class FolderHistoryPopup(ctk.CTkToplevel):
                 )
 
             formulations = query.order_by(Formulation.created_at).all()
+            
+            # 디버깅: 조회된 처방 개수 출력
+            print(f"[전체이력조회] 폴더 '{self.folder_name}': {len(formulations)}개 처방 조회됨")
+            for idx, f in enumerate(formulations, 1):
+                print(f"  [{idx}] LAB NO: {f.lab_no}, 차수: {f.revision}, 생성일: {f.created_at}")
 
             if not formulations:
                 message = "검색 결과가 없습니다." if search_term else "저장된 이력이 없습니다."
@@ -118,36 +136,62 @@ class FolderHistoryPopup(ctk.CTkToplevel):
                 # 각 항목을 표시할 때 사용할 행 번호
                 row_counter = 2
 
-                # --- 변경된 항목만 계산하여 표시 ---
+                # --- 변경된 항목만 상세 표시 ---
                 lab_key = form.lab_no or f"__{form.experiment_name}__"
                 prev = prev_by_lab.get(lab_key)
+                
+                # 변경 이력 계산
                 diffs = self._compute_formulation_diff(prev, form)
-
+                
                 if prev is None:
-                    # 최초 기록: 메타만 보여주고 '초기 등록' 표시
-                    init_label = ctk.CTkLabel(entry_frame, text="[초기 등록]", text_color="gray")
-                    init_label.grid(row=row_counter, column=0, padx=10, pady=(0, 8), sticky="w")
+                    # 최초 기록 - 전체 정보 표시 (이전 버전 없음)
+                    status_label = ctk.CTkLabel(entry_frame, text="[초기 등록]", text_color="green", font=ctk.CTkFont(weight="bold"))
+                    status_label.grid(row=row_counter, column=0, padx=10, pady=(0, 8), sticky="w")
                     row_counter += 1
+                    
+                    # 초기 등록 시 전체 정보 표시 (이전 버전 없음)
+                    items_text = self._format_formulation_items(form, prev_form=None)
+                    if items_text:
+                        items_textbox = ctk.CTkTextbox(entry_frame, height=120, wrap="word", fg_color="#2b2b2b")
+                        items_textbox.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
+                        items_textbox.insert("1.0", items_text)
+                        items_textbox.configure(state="disabled")
+                        row_counter += 1
+                    
                     shown_count += 1
                 else:
+                    # 변경 이력이 있는 경우만 상세 표시
                     if diffs:
-                        diff_label = ctk.CTkLabel(entry_frame, text="[변경 항목]", font=ctk.CTkFont(weight="bold"), anchor="w")
-                        diff_label.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=(5, 2), sticky="w")
+                        status_label = ctk.CTkLabel(entry_frame, text="[변경된 항목]", text_color="orange", font=ctk.CTkFont(weight="bold"))
+                        status_label.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=(5, 2), sticky="w")
                         row_counter += 1
-
-                        # 변경 항목만 리스트로 출력
+                        
                         for line in diffs:
-                            ctk.CTkLabel(entry_frame, text=f"- {line}", anchor="w", justify="left").grid(
+                            ctk.CTkLabel(entry_frame, text=f"  • {line}", anchor="w", justify="left").grid(
                                 row=row_counter, column=0, columnspan=2, padx=16, pady=2, sticky="w"
                             )
                             row_counter += 1
+                        
+                        # 변경된 처방의 전체 정보 표시 (이전 버전과 비교)
+                        all_info_label = ctk.CTkLabel(entry_frame, text="[전체 정보 (함량 변경 내역 포함)]", font=ctk.CTkFont(weight="bold"), anchor="w")
+                        all_info_label.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=(10, 2), sticky="w")
+                        row_counter += 1
+                        
+                        items_text = self._format_formulation_items(form, prev_form=prev)
+                        if items_text:
+                            items_textbox = ctk.CTkTextbox(entry_frame, height=120, wrap="word", fg_color="#2b2b2b")
+                            items_textbox.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
+                            items_textbox.insert("1.0", items_text)
+                            items_textbox.configure(state="disabled")
+                            row_counter += 1
+                        
                         shown_count += 1
                     else:
-                        # 변경 없음이면 이 항목은 최소한의 헤더만 남기고 안내 표시
-                        ctk.CTkLabel(entry_frame, text="(변경 없음)", text_color="gray").grid(
-                            row=row_counter, column=0, padx=10, pady=(0, 8), sticky="w"
-                        )
+                        # 변경 없음 - 헤더만 표시하고 상세 정보는 숨김
+                        status_label = ctk.CTkLabel(entry_frame, text="[변경 없음]", text_color="gray")
+                        status_label.grid(row=row_counter, column=0, padx=10, pady=(0, 8), sticky="w")
                         row_counter += 1
+                        # shown_count는 증가시키지 않음 (변경 없는 항목은 카운트 제외)
 
                 # --- 품평결과 및 특이사항 ---
                 if form.experiment_comment:
@@ -174,6 +218,65 @@ class FolderHistoryPopup(ctk.CTkToplevel):
         self.search_entry.delete(0, "end")
         self.load_history()
 
+    # ---------------- 내부 유틸: 처방 아이템 포맷팅 ----------------
+    def _format_formulation_items(self, form, prev_form=None):
+        """처방의 모든 아이템을 텍스트로 포맷팅합니다. 이전 버전과 비교하여 함량 차이를 표시합니다."""
+        if not form.items:
+            return "처방 아이템 없음"
+        
+        lines = []
+        lines.append(f"담당자: {form.manager_name or '-'}")
+        
+        # 실험일 포맷팅 (날짜 객체 또는 문자열 처리)
+        exp_date_str = '-'
+        if form.experiment_date:
+            if isinstance(form.experiment_date, str):
+                exp_date_str = form.experiment_date
+            elif hasattr(form.experiment_date, 'strftime'):
+                exp_date_str = form.experiment_date.strftime('%Y-%m-%d')
+        lines.append(f"실험일: {exp_date_str}")
+        
+        lines.append(f"pH: 초기 {form.experiment_ph_initial or '-'} / 익일 {form.experiment_ph_next_day or '-'}")
+        lines.append(f"점도: 초기 {form.experiment_viscosity_initial or '-'} / 익일 {form.experiment_viscosity_next_day or '-'}")
+        lines.append(f"Pin: {form.experiment_machine or '-'}")
+        lines.append(f"샘플발송: {form.sample_sent_count or 0}회")
+        lines.append("")
+        lines.append("=== 처방 아이템 ===")
+        
+        # 이전 버전의 아이템을 딕셔너리로 변환 (material_code를 키로)
+        prev_items = {}
+        if prev_form and prev_form.items:
+            for item in prev_form.items:
+                if item.material_code and item.material_code not in ["---", "-", "--"]:
+                    prev_items[item.material_code] = float(item.ratio) if item.ratio else 0.0
+        
+        # 현재 버전의 아이템 표시
+        for item in sorted(form.items, key=lambda x: x.order if x.order is not None else 999999):
+            if item.material_code and item.material_code not in ["---", "-", "--"]:
+                current_ratio = float(item.ratio) if item.ratio else 0.0
+                ratio_str = f"{current_ratio:.4f}%"
+                
+                # 이전 버전과 비교하여 차이 계산
+                if prev_form and item.material_code in prev_items:
+                    prev_ratio = prev_items[item.material_code]
+                    diff = current_ratio - prev_ratio
+                    if abs(diff) > 0.0001:  # 차이가 있는 경우
+                        sign = "+" if diff > 0 else ""
+                        lines.append(f"  [{item.order or '-'}] {item.material_code} - {item.material_name or ''}")
+                        lines.append(f"      함량: {ratio_str} (이전: {prev_ratio:.4f}%, 차이: {sign}{diff:.4f}%)")
+                    else:
+                        lines.append(f"  [{item.order or '-'}] {item.material_code} - {item.material_name or ''}")
+                        lines.append(f"      함량: {ratio_str}")
+                else:
+                    # 새로 추가된 항목이거나 이전 버전이 없는 경우
+                    lines.append(f"  [{item.order or '-'}] {item.material_code} - {item.material_name or ''}")
+                    if prev_form:
+                        lines.append(f"      함량: {ratio_str} (신규 추가)")
+                    else:
+                        lines.append(f"      함량: {ratio_str}")
+        
+        return "\n".join(lines)
+    
     # ---------------- 내부 유틸: 변경 항목 비교 ----------------
     def _compute_formulation_diff(self, prev, curr):
         """두 Formulation을 비교해 변경된 항목만 텍스트로 반환합니다."""

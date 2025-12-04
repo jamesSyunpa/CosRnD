@@ -12,6 +12,85 @@ import subprocess
 import time
 from PIL import Image
 
+# ==================== 단일 인스턴스 실행 체크 ====================
+def check_single_instance():
+    """프로그램이 이미 실행 중인지 확인하고, 중복 실행을 방지합니다."""
+    try:
+        if sys.platform.startswith('win'):
+            # Windows: Named Mutex 사용
+            import win32event
+            import win32api
+            import winerror
+            
+            mutex_name = "Global\\RnD_Platform_Cosmetic_Management_System_Mutex"
+            try:
+                # 뮤텍스 생성 시도
+                mutex = win32event.CreateMutex(None, False, mutex_name)
+                last_error = win32api.GetLastError()
+                
+                if last_error == winerror.ERROR_ALREADY_EXISTS:
+                    # 이미 실행 중
+                    import tkinter as tk
+                    root = tk.Tk()
+                    root.withdraw()
+                    messagebox.showerror(
+                        "프로그램 실행 오류",
+                        "프로그램이 이미 실행 중입니다.\n"
+                        "작업 관리자에서 기존 프로세스를 종료하거나,\n"
+                        "실행 중인 프로그램 창을 확인해주세요.",
+                        parent=root
+                    )
+                    root.destroy()
+                    return False
+                
+                # 뮤텍스를 전역 변수로 저장 (프로그램 종료 시까지 유지)
+                globals()['_app_mutex'] = mutex
+                print("[단일 인스턴스] 프로그램 실행 허용")
+                return True
+                
+            except Exception as e:
+                print(f"[단일 인스턴스] Windows 뮤텍스 생성 실패: {e}")
+                # 뮤텍스 생성 실패 시에도 프로그램은 계속 실행
+                return True
+        else:
+            # 다른 OS: 락 파일 사용
+            import fcntl
+            lock_file_path = os.path.join(
+                os.path.expanduser('~'),
+                '.rnd_platform_lock'
+            )
+            
+            try:
+                lock_file = open(lock_file_path, 'w')
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                
+                # 락 파일을 전역 변수로 저장 (프로그램 종료 시까지 유지)
+                globals()['_app_lock_file'] = lock_file
+                print("[단일 인스턴스] 프로그램 실행 허용")
+                return True
+                
+            except IOError:
+                # 이미 실행 중
+                import tkinter as tk
+                root = tk.Tk()
+                root.withdraw()
+                messagebox.showerror(
+                    "프로그램 실행 오류",
+                    "프로그램이 이미 실행 중입니다.\n"
+                    "실행 중인 프로그램 창을 확인해주세요.",
+                    parent=root
+                )
+                root.destroy()
+                return False
+            except Exception as e:
+                print(f"[단일 인스턴스] 락 파일 생성 실패: {e}")
+                return True
+                
+    except Exception as e:
+        print(f"[단일 인스턴스] 체크 중 오류 발생: {e}")
+        # 오류 발생 시에도 프로그램은 계속 실행
+        return True
+
 # ==================== PyInstaller 경로 처리 ====================
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -2386,6 +2465,11 @@ def check_sqlite_availability():
         return False
 
 if __name__ == "__main__":
+    # 단일 인스턴스 체크 (프로그램 중복 실행 방지)
+    if not check_single_instance():
+        print("[STARTUP] 프로그램이 이미 실행 중입니다. 종료합니다.")
+        sys.exit(0)
+    
     # PyInstaller 임시 폴더 관련 전역 오류 처리
     try:
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):

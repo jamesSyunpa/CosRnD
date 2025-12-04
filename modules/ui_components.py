@@ -167,7 +167,8 @@ class AddMaterialDialog(ctk.CTkToplevel):
         self.title(self.texts['add_material_title'])
         self.geometry("600x500")
         self.transient(master)
-        self.grab_set()
+        # grab_set() 제거 - 원료 추가 창이 떠 있어도 처방 내용 수정 가능하도록
+        # self.grab_set()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)

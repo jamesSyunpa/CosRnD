@@ -20,9 +20,12 @@ class FormulationComparisonPopup(ctk.CTkToplevel):
     def __init__(self, master, formulation_id1, formulation_id2):
         super().__init__(master)
         self.title("처방 비교")
-        self.geometry("1400x800")
-        self.transient(master)
+        self.geometry("1200x750")  # 메인 창보다 작게 조정
+        self.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
+        self.minsize(800, 600)  # 최소 크기만 제한
+        # self.transient(master)  # 최대화 버튼을 활성화하기 위해 transient 제거
         self.grab_set()
+        self.after(100, lambda: print(f"[WINDOW SIZE] 처방 비교 | geometry: {self.winfo_width()}x{self.winfo_height()} | requested: 1200x750"))
 
         self.reason_entries = {} # 변경 사유 입력을 위한 Entry 위젯 저장
         self.formulation1 = None
@@ -30,10 +33,20 @@ class FormulationComparisonPopup(ctk.CTkToplevel):
 
         self.setup_ui()
         self.load_and_compare(formulation_id1, formulation_id2)
-        try:
-            center_window_on_mouse_display(self)
-        except Exception:
-            pass
+        
+        # 메인 창 중앙에 배치
+        self.update_idletasks()
+        parent = master
+        if parent:
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            self.geometry(f"+{x}+{y}")
 
     def setup_ui(self):
         """UI 기본 구조를 설정합니다."""

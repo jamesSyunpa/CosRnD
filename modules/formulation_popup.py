@@ -229,16 +229,24 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.data_loading = False  # 데이터 로딩 중 플래그
 
         self.title(self.texts['formulation_popup_title'])
-        # 창 크기: 기존 대비 20% 더 축소
-        self.geometry("1120x720")
-        self.transient(master)
-        self.resizable(True, True) # 크기 조절 활성화
-        # 최소 크기도 동일 비율로 축소
-        self.minsize(800, 560)
+        # 창 크기: 메인 창보다 작게 조정
+        self.geometry("1200x750")
+        # self.transient(master)  # 최대화 버튼을 활성화하기 위해 transient 제거
+        self.resizable(True, True) # 크기 조절 및 최대화 버튼 활성화
+        # 최소 크기만 제한 (최대화 가능하도록 maxsize 제거)
+        self.minsize(800, 600)
         self.grab_set()
+        
+        # 창 크기 정보 출력
+        self.after(100, lambda: print(f"[WINDOW SIZE] {self.title()} | geometry: {self.winfo_width()}x{self.winfo_height()} | requested: 1200x750"))
 
         # UI 구성
         self.setup_ui()
+        
+        # UI 생성 후 창 크기 강제 설정
+        self.update_idletasks()
+        self.geometry("1200x750")
+        self.update()
         
         # 데이터 로딩 (UI 구성 완료 후 지연 실행)
         if formulation_id:
@@ -249,11 +257,32 @@ class FormulationEditPopup(ctk.CTkToplevel):
             
         # 주기적 데이터 새로고침 시작 (5분마다)
         self.start_refresh_timer()
-        # 창 중앙 배치
+        # 창 중앙 배치 (메인 창 기준)
         try:
-            center_window_on_mouse_display(self)
+            self.center_on_parent()
         except Exception:
             pass
+    
+    def center_on_parent(self):
+        """팝업 창을 부모(메인) 창의 중앙에 배치합니다."""
+        self.update_idletasks()
+        parent = self.master
+        if parent:
+            # 부모 창의 화면상 절대 위치와 크기
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            
+            # 현재 창의 크기
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            
+            # 부모 창 중앙 계산
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            
+            self.geometry(f"+{x}+{y}")
 
     def setup_ui(self):
         """팝업 창의 UI를 구성합니다."""
@@ -492,7 +521,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.formulation_item_tree.heading("ratio", text=formulation_item_cols['ratio']); self.formulation_item_tree.column("ratio", width=80, anchor="e")
         self.formulation_item_tree.heading("amount", text=formulation_item_cols['amount']); self.formulation_item_tree.column("amount", width=80, anchor="e")
         self.formulation_item_tree.grid(row=1, column=0, padx=10, pady=(0, 5), sticky="nsew")
-        self.formulation_item_tree.bind("<Double-1>", self.edit_item_ratio)
+        self.formulation_item_tree.bind("<Double-1>", self.on_treeview_double_click)
         self.formulation_item_tree.bind("<Up>", self.move_item_up)
         self.formulation_item_tree.bind("<Down>", self.move_item_down)
         self.formulation_item_tree.bind("<Control-Up>", self.move_item_up)
@@ -1186,6 +1215,10 @@ class FormulationEditPopup(ctk.CTkToplevel):
                 form.items.append(new_item)
 
             session.commit()
+            
+            # 디버깅: 저장된 처방 정보 출력
+            print(f"[처방 저장] 실험품명: {form.experiment_name}, LAB NO: {form.lab_no}, 차수: {form.revision}, ID: {form.id}, 생성일: {form.created_at}")
+            
             messagebox.showinfo(self.texts['success'], self.texts['formulation_saved_success'], parent=self)
             
             self.on_save_callback() # 부모 창의 목록 새로고침 콜백 호출
@@ -1264,6 +1297,116 @@ class FormulationEditPopup(ctk.CTkToplevel):
         if not self.formulation_item_tree.get_children():
             self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
+    def on_treeview_double_click(self, event):
+        """Treeview 더블클릭 - Phase 또는 함량 셀 편집"""
+        if self.edit_entry:
+            self.edit_entry.destroy()
+        
+        region = self.formulation_item_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        
+        column = self.formulation_item_tree.identify_column(event.x)
+        selected_item = self.formulation_item_tree.focus()
+        
+        if not selected_item:
+            return
+        
+        # Phase 컬럼 (#1) 편집
+        if column == "#1":
+            self.start_phase_editing(selected_item, column)
+        # 함량 컬럼 (#4) 편집
+        elif column == "#4":
+            self.start_ratio_editing(selected_item, column)
+    
+    def start_phase_editing(self, selected_item, column_id):
+        """Phase 셀 편집 시작"""
+        if not selected_item:
+            return
+        
+        item_values = self.formulation_item_tree.item(selected_item, "values")
+        if item_values and item_values[1] == "---":  # 구분선은 편집 불가
+            return
+        
+        if self.edit_entry:
+            self.edit_entry.destroy()
+        
+        x, y, width, height = self.formulation_item_tree.bbox(selected_item, column_id)
+        current_value = self.formulation_item_tree.item(selected_item, "values")[0]
+        
+        self.edit_entry = ctk.CTkEntry(self.formulation_item_tree, width=width, height=height, justify='center')
+        self.edit_entry.place(x=x, y=y)
+        self.edit_entry.insert(0, current_value)
+        self.edit_entry.select_range(0, 'end')
+        self.edit_entry.focus_set()
+        self.edit_entry.bind("<Return>", lambda e: self.on_phase_edit_commit(selected_item))
+        self.edit_entry.bind("<FocusOut>", lambda e: self.on_phase_edit_commit(selected_item))
+    
+    def on_phase_edit_commit(self, item_id):
+        """Phase 편집 완료 - 값 저장 및 재정렬"""
+        if not self.edit_entry:
+            return
+        
+        try:
+            new_phase = self.edit_entry.get().strip()
+            current_values = list(self.formulation_item_tree.item(item_id, "values"))
+            old_phase = current_values[0]
+            
+            # Phase 값이 변경되었을 때만 처리
+            if new_phase != old_phase:
+                current_values[0] = new_phase
+                self.formulation_item_tree.item(item_id, values=tuple(current_values))
+                
+                # Phase가 숫자인 경우 자동 재정렬 트리거
+                try:
+                    new_phase_num = int(new_phase) if new_phase else 0
+                    # 다른 Phase들 확인 및 재정렬
+                    self.reorder_phases_on_insert(new_phase_num)
+                except ValueError:
+                    # 숫자가 아닌 Phase는 재정렬 안 함
+                    pass
+        except Exception as e:
+            print(f"Phase 편집 오류: {e}")
+        finally:
+            self.edit_entry.destroy()
+            self.edit_entry = None
+    
+    def reorder_phases_on_insert(self, inserted_phase):
+        """Phase 중간 삽입 시 이후 Phase들을 자동으로 밀어내기"""
+        all_items = []
+        
+        # 모든 아이템 정보 수집
+        for item_id in self.formulation_item_tree.get_children():
+            values = list(self.formulation_item_tree.item(item_id, "values"))
+            tags = self.formulation_item_tree.item(item_id, "tags")
+            all_items.append((item_id, values, tags))
+        
+        # Phase 재정렬
+        phase_map = {}  # {old_phase: new_phase}
+        for item_id, values, tags in all_items:
+            if values[1] == "---":  # 구분선은 스킵
+                continue
+            
+            try:
+                current_phase_str = values[0]
+                if not current_phase_str:
+                    continue
+                
+                current_phase = int(current_phase_str)
+                
+                # 삽입된 Phase보다 크거나 같은 Phase는 +1
+                if current_phase >= inserted_phase and current_phase != inserted_phase:
+                    new_phase = current_phase + 1
+                    phase_map[current_phase] = new_phase
+                    values[0] = str(new_phase)
+                    self.formulation_item_tree.item(item_id, values=tuple(values))
+            except (ValueError, TypeError):
+                # 숫자가 아닌 Phase는 건너뜀
+                continue
+        
+        if phase_map:
+            print(f"Phase 자동 재정렬: Phase {inserted_phase} 삽입, {phase_map} 변경")
+    
     def edit_item_ratio(self, event):
         """Treeview의 '함량' 셀을 더블클릭하여 수정합니다."""
         if self.edit_entry: self.edit_entry.destroy()
@@ -1300,8 +1443,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
             new_ratio_dec = to_decimal(self.edit_entry.get())
             current_values = list(self.formulation_item_tree.item(item_id, "values"))
             current_values[3] = decimal_to_str_full(new_ratio_dec)
-            # amount 재계산 (총량을 Decimal로)
-            current_values[4] = self.calculate_single_amount(new_ratio_dec)
+            # amount는 재계산하지 않고 그대로 유지
+            # current_values[4] = self.calculate_single_amount(new_ratio_dec)
             self.formulation_item_tree.item(item_id, values=tuple(current_values))
         except (InvalidOperation, ValueError, TypeError):
             pass
@@ -1335,7 +1478,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
         current_values = list(self.formulation_item_tree.item(selected_item_id, "values"))
         current_values[3] = f"{new_ratio:.4f}"
-        current_values[4] = self.calculate_single_amount(new_ratio)
+        # amount는 재계산하지 않고 그대로 유지
+        # current_values[4] = self.calculate_single_amount(new_ratio)
         self.formulation_item_tree.item(selected_item_id, values=tuple(current_values))
         self.update_formulation_summary()
 
