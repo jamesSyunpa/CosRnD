@@ -152,7 +152,7 @@ class FolderHistoryPopup(ctk.CTkToplevel):
                     # 초기 등록 시 전체 정보 표시 (이전 버전 없음)
                     items_text = self._format_formulation_items(form, prev_form=None)
                     if items_text:
-                        items_textbox = ctk.CTkTextbox(entry_frame, height=120, wrap="word", fg_color="#2b2b2b")
+                        items_textbox = ctk.CTkTextbox(entry_frame, height=120, wrap="word", fg_color=("gray90", "gray25"), text_color=("gray10", "gray90"))
                         items_textbox.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
                         items_textbox.insert("1.0", items_text)
                         items_textbox.configure(state="disabled")
@@ -179,7 +179,7 @@ class FolderHistoryPopup(ctk.CTkToplevel):
                         
                         items_text = self._format_formulation_items(form, prev_form=prev)
                         if items_text:
-                            items_textbox = ctk.CTkTextbox(entry_frame, height=120, wrap="word", fg_color="#2b2b2b")
+                            items_textbox = ctk.CTkTextbox(entry_frame, height=120, wrap="word", fg_color=("gray90", "gray25"), text_color=("gray10", "gray90"))
                             items_textbox.grid(row=row_counter, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
                             items_textbox.insert("1.0", items_text)
                             items_textbox.configure(state="disabled")

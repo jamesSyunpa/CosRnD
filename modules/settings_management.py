@@ -700,6 +700,14 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 f"설정 저장 중 오류가 발생했습니다:\n{str(e)}", 
                 f"Excel 경로: {new_excel_path}"
             )
+    
+    def save_excel_path_only_wrapper(self):
+        """엑셀 경로만 저장하는 래퍼 메서드"""
+        new_excel_path = self.excel_path_entry.get().strip()
+        if not new_excel_path:
+            messagebox.showwarning("경고", "엑셀 저장 경로를 입력해주세요.", parent=self)
+            return
+        self._save_excel_path_only(new_excel_path)
 
     def _save_config(self, section, option, value):
         config = configparser.ConfigParser(interpolation=None)
