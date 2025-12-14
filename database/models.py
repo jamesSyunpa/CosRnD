@@ -87,10 +87,6 @@ class User(Base):
         # 정책 변경: RQD도 백업 권한 포함
         return bool(self.is_admin) or self.role in ['MSAD', 'RQD']
     
-    def can_delete_formulation(self):
-        """처방 삭제 권한 - 연구원 이상(RD, RQ, RQD, MSAD)"""
-        return bool(self.is_admin) or self.role in ['RD', 'RQ', 'RQD', 'MSAD']
-    
 class Client(Base):
     __tablename__ = 'clients'
     
@@ -205,10 +201,6 @@ class Formulation(Base):
 
     sample_sent_count = Column(Integer, default=0) # 샘플 발송 횟수
     sample_delivery_date = Column(Date) # 샘플 발송일
-    
-    # 삭제 플래그 (소프트 삭제)
-    is_deleted = Column(Boolean, default=False)
-    
     # 구성 원료 관계
     # cascade="all, delete-orphan": Formulation이 삭제될 때 관련된 모든 FormulationItem도 함께 삭제되도록 설정합니다.
     # passive_deletes=True: 데이터베이스의 ON DELETE CASCADE 기능을 사용하도록 SQLAlchemy에 지시합니다.

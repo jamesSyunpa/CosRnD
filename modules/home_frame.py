@@ -30,7 +30,7 @@ class HomeFrame(ctk.CTkFrame):
         self.recent_actions_frame.grid(row=0, column=0, sticky="new", padx=10, pady=10)
         self.recent_actions_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(self.recent_actions_frame, text="최근 활동", font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(self.recent_actions_frame, text="최근 활동", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", pady=(0, 10))
         
         self.cards_frame = ctk.CTkFrame(self.recent_actions_frame, fg_color="transparent")
         self.cards_frame.pack(fill="x")
@@ -48,9 +48,9 @@ class HomeFrame(ctk.CTkFrame):
         notice_frame.grid_rowconfigure(1, weight=1)
         notice_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(notice_frame, text="공지사항 / 업데이트", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, padx=15, pady=10, sticky="w")
+        ctk.CTkLabel(notice_frame, text="공지사항 / 업데이트", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, padx=15, pady=10, sticky="w")
         
-        self.notice_textbox = ctk.CTkTextbox(notice_frame, wrap="word", font=ctk.CTkFont(family="Malgun Gothic", size=13))
+        self.notice_textbox = ctk.CTkTextbox(notice_frame, wrap="word", font=ctk.CTkFont(family="Malgun Gothic", size=10))
         self.notice_textbox.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
         self.notice_textbox.insert("1.0", "시스템 공지사항 또는 업데이트 내역이 여기에 표시됩니다.\n\n"
                                           "v1.0.0 (2024-07-30)\n"
@@ -64,7 +64,7 @@ class HomeFrame(ctk.CTkFrame):
         changes_frame.grid_rowconfigure(1, weight=1)
         changes_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(changes_frame, text="최근 성분 변경 이력", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, padx=15, pady=10, sticky="w")
+        ctk.CTkLabel(changes_frame, text="최근 성분 변경 이력", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, padx=15, pady=10, sticky="w")
 
         # 변경 이력 리스트 컨테이너 (행 단위로 2단 색상 적용)
         self.changes_panel = ctk.CTkFrame(changes_frame, fg_color="transparent")
@@ -80,7 +80,7 @@ class HomeFrame(ctk.CTkFrame):
             widget.destroy()
 
         if not self.recent_actions:
-            ctk.CTkLabel(self.cards_frame, text="최근 활동이 없습니다.", font=ctk.CTkFont(size=14), text_color="gray").pack(pady=20)
+            ctk.CTkLabel(self.cards_frame, text="최근 활동이 없습니다.", font=ctk.CTkFont(size=11), text_color="gray").pack(pady=20)
             return
 
         # [수정] pack() 대신 grid()를 사용하여 5열 레이아웃으로 꽉 채워 표시
@@ -97,11 +97,11 @@ class HomeFrame(ctk.CTkFrame):
         card = ctk.CTkFrame(master, corner_radius=15, cursor="hand2")
         card.grid_columnconfigure(0, weight=1)
 
-        icon_label = ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=40))
-        icon_label.pack(pady=(20, 10))
+        icon_label = ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=32))
+        icon_label.pack(pady=(15, 8))
 
-        title_label = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=14, weight="bold"), wraplength=120)
-        title_label.pack(pady=(0, 20), padx=10)
+        title_label = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=10, weight="bold"), wraplength=100)
+        title_label.pack(pady=(0, 15), padx=8)
 
         for widget in [card, icon_label, title_label]:
             widget.bind("<Button-1>", lambda e, name=action_name: self.app.navigate_and_record(name))
@@ -120,22 +120,6 @@ class HomeFrame(ctk.CTkFrame):
                 w.destroy()
             except Exception:
                 pass
-
-        # 초기 DB 설정 중인 경우 성분 변경 이력 표시하지 않음
-        if getattr(self.app, 'db_initial_setup_complete', False):
-            empty = ctk.CTkLabel(self.changes_panel, 
-                               text="초기 DB 설정 완료 - 이후 변경사항부터 표시됩니다.", 
-                               text_color="gray")
-            empty.grid(row=0, column=0, padx=6, pady=6, sticky="w")
-            return
-
-        # 데이터 관리 접근 권한이 없는 경우 표시하지 않음
-        if not self.current_user.can_access_data_management():
-            empty = ctk.CTkLabel(self.changes_panel, 
-                               text="이 기능은 데이터 관리 권한이 필요합니다.", 
-                               text_color="gray")
-            empty.grid(row=0, column=0, padx=6, pady=6, sticky="w")
-            return
 
         session = db_manager.get_session()
         try:
@@ -178,10 +162,10 @@ class HomeFrame(ctk.CTkFrame):
                     left_label = ctk.CTkLabel(
                         left_cell,
                         text=header_text,
-                        font=ctk.CTkFont(size=13, weight="bold"),
+                        font=ctk.CTkFont(size=10, weight="bold"),
                         anchor="w"
                     )
-                    left_label.pack(padx=10, pady=8)
+                    left_label.pack(padx=8, pady=6)
 
                     # 우측 영역 (요약)
                     right_cell = ctk.CTkFrame(row_container, fg_color=right_color, corner_radius=10, cursor="hand2")
@@ -195,7 +179,7 @@ class HomeFrame(ctk.CTkFrame):
                         justify="left",
                         anchor="w"
                     )
-                    right_label.pack(padx=10, pady=8)
+                    right_label.pack(padx=8, pady=6)
 
                     # 클릭: 행 전체 어느 영역을 눌러도 이동
                     self._bind_click_open([row_container, left_cell, left_label, right_cell, right_label], material.id)
@@ -224,15 +208,6 @@ class HomeFrame(ctk.CTkFrame):
     def _open_material(self, material_id: int):
         """해당 원료 ID로 데이터 관리/성분 관리 탭을 열고 선택합니다."""
         try:
-            # 데이터 관리 접근 권한 체크
-            if not self.current_user.can_access_data_management():
-                from tkinter import messagebox
-                messagebox.showwarning("권한 없음", 
-                                     "데이터 관리 기능에 접근할 수 없습니다.\n"
-                                     "관리자에게 문의하세요.",
-                                     parent=self.app)
-                return
-            
             if hasattr(self.app, 'open_material_by_id'):
                 self.app.open_material_by_id(material_id)
             else:
@@ -363,8 +338,7 @@ class HomeFrame(ctk.CTkFrame):
     def _bind_click_open(self, widgets, material_id: int):
         for w in widgets:
             try:
-                # 이벤트 인자 e는 받지만 사용하지 않음 (tkinter 바인딩 규칙)
-                w.bind("<Button-1>", lambda e=None, mid=material_id: self._open_material(mid))
+                w.bind("<Button-1>", lambda e, mid=material_id: self._open_material(mid))
             except Exception:
                 pass
 
