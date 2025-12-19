@@ -1101,7 +1101,7 @@ class App(ctk.CTk):
             {"name": FRAME_HOME, "text": self.texts["home"], "requires": None},
             {"name": FRAME_DOCUMENT, "text": self.texts["document"], "requires": "research"},
             {"name": FRAME_QUALITY, "text": self.texts["quality"], "requires": "quality"},
-            {"name": FRAME_PACKAGE, "text": "문서 관리", "requires": "admin", "hidden": True},  # 숨김 처리
+            {"name": FRAME_PACKAGE, "text": "문서 관리", "requires": "package"},
         ]
 
         current_row = 1
@@ -1120,6 +1120,12 @@ class App(ctk.CTk):
                 show_item = self.current_user.has_quality_access()
             elif item["requires"] == "admin":
                 show_item = self.current_user.is_admin
+            elif item["requires"] == "package":
+                checker = getattr(self.current_user, 'has_package_management_access', None)
+                if callable(checker):
+                    show_item = checker()
+                else:
+                    show_item = bool(getattr(self.current_user, 'is_admin', False))
             
             if show_item:
                 button = ctk.CTkButton(
@@ -1131,7 +1137,7 @@ class App(ctk.CTk):
                 button.grid(row=current_row, column=0, padx=15, pady=8)
                 self.nav_buttons[item["name"]] = button
                 current_row += 1
- 
+
         self.navigation_frame.grid_rowconfigure(current_row, weight=1)
         empty_space = ctk.CTkFrame(self.navigation_frame, fg_color="transparent", height=0)
         empty_space.grid(row=current_row, column=0, sticky="nsew")
@@ -1208,7 +1214,8 @@ class App(ctk.CTk):
             self.main_content_frame,
             self.current_user,
             self,
-            texts=self.texts
+            texts=self.texts,
+            mode="research"
         )
         self.frames[FRAME_DOCUMENT].grid(row=0, column=0, sticky="nsew")
 
@@ -1220,14 +1227,14 @@ class App(ctk.CTk):
         )
         self.frames[FRAME_QUALITY].grid(row=0, column=0, sticky="nsew")
         
-        # 패키지 관리 프레임 (숨김 - 향후 확장용)
-        self.frames[FRAME_PACKAGE] = ctk.CTkFrame(self.main_content_frame)
-        package_label = ctk.CTkLabel(
-            self.frames[FRAME_PACKAGE],
-            text="문서 관리 (패키지)\n\n향후 확장 예정",
-            font=ctk.CTkFont(size=20)
+        # 패키지 관리 프레임
+        self.frames[FRAME_PACKAGE] = DocumentManagementFrame(
+            self.main_content_frame,
+            self.current_user,
+            self,
+            texts=self.texts,
+            mode="package_only"
         )
-        package_label.pack(expand=True)
         self.frames[FRAME_PACKAGE].grid(row=0, column=0, sticky="nsew")
         
         self.select_frame_by_name(FRAME_HOME)
@@ -1370,6 +1377,13 @@ class App(ctk.CTk):
         if frame_name not in self.frames:
             print(f"'{frame_name}' 프레임을 찾을 수 없습니다.")
             return
+
+        if frame_name == FRAME_PACKAGE:
+            checker = getattr(self.current_user, 'has_package_management_access', None)
+            allowed = checker() if callable(checker) else bool(getattr(self.current_user, 'is_admin', False))
+            if not allowed:
+                messagebox.showwarning("권한 없음", "문서 관리(패키지) 화면은 RQ 이상만 접근할 수 있습니다.")
+                return
         
         self.frames[frame_name].tkraise()
         # 홈으로 전환 시, 최신 변경 이력과 카드 섹션을 즉시 새로고침하여 방금 변경한 내용이 보이도록 함

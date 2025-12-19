@@ -1,94 +1,76 @@
 # modules/data_management.py
 import customtkinter as ctk
 from tkinter import ttk, messagebox
+import tkinter as tk
+import traceback
+from database.db_manager import db_manager
+from database.models import User, Client
+import modules.excel_handler as excel_handler
+from datetime import datetime
 import bcrypt
 from modules.material_management import MaterialManagementFrame
-from modules.document_management import CustomDropdown # CustomDropdown을 여기서 가져옵니다.
-from database.db_manager import db_manager
-from database.models import User, Client, Formulation
-import modules.excel_handler as excel_handler
-from datetime import datetime # noqa
-from modules.ui_components import HelpPopup
 from modules.history_popup import HistoryPopup
+from modules.ui_components import HelpPopup
 from modules.translation import get_texts
-import traceback  # 상단에 추가
 
 class DataManagementFrame(ctk.CTkFrame):
-    def __init__(self, master, current_user, app, language="korean"):
-        super().__init__(master)
-        self.current_user = current_user
+    def __init__(self, master, user, app):
+        super().__init__(master, corner_radius=0, fg_color="transparent")
+        self.current_user = user
         self.app = app
-        self.language = language
+        self.language = getattr(app, 'language', 'korean')
+        self.texts = get_texts(self.language)
+        
         self.client_search_timer = None
+        self._selected_user_id = None
+        self._selected_client_id = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # --- 상단 프레임 (탭 뷰 + 도움말 버튼) ---
-        top_frame = ctk.CTkFrame(self, fg_color="transparent")
-        top_frame.grid(row=0, column=0, sticky="nsew")
-        top_frame.grid_columnconfigure(0, weight=1)
-        top_frame.grid_rowconfigure(0, weight=1)
-
         self.tab_view = ctk.CTkTabview(
-            top_frame,
-            command=self.on_tab_change,
-            border_width=1,
+            self, command=self.on_tab_change, border_width=1,
             border_color=("gray80", "gray30"),
-            segmented_button_selected_color=("#3B8ED0", "#1F6AA5"),
+            segmented_button_selected_color=('#3B8ED0', '#1F6AA5'),
             segmented_button_unselected_color=("gray92", "gray20"),
             text_color=("black", "white"),
-            segmented_button_selected_hover_color=("#3671A8", "#144870"),
+            segmented_button_selected_hover_color=('#3671A8', '#144870'),
             segmented_button_unselected_hover_color=("gray85", "gray28")
         )
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # 도움말 버튼
-        self.texts = get_texts(self.language)
-
-        # --- 변경: 탭 텍스트를 texts에서 가져오되 기본값 지정 ---
         tab_texts = {
             "ingredient": self.texts.get("ingredient_mgt", "성분 관리"),
             "client": self.texts.get("client_mgt", "거래처 관리"),
             "user": self.texts.get("user_mgt", "회원 관리")
         }
 
-        self.tab_map = {
-            tab_texts["ingredient"]: "data/ingredient_mgt",
-            tab_texts["client"]: "data/client_mgt",
-            tab_texts["user"]: "data/user_mgt"
-        }
-
-        # Reverse mapping: stable/internal keys -> displayed tab label
-        # e.g. 'ingredient_mgt' or 'data/ingredient_mgt' -> tab_texts['ingredient']
+        self.tab_map = {}
         self.tab_key_map = {}
-        try:
-            self.tab_key_map['ingredient_mgt'] = tab_texts['ingredient']
-            self.tab_key_map['client_mgt'] = tab_texts['client']
-            self.tab_key_map['user_mgt'] = tab_texts['user']
-            self.tab_key_map['data/ingredient_mgt'] = tab_texts['ingredient']
-            self.tab_key_map['data/client_mgt'] = tab_texts['client']
-            self.tab_key_map['data/user_mgt'] = tab_texts['user']
-        except Exception:
-            # Defensive: if texts missing, leave map possibly incomplete
-            pass
 
-        # 성분 관리 탭 - RD, RQ, RQD, MSAD만 접근 가능
+        # 성분 관리 탭 - RD, RQ, RQD, MSAD 접근 가능
         if self.current_user.can_view_material_data():
             self.tab_view.add(tab_texts["ingredient"])
+            self.tab_map[tab_texts["ingredient"]] = "data/ingredient_mgt"
+            self.tab_key_map["ingredient_mgt"] = tab_texts["ingredient"]
+            self.tab_key_map["data/ingredient_mgt"] = tab_texts["ingredient"]
             self.setup_material_management_tab(self.tab_view.tab(tab_texts["ingredient"]))
 
         # 거래처 관리 탭 - QC, RD, RQ, RQD, MSAD 모두 접근 가능 (검색/참고)
         if self.current_user.can_view_client_data():
             self.tab_view.add(tab_texts["client"])
+            self.tab_map[tab_texts["client"]] = "data/client_mgt"
+            self.tab_key_map["client_mgt"] = tab_texts["client"]
+            self.tab_key_map["data/client_mgt"] = tab_texts["client"]
             self.setup_client_management_tab(self.tab_view.tab(tab_texts["client"]))
 
         # 회원 관리 탭 - RQD, MSAD만 접근 가능
         if self.current_user.can_manage_all_data():
             self.tab_view.add(tab_texts["user"])
+            self.tab_map[tab_texts["user"]] = "data/user_mgt"
+            self.tab_key_map["user_mgt"] = tab_texts["user"]
+            self.tab_key_map["data/user_mgt"] = tab_texts["user"]
             self.setup_user_management_tab(self.tab_view.tab(tab_texts["user"]))
-            
-            # 사용자 관리 탭 초기화 후 권한 옵션 업데이트
             self.update_role_options()
 
     def show_help(self):
@@ -109,16 +91,13 @@ class DataManagementFrame(ctk.CTkFrame):
         try:
             self.tab_view.set(tab_name)
         except Exception as e:
-            # Try resolving tab_name as an internal key (e.g., 'ingredient_mgt' or 'data/ingredient_mgt')
             resolved_label = None
             if tab_name in self.tab_key_map:
                 resolved_label = self.tab_key_map[tab_name]
             else:
-                # If full action provided like 'data/ingredient_mgt', try the part after '/'
                 if '/' in tab_name:
                     _, maybe_key = tab_name.split('/', 1)
                     resolved_label = self.tab_key_map.get(maybe_key)
-
             if resolved_label:
                 try:
                     self.tab_view.set(resolved_label)
@@ -126,14 +105,11 @@ class DataManagementFrame(ctk.CTkFrame):
                 except Exception as e2:
                     print(f"데이터 관리 탭 '{tab_name}'을(를) '{resolved_label}'로 변환했으나 전환 실패: {e2}")
                     return
-
             print(f"데이터 관리 탭 '{tab_name}'으로 전환 실패: {e}")
 
     def refresh_data(self):
         """데이터 관리 프레임의 모든 탭에 있는 데이터를 새로고침합니다."""
         print("데이터 관리 프레임 새로고침...")
-
-        # 1. 회원 관리 탭 새로고침 (존재하는 경우)
         if hasattr(self, 'load_users'):
             try:
                 print("  - 사용자 목록 새로고침...")
@@ -141,8 +117,6 @@ class DataManagementFrame(ctk.CTkFrame):
                 self.clear_user_form()
             except Exception as e:
                 print(f"[오류] 사용자 목록 새로고침 실패: {e}")
-
-        # 2. 거래처 관리 탭 새로고침 (존재하는 경우)
         if hasattr(self, 'load_clients'):
             try:
                 print("  - 거래처 목록 새로고침...")
@@ -150,36 +124,27 @@ class DataManagementFrame(ctk.CTkFrame):
                 self.clear_client_form()
             except Exception as e:
                 print(f"[오류] 거래처 목록 새로고침 실패: {e}")
-
-        # 3. 성분 관리 탭(MaterialManagementFrame) 새로고침
         try:
-            # 탭 이름은 self.texts에서 가져옴
             ingredient_tab_name = self.texts.get("ingredient", "성분 관리")
             material_tab_frame = self.tab_view.tab(ingredient_tab_name)
-            
-            # material_tab_frame의 자식 위젯(MaterialManagementFrame)을 찾아서 refresh_data 호출
             for child in material_tab_frame.winfo_children():
                 if hasattr(child, 'refresh_data'):
                     print("  - 성분 관리 탭 새로고침...")
                     child.refresh_data()
-                    break # MaterialManagementFrame은 하나만 있다고 가정
+                    break
         except Exception as e:
-            # 탭이 아직 생성되지 않았거나 다른 오류 발생 시
             print(f"[오류] 성분 관리 탭 새로고침 실패: {e}")
 
     def focus_material_by_id(self, material_id: int):
         """외부에서 원료 ID를 받아 성분 관리 탭을 열고 해당 항목을 선택합니다."""
         try:
-            # 성분 관리 탭으로 전환
             self.switch_to_tab('data/ingredient_mgt')
-            # 탭의 자식 중 MaterialManagementFrame을 찾아 위임
             ingredient_tab_label = self.tab_key_map.get('data/ingredient_mgt') or self.tab_key_map.get('ingredient_mgt')
             tab_widget = None
             try:
                 if ingredient_tab_label:
                     tab_widget = self.tab_view.tab(ingredient_tab_label)
             except Exception:
-                # 라벨 해석 실패 시 현재 탭 컨테이너에서 탐색
                 tab_widget = self.tab_view
             if not tab_widget:
                 tab_widget = self.tab_view
@@ -193,23 +158,18 @@ class DataManagementFrame(ctk.CTkFrame):
             print(f"[경고] 성분 관리 탭 포커스 실패: {e}")
             return False
 
-    # ==============================================================================
-    # 아래는 settings_management.py에서 이동 및 통합된 UI 설정 메서드들입니다.
-    # ==============================================================================
-
     def setup_material_management_tab(self, tab_frame):
         """성분 관리 탭의 UI를 설정합니다."""
         tab_frame.grid_columnconfigure(0, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
         material_frame = MaterialManagementFrame(tab_frame, self.current_user, self.app)
-        material_frame.grid(row=0, column=0, sticky="nsew") # MaterialManagementFrame needs language
+        material_frame.grid(row=0, column=0, sticky="nsew")
 
     def setup_user_management_tab(self, tab_frame):
-        tab_frame.grid_columnconfigure(0, weight=0, minsize=500) # 좌측 폼 (고정 너비)
-        tab_frame.grid_columnconfigure(1, weight=1) # 우측 리스트 (가변 너비)
+        tab_frame.grid_columnconfigure(0, weight=0, minsize=500)
+        tab_frame.grid_columnconfigure(1, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
 
-        # 좌측 폼 영역에 세로 스크롤이 가능하도록 ScrollableFrame 적용
         user_scrollable = ctk.CTkScrollableFrame(tab_frame, fg_color="transparent")
         user_scrollable.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         user_scrollable.grid_columnconfigure(0, weight=1)
@@ -395,13 +355,27 @@ class DataManagementFrame(ctk.CTkFrame):
         self.load_users()
 
     def setup_client_management_tab(self, tab_frame):
-        tab_frame.grid_columnconfigure(0, weight=0, minsize=500) # 좌측 폼 (고정 너비)
-        tab_frame.grid_columnconfigure(1, weight=1) # 우측 리스트 (가변 너비)
         tab_frame.grid_rowconfigure(0, weight=1)
+        tab_frame.grid_columnconfigure(0, weight=1)
+
+        paned = tk.PanedWindow(tab_frame, orient="horizontal", sashwidth=6, sashrelief="raised", opaqueresize=False)
+        paned.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        left_container = ctk.CTkFrame(paned, fg_color="transparent")
+        left_container.grid_rowconfigure(0, weight=1)
+        left_container.grid_columnconfigure(0, weight=1)
+        paned.add(left_container, minsize=520)
+        paned.paneconfigure(left_container, stretch="always")
+
+        right_container = ctk.CTkFrame(paned, fg_color="transparent")
+        right_container.grid_rowconfigure(0, weight=1)
+        right_container.grid_columnconfigure(0, weight=1)
+        paned.add(right_container, minsize=420)
+        paned.paneconfigure(right_container, stretch="always")
 
         # 스크롤 가능한 프레임을 생성하여 모든 위젯을 담습니다.
-        scrollable_frame = ctk.CTkScrollableFrame(tab_frame, fg_color="transparent")
-        scrollable_frame.grid(row=0, column=0, padx=(10, 0), pady=10, sticky="nsew")
+        scrollable_frame = ctk.CTkScrollableFrame(left_container, fg_color="transparent")
+        scrollable_frame.grid(row=0, column=0, padx=(0, 8), pady=0, sticky="nsew")
 
         form_frame = ctk.CTkFrame(scrollable_frame)
         form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
@@ -450,18 +424,17 @@ class DataManagementFrame(ctk.CTkFrame):
         self.client_delete_button.pack(side="left", padx=5)
 
         # --- 우측: 거래처 목록 ---
-        list_frame = ctk.CTkFrame(tab_frame)
-        list_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+        list_frame = ctk.CTkFrame(right_container)
+        list_frame.grid(row=0, column=0, padx=(8, 0), pady=0, sticky="nsew")
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
         
         # --- 거래처 목록 헤더 (검색 및 버튼 포함) ---
         client_list_header_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
         client_list_header_frame.grid(row=0, column=0, columnspan=2, pady=(10, 5), padx=10, sticky="ew")
-        client_list_header_frame.grid_columnconfigure(1, weight=1) # 가변 공간
+        client_list_header_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(client_list_header_frame, text=self.texts['client_list'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
-        # 거래처 전체 이력 조회 버튼 추가
         ctk.CTkButton(client_list_header_frame, text=self.texts['view_all_history'], command=self.show_all_client_history).grid(row=0, column=1, padx=(20, 0), sticky="w")
         
         # --- 우측 컨트롤 (검색, 초기화, 엑셀 버튼) ---
@@ -474,54 +447,46 @@ class DataManagementFrame(ctk.CTkFrame):
         self.client_search_entry.bind("<KeyRelease>", self.on_client_search)
         ctk.CTkButton(right_header_frame, text=self.texts['reset'], width=60, command=self.reset_client_search).pack(side="left", padx=5)
 
-        # 엑셀 버튼 프레임
         client_excel_frame = ctk.CTkFrame(right_header_frame, fg_color="transparent")
         client_excel_frame.pack(side="left", padx=(10, 0))
 
         ctk.CTkButton(client_excel_frame, text=self.texts['export_data'], command=self.export_client_data).pack(side="left", padx=5)
         self.client_import_button = ctk.CTkButton(client_excel_frame, text=self.texts['import_data'], command=self.import_client_data)
 
-        # 거래처 데이터 편집 권한 확인 (RQD, MSAD만 가능)
         if not self.current_user.can_edit_client_data():
             self.client_save_button.configure(state="disabled")
             self.client_new_button.configure(state="disabled")
             self.client_delete_button.configure(state="disabled")
-            # QC, RD는 검색/참고만 가능한 메시지 추가
             user_role = getattr(self.current_user, 'role', 'Unknown')
             print(f"거래처 관리 - 검색/참고 전용 모드 (권한: {user_role})")
         else:
-            # RQD, MSAD일 때만 가져오기 버튼 표시
             self.client_import_button.pack(side="left", padx=5)
 
         tree_columns = self.texts['client_tree_columns']
         client_column_ids = [k for k in tree_columns if k != 'id']
-        # 구분 컬럼을 포함한 전체 컬럼 리스트 생성
         all_columns = ['division'] + client_column_ids
         self.client_tree = ttk.Treeview(list_frame, columns=all_columns, show="headings", selectmode="browse")
         
-        # 구분 컬럼 설정 (맨 앞에 추가)
         self.client_tree.heading("division", text="구분")
         self.client_tree.column("division", width=60, anchor="center")
         
-        # 기존 컬럼들 설정
-        self.client_tree.heading("type", text=tree_columns['type']); self.client_tree.column("type", width=80, anchor="center") # noqa
-        self.client_tree.heading("code", text=tree_columns['code']); self.client_tree.column("code", width=120) # noqa
-        self.client_tree.heading("name", text=tree_columns['name']); self.client_tree.column("name", width=150) # noqa
-        self.client_tree.heading("ceo", text=tree_columns['ceo']); self.client_tree.column("ceo", width=100) # noqa
-        self.client_tree.heading("manager", text=tree_columns['manager']); self.client_tree.column("manager", width=100) # noqa
-        self.client_tree.heading("contact", text=tree_columns['contact']); self.client_tree.column("contact", width=120) # noqa
-        self.client_tree.heading("fax", text=tree_columns['fax']); self.client_tree.column("fax", width=120) # noqa
-        self.client_tree.heading("email", text=tree_columns['email']); self.client_tree.column("email", width=150) # noqa
-        self.client_tree.heading("zip", text=tree_columns['zip']); self.client_tree.column("zip", width=80, anchor="center") # noqa
-        self.client_tree.heading("address", text=tree_columns['address']); self.client_tree.column("address", width=250) # noqa
-        self.client_tree.heading("active", text=tree_columns['active']); self.client_tree.column("active", width=80, anchor="center") # noqa
+        self.client_tree.heading("type", text=tree_columns['type']); self.client_tree.column("type", width=80, anchor="center")
+        self.client_tree.heading("code", text=tree_columns['code']); self.client_tree.column("code", width=120)
+        self.client_tree.heading("name", text=tree_columns['name']); self.client_tree.column("name", width=150)
+        self.client_tree.heading("ceo", text=tree_columns['ceo']); self.client_tree.column("ceo", width=100)
+        self.client_tree.heading("manager", text=tree_columns['manager']); self.client_tree.column("manager", width=100)
+        self.client_tree.heading("contact", text=tree_columns['contact']); self.client_tree.column("contact", width=120)
+        self.client_tree.heading("fax", text=tree_columns['fax']); self.client_tree.column("fax", width=120)
+        self.client_tree.heading("email", text=tree_columns['email']); self.client_tree.column("email", width=150)
+        self.client_tree.heading("zip", text=tree_columns['zip']); self.client_tree.column("zip", width=80, anchor="center")
+        self.client_tree.heading("address", text=tree_columns['address']); self.client_tree.column("address", width=250)
+        self.client_tree.heading("active", text=tree_columns['active']); self.client_tree.column("active", width=80, anchor="center")
         self.client_tree.grid(row=1, column=0, sticky="nsew")
         
         client_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.client_tree.yview)
         self.client_tree.configure(yscrollcommand=client_scrollbar.set)
         client_scrollbar.grid(row=1, column=1, sticky="ns")
 
-        # 가로 스크롤바 추가
         client_h_scrollbar = ttk.Scrollbar(list_frame, orient="horizontal", command=self.client_tree.xview)
         self.client_tree.configure(xscrollcommand=client_h_scrollbar.set)
         client_h_scrollbar.grid(row=2, column=0, sticky="ew")
@@ -529,7 +494,7 @@ class DataManagementFrame(ctk.CTkFrame):
         self.client_tree.bind("<<TreeviewSelect>>", self.on_client_tree_select)
         self.load_clients()
 
-    def export_user_data(self): # 이 함수는 그대로 둡니다.
+    def export_user_data(self):
         session = db_manager.get_session()
         users = session.query(User).all()
         session.close()
