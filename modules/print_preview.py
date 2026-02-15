@@ -20,9 +20,10 @@ CONTENT_W = PAGE_W - MARGIN_L - MARGIN_R
 CONTENT_H = PAGE_H - MARGIN_T - MARGIN_B
 
 # Fixed column widths mapping from revised export (A..H)
-COLS = ['A','B','C','D','E','F','G','H']
-# '계량량(kg)' 열을 생산량 옆에 추가: A..I (Ph, 구분, 코드, 원료명, 함량, 생산량, 계량량, 제조공정, 공정검사)
-COL_WIDTHS = [8, 10, 15, 45, 12, 12, 12, 26, 22]
+COLS = ['A','B','C','D','E','F','G','H','I','J','K']
+# '계량량(kg)' 열을 생산량 옆에 추가: A..K (Ph, 구분, 코드, 원료명, 함량, 생산량, 계량량, 제조공정, 공정검사1,2,3)
+# H=20(제조공정), I,J,K=8,8,8(공정검사/결재란)
+COL_WIDTHS = [8, 10, 15, 45, 12, 12, 12, 20, 8, 8, 8]
 COL_SUM = sum(COL_WIDTHS)
 COL_PIX = [int(CONTENT_W * (w / COL_SUM)) for w in COL_WIDTHS]
 
@@ -155,33 +156,29 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
     y = MARGIN_T
     x = MARGIN_L
 
-    # 1) Title A1:F2 (left area merged)
-    title_w = sum(COL_PIX[:6])
+    # 1) Title A1:H2 (merged) - 제조공정까지 제목 영역
+    title_w = sum(COL_PIX[:8])
     draw.rectangle([x, y, x + title_w, y + TITLE_H], outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (x, y, x + title_w, y + TITLE_H), "생산지시서", TITLE_FONT)
 
-    # 2) Approval G1:H2: 스탬프 그리드(왼쪽 '결/재' + 상단 '작성/검토/승인' + 하단 서명칸)
+    # 2) Approval I1:K2: 결재란 (작성/검토/승인) - 왼쪽 '결/재' 라벨 제거
     appr_x = x + title_w
-    appr_w = CONTENT_W - title_w  # G+H 폭
+    appr_w = CONTENT_W - title_w  # I+J+K 폭
     # 바깥 테두리
     draw.rectangle([appr_x, y, appr_x + appr_w, y + TITLE_H], outline=GRID_COLOR, width=2)
-    # 왼쪽 라벨 영역 폭
-    left_w = max(28, int(appr_w * 0.12))
-    # 세로 구분선 (왼쪽 라벨/3분할)
-    draw.line([appr_x + left_w, y, appr_x + left_w, y + TITLE_H], fill=GRID_COLOR, width=2)
-    # 3분할
-    col_w = (appr_w - left_w) // 3
-    draw.line([appr_x + left_w + col_w, y, appr_x + left_w + col_w, y + TITLE_H], fill=GRID_COLOR, width=2)
-    draw.line([appr_x + left_w + col_w*2, y, appr_x + left_w + col_w*2, y + TITLE_H], fill=GRID_COLOR, width=2)
-    # 헤더/서명 구분선: 왼쪽 라벨 칸은 위 칸과 병합되도록 선을 비켜서 그림
-    header_h = int(TITLE_H * 0.55)
-    draw.line([appr_x + left_w, y + header_h, appr_x + appr_w, y + header_h], fill=GRID_COLOR, width=2)
-    # 내부 구분선 없이, 왼쪽 라벨 전체 높이를 반으로 나눠 각 절반의 가운데 정렬
-    _draw_text_center(draw, (appr_x, y, appr_x + left_w, y + TITLE_H//2), '결', BOLD_FONT)
-    _draw_text_center(draw, (appr_x, y + TITLE_H//2, appr_x + left_w, y + TITLE_H), '재', BOLD_FONT)
+    
+    # 3분할 (작성, 검토, 승인)
+    col_w = appr_w // 3
+    draw.line([appr_x + col_w, y, appr_x + col_w, y + TITLE_H], fill=GRID_COLOR, width=2)
+    draw.line([appr_x + col_w*2, y, appr_x + col_w*2, y + TITLE_H], fill=GRID_COLOR, width=2)
+    
+    # 헤더/서명 구분선
+    header_h = int(TITLE_H * 0.4) # 헤더 높이 비율 조정 (상단 40% 텍스트, 하단 60% 서명)
+    draw.line([appr_x, y + header_h, appr_x + appr_w, y + header_h], fill=GRID_COLOR, width=2)
+    
     # 헤더 텍스트
     for i, txt in enumerate(["작성","검토","승인"]):
-        cx0 = appr_x + left_w + i*col_w
+        cx0 = appr_x + i*col_w
         _draw_text_center(draw, (cx0, y, cx0 + col_w, y + header_h), txt, BOLD_FONT)
     y += TITLE_H
 
@@ -194,7 +191,7 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
             pages.append(img)
             img, draw = new_page()
             y = MARGIN_T
-    # Row 3 (제품명 A3:D3, 생산코드 E3:F3+G3 merged, 제조자 H3:I3)
+    # Row 3 (제품명 A3:D3, 생산코드 E3:F3+G3+H3 merged, 제조자 I3:J3+K3)
     ensure_page_space(INFO_ROW_H)
     # A3 라벨 셀
     a0 = x + sum(COL_PIX[:0]); a1 = x + sum(COL_PIX[:1])
@@ -205,20 +202,20 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
     draw.rectangle([bd0, y, bd1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
     prod_name = str(details.get('제품명','') or '')
     _draw_text_left_vcenter(draw, (bd0, y, bd1, y + INFO_ROW_H), prod_name, NORMAL_FONT)
-    # E3:F3(+G3 병합) 생산코드
+    # E3 라벨 / F3:H3 값 병합 (생산코드)
     e0 = x + sum(COL_PIX[:4]); e1 = x + sum(COL_PIX[:5])
     draw.rectangle([e0, y, e1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (e0, y, e1, y + INFO_ROW_H), '생산코드', BOLD_FONT)
-    f0 = x + sum(COL_PIX[:5]); g1 = x + sum(COL_PIX[:7])
-    draw.rectangle([f0, y, g1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (f0, y, g1, y + INFO_ROW_H), str(details.get('생산코드','') or ''), NORMAL_FONT)
-    # H3:I3 제조자 (오른쪽으로 1칸 이동)
-    h0 = x + sum(COL_PIX[:7]); h1 = x + sum(COL_PIX[:8])
-    draw.rectangle([h0, y, h1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (h0, y, h1, y + INFO_ROW_H), '제조자', BOLD_FONT)
+    f0 = x + sum(COL_PIX[:5]); h1 = x + sum(COL_PIX[:8])
+    draw.rectangle([f0, y, h1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    _draw_text_left_vcenter(draw, (f0, y, h1, y + INFO_ROW_H), str(details.get('생산코드','') or ''), NORMAL_FONT)
+    # I3 라벨 / J3:K3 값 병합 (제조자)
     i0 = x + sum(COL_PIX[:8]); i1 = x + sum(COL_PIX[:9])
-    draw.rectangle([i0, y, i1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (i0, y, i1, y + INFO_ROW_H), str(details.get('제조자','') or ''), NORMAL_FONT)
+    draw.rectangle([i0, y, i1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (i0, y, i1, y + INFO_ROW_H), '제조자', BOLD_FONT)
+    j0 = x + sum(COL_PIX[:9]); k1 = x + sum(COL_PIX[:11])
+    draw.rectangle([j0, y, k1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    _draw_text_left_vcenter(draw, (j0, y, k1, y + INFO_ROW_H), str(details.get('제조자','') or ''), NORMAL_FONT)
     y += INFO_ROW_H
 
     # Row 4: 지시일/제조일/생산량(kg)/수득량
@@ -237,37 +234,48 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
     dx0 = x + sum(COL_PIX[:3]); dx1 = x + sum(COL_PIX[:4])
     draw.rectangle([dx0, y, dx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
     _draw_text_left_vcenter(draw, (dx0, y, dx1, y + INFO_ROW_H), str(details.get('제조일','') or ''), NORMAL_FONT)
-    # E/F(+G 병합)
+    # E 라벨 / F:H 값 병합 (생산량)
     ex0 = x + sum(COL_PIX[:4]); ex1 = x + sum(COL_PIX[:5])
     draw.rectangle([ex0, y, ex1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (ex0, y, ex1, y + INFO_ROW_H), '생산량(kg)', BOLD_FONT)
-    fx0 = x + sum(COL_PIX[:5]); gx1 = x + sum(COL_PIX[:7])
-    draw.rectangle([fx0, y, gx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (fx0, y, gx1, y + INFO_ROW_H), str(details.get('생산량(kg)','') or ''), NORMAL_FONT)
-    # H/I (수득량을 오른쪽으로 1칸 이동)
-    hx0 = x + sum(COL_PIX[:7]); hx1 = x + sum(COL_PIX[:8])
-    draw.rectangle([hx0, y, hx1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (hx0, y, hx1, y + INFO_ROW_H), '수득량', BOLD_FONT)
+    fx0 = x + sum(COL_PIX[:5]); hx1 = x + sum(COL_PIX[:8])
+    draw.rectangle([fx0, y, hx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    _draw_text_left_vcenter(draw, (fx0, y, hx1, y + INFO_ROW_H), str(details.get('생산량(kg)','') or ''), NORMAL_FONT)
+    # I 라벨 / J:K 값 병합 (수득량)
     ix0 = x + sum(COL_PIX[:8]); ix1 = x + sum(COL_PIX[:9])
-    draw.rectangle([ix0, y, ix1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (ix0, y, ix1, y + INFO_ROW_H), str(details.get('수득량','') or ''), NORMAL_FONT)
+    draw.rectangle([ix0, y, ix1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (ix0, y, ix1, y + INFO_ROW_H), '수득량', BOLD_FONT)
+    jx0 = x + sum(COL_PIX[:9]); kx1 = x + sum(COL_PIX[:11])
+    draw.rectangle([jx0, y, kx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    _draw_text_left_vcenter(draw, (jx0, y, kx1, y + INFO_ROW_H), str(details.get('수득량','') or ''), NORMAL_FONT)
     y += INFO_ROW_H
 
     # Spacer
     ensure_page_space(8)
     y += 8
 
-    # 4) Table header (A..H)
+    # 4) Table header (A..K)
     ensure_page_space(HEADER_H)
     cx = x
-    for c_idx, head in enumerate(["Ph", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "계량량(kg)", "제조공정", "공정검사"]):
+    headers_7 = ["Ph", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "계량량(kg)"]
+    # A~G
+    for c_idx, head in enumerate(headers_7):
         cw = COL_PIX[c_idx]
         draw.rectangle([cx, y, cx + cw, y + HEADER_H], fill=HEADER_FILL, outline=GRID_COLOR, width=1)
         _draw_text_center(draw, (cx, y, cx + cw, y + HEADER_H), head, HEADER_FONT, fill=HEADER_TEXT)
         cx += cw
+    # H (제조공정)
+    cw_h = COL_PIX[7]
+    draw.rectangle([cx, y, cx + cw_h, y + HEADER_H], fill=HEADER_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (cx, y, cx + cw_h, y + HEADER_H), "제조공정", HEADER_FONT, fill=HEADER_TEXT)
+    cx += cw_h
+    # I~K merged (공정검사)
+    cw_insp = sum(COL_PIX[8:11])
+    draw.rectangle([cx, y, cx + cw_insp, y + HEADER_H], fill=HEADER_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (cx, y, cx + cw_insp, y + HEADER_H), "공정검사", HEADER_FONT, fill=HEADER_TEXT)
     y += HEADER_H
 
-    # 5) Rows with vertical merges for A/G/H per phase group
+    # 5) Rows with vertical merges for A/H/I~K per phase group
     def norm_phase(v: Optional[str]) -> str:
         s = str(v).strip() if v is not None else ''
         return s.replace('Ph.', '').replace('PH', '').strip() if s else ''
@@ -293,33 +301,80 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
         groups.append((cur, start_idx, len(items)-1))
 
     total_ratio = 0.0
+    total_prod_amount = 0.0 # 생산지시량 총 합계
+
+    # 생산량 소수점 자리수 계산 (최종 마지막자리로 통일)
+    max_prod_decimals = 1
+    for item in items:
+        qty = item.get('생산량(kg)')
+        if qty in (None, ""):
+            try:
+                g = float(item.get('기준중량(g)'))
+                qty = g / 1000.0
+            except Exception:
+                qty = item.get('생산량(kg)')
+        
+        if qty is not None and qty != "":
+            try:
+                f = float(qty)
+                # 부동소수점 오차 방지 및 유효 자릿수 확인
+                s = f"{f:.10f}".rstrip('0').rstrip('.')
+                if '.' in s:
+                    decs = len(s.split('.')[1])
+                    if decs > max_prod_decimals:
+                        max_prod_decimals = decs
+            except:
+                pass
+    
+    # 최대 6자리로 제한
+    max_prod_decimals = min(max_prod_decimals, 6)
+    # Print Preview용 포맷 문자열 (f-string)
+    prod_fmt_str = f"{{:,.{max_prod_decimals}f}}"
+
     for ph, s_idx, e_idx in groups:
         # compute per-row heights first and ensure group fits page
         row_heights: List[int] = []
         group_proc_texts: List[str] = []
         group_insp_texts: List[str] = []
+        
+        group_items_count = e_idx - s_idx + 1
+        
         for i in range(s_idx, e_idx+1):
             it = items[i]
             ptxt = (str(it.get('제조공정','') or '').replace('"','').replace("'", ''))
             itxt = (str(it.get('공정검사','') or '').replace('"','').replace("'", ''))
             group_proc_texts.append(ptxt)
             group_insp_texts.append(itxt)
-            lines = max(_calc_lines(ptxt), _calc_lines(itxt))
-            row_heights.append(max(ROW_H_BASE, LINE_H * lines + 6))
-        # group-level wrap for 제조공정(G) and 공정검사(H)
+            # lines = max(_calc_lines(ptxt), _calc_lines(itxt)) # 개별 계산 안함
+        
+        # group-level wrap for 제조공정(H) and 공정검사(I~K)
         g_text = max(group_proc_texts, key=len) if group_proc_texts else ''
         h_text = max(group_insp_texts, key=len) if group_insp_texts else ''
+        
         # compute available widths in pixels
-        g_x0 = x + sum(COL_PIX[:6]); g_x1 = x + sum(COL_PIX[:7])
-        h_x0 = x + sum(COL_PIX[:7]); h_x1 = x + sum(COL_PIX[:8])
+        # H: index 7
+        g_x0 = x + sum(COL_PIX[:7]); g_x1 = x + sum(COL_PIX[:8])
+        # I~K: index 8,9,10
+        h_x0 = x + sum(COL_PIX[:8]); h_x1 = x + sum(COL_PIX[:11])
         g_wrap = _wrap_text_by_width(draw, g_text, NORMAL_FONT, max(10, g_x1 - g_x0 - 12))
         h_wrap = _wrap_text_by_width(draw, h_text, NORMAL_FONT, max(10, h_x1 - h_x0 - 12))
+        
         # ensure group height can fit wrapped text
         need_lines = max(_calc_lines(g_wrap), _calc_lines(h_wrap))
-        pre_h = sum(row_heights) if row_heights else 0
-        need_h = max(pre_h, max(ROW_H_BASE, LINE_H * need_lines + 6))
-        if need_h > pre_h and row_heights:
-            row_heights[-1] += (need_h - pre_h)
+        
+        # 최소 행 높이(30)와 텍스트 필요 높이 중 큰 값으로 그룹 전체 높이 설정
+        min_row_h = 30
+        group_content_h = max(need_lines * LINE_H + 10, group_items_count * min_row_h)
+        
+        # 균일 분배
+        uniform_h = int(group_content_h / group_items_count)
+        row_heights = [uniform_h] * group_items_count
+        
+        # 보정 (나머지 픽셀 처리)
+        diff = int(group_content_h) - sum(row_heights)
+        if diff > 0:
+            row_heights[-1] += diff
+            
         # if not enough space, start new page before the group
         group_total_h = sum(row_heights)
         ensure_page_space(group_total_h)
@@ -330,17 +385,25 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
             ensure_page_space(hgt)
             it = items[s_idx + rel]
             cx = x
+            
+            continuous_order = str(s_idx + rel + 1)
+            
             values = [
                 None,  # A merged later
-                it.get('구분'), it.get('코드'), it.get('원료명'),
-                it.get('함량(%)'), it.get('생산량(kg)'), it.get('계량량(kg)')
+                continuous_order, # Force continuous numbering
+                it.get('코드'), it.get('원료명'),
+                it.get('함량(%)'), it.get('생산량(kg)'), it.get('계량량(kg)'),
+                None, None, None, None # H, I, J, K merged later
             ]
             for c_idx, val in enumerate(values):
-                # actual column index = c_idx + 0; but skip A(0)
+                # actual column index = c_idx + 0; but skip A(0) and H~K(7~10)
                 if c_idx == 0:
-                    # skip A
                     cx += COL_PIX[0]
                     continue
+                if c_idx >= 7: # H, I, J, K skip
+                    cx += COL_PIX[c_idx]
+                    continue
+                
                 cw = COL_PIX[c_idx]
                 box = (cx, y, cx + cw, y + hgt)
                 draw.rectangle(box, outline=GRID_COLOR, width=1)
@@ -355,6 +418,9 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
                         if c_idx == 4:
                             total_ratio += fval
                             text = f"{fval:.4f}"
+                        elif c_idx == 5: # 생산량
+                            total_prod_amount += fval
+                            text = prod_fmt_str.format(fval)
                         else:
                             text = f"{fval:,.1f}"
                     except Exception:
@@ -364,18 +430,18 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
             # skip H/I per-row; merged later
             y += hgt
 
-        # merged cells for A, H, I across group
+        # merged cells for A, H, I~K across group
         group_y_end = y
         # A column (Ph): always merge across group until next phase; text may be empty
         a_x0 = x; a_x1 = x + COL_PIX[0]
         draw.rectangle([a_x0, group_y_start, a_x1, group_y_end], outline=GRID_COLOR, width=1)
         _draw_text_center(draw, (a_x0, group_y_start, a_x1, group_y_end), ph or '', BOLD_FONT)
         # H column merged (wrap to width) - 제조공정
-        g_x0 = x + sum(COL_PIX[:7]); g_x1 = x + sum(COL_PIX[:8])
+        # g_x0, g_x1 pre-calculated
         draw.rectangle([g_x0, group_y_start, g_x1, group_y_end], outline=GRID_COLOR, width=1)
         _draw_text_left_vcenter(draw, (g_x0, group_y_start, g_x1, group_y_end), g_wrap, NORMAL_FONT)
-        # I column merged (wrap to width) - 공정검사
-        h_x0 = x + sum(COL_PIX[:8]); h_x1 = x + sum(COL_PIX[:9])
+        # I~K column merged (wrap to width) - 공정검사
+        # h_x0, h_x1 pre-calculated
         draw.rectangle([h_x0, group_y_start, h_x1, group_y_end], outline=GRID_COLOR, width=1)
         _draw_text_left_vcenter(draw, (h_x0, group_y_start, h_x1, group_y_end), h_wrap, NORMAL_FONT)
 
@@ -387,14 +453,16 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
     ad_box = (x, y, x + ad_w, y + sum_h)
     draw.rectangle(ad_box, fill=HEADER_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, ad_box, "합계 (Total)", HEADER_FONT, fill=HEADER_TEXT)
-    # Draw remaining E..I cells normally
+    # Draw remaining E..K cells normally
     cx = x + ad_w
-    for c_idx in range(4, 9):
+    for c_idx in range(4, 11): # E~K
         cw = COL_PIX[c_idx]
         box = (cx, y, cx + cw, y + sum_h)
         draw.rectangle(box, fill=HEADER_FILL, outline=GRID_COLOR, width=1)
         if c_idx == 4:
             _draw_text_center(draw, box, f"{total_ratio:.4f}", HEADER_FONT, fill=HEADER_TEXT)
+        elif c_idx == 5: # 생산량 합계
+            _draw_text_center(draw, box, prod_fmt_str.format(total_prod_amount), HEADER_FONT, fill=HEADER_TEXT)
         cx += cw
     y += sum_h
 
@@ -407,13 +475,31 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
         printed = _dt.datetime.now().strftime('%Y-%m-%d %H:%M')
     except Exception:
         printed = ""
+    
+    approver_name = ""
+    try:
+        if production_data and 'details' in production_data:
+            approver_name = str(production_data['details'].get('approver_name', '') or '')
+    except:
+        pass
+
     total = len(pages)
     for idx, p in enumerate(pages):
         d = ImageDraw.Draw(p)
+        
+        # 왼쪽: 승인자 정보
+        if approver_name:
+            app_text = f"승인자: {approver_name}"
+            y_footer = PAGE_H - MARGIN_B + int(0.15 * DPI)
+            d.text((MARGIN_L, y_footer), app_text, font=SMALL_FONT, fill=(80,80,80))
+            
+        # 오른쪽: 페이지/출력일시
         footer_text = f"Page {idx+1} / {total}    Printed: {printed}"
-        # draw at bottom within margins
+        # draw at bottom right within margins
+        w_ft = d.textbbox((0,0), footer_text, font=SMALL_FONT)[2]
+        x_ft = PAGE_W - MARGIN_R - w_ft
         y_footer = PAGE_H - MARGIN_B + int(0.15 * DPI)
-        d.text((MARGIN_L, y_footer), footer_text, font=SMALL_FONT, fill=(120,120,120))
+        d.text((x_ft, y_footer), footer_text, font=SMALL_FONT, fill=(120,120,120))
 
     return pages
 

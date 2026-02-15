@@ -1,34 +1,182 @@
-# main.py
-import customtkinter as ctk
-import configparser
 import sys
+import os
+import subprocess
+import time
+
+# 로그인/회원가입 시 표시할 법적고지 및 일반사항 전문
+LEGAL_NOTICE_FULL_TEXT = '''
+[실무요약] 본 프로그램은 화장품 연구소의 내부 연구 및 관리 효율 향상을 위한 도구이며, 최종 품질 판단 및 법적 책임은 전적으로 사용자에게 있습니다.
+
+0.1 프로그램 개요
+    0.1.1 프로그램 명칭
+        국문: 화장품 연구소 관리 시스템
+        영문: Cosmetic Research & Quality Data System (CosRQD)
+    0.1.2 개발 목적
+        본 프로그램은 화장품 연구소의 연구 데이터 관리, 성분 정보 관리, 시험 및 연구 이력 관리를 효율적으로 수행하기 위해 개발된 내부 연구 지원용 소프트웨어입니다.
+        연구 업무의 편의성과 관리 효율 향상을 주목적으로 하며, 최종 제품의 품질 판단이나 법적 적합성 판단을 대체하는 목적이 아님을 명시합니다.
+
+0.2 사용 범위 및 제한 사항
+    0.2.1 사용 범위
+        본 프로그램은 다음의 목적에 한하여 사용해야 합니다.
+        - 화장품 연구 개발(R&D) 데이터의 전산화 및 관리
+        - 성분 정보 데이터베이스 구축 및 배합 이력 관리
+        - 내부 연구 기록 정리 및 참고용 수치 계산
+        - 기타 연구소 내부 관리 업무 지원
+
+    0.2.2 사용 제한
+        대외비 (Internal Use Only): 본 프로그램은 외부 배포, 판매, 재가공, 무단 복제를 엄격히 금지합니다.
+        법적 효력 부존재: 본 프로그램은 화장품 제조 및 판매 허가에 대한 법적 판단 도구로 사용될 수 없습니다.
+        참고용 자료: 프로그램의 모든 출력 결과는 참고 자료(Reference)이며, 최종 판단은 반드시 관련 법규 및 내부 절차(SOP)에 따라 수행되어야 합니다.
+
+0.3 책임 범위 및 면책 조항 (중요)
+    !! Warning 주의 (Disclaimer) !!
+    3.1 면책 조항
+    본 프로그램은 연구 및 내부 관리 편의를 위해 제공됩니다. 본 프로그램을 통해 생성된 계산 결과, 분석 정보, 관리 데이터는 최종 제품의 품질, 안전성, 법적 적합성을 보장하지 않습니다. 본 프로그램의 사용으로 인해 발생하는 모든 유형/무형의 결과에 대한 최종 책임은 사용자에게 있으며, 개발자 및 제공자는 이에 대한 어떠한 법적 책임도 지지 않습니다.
+
+    ** 3.2 데이터 입력 책임 **
+    본 프로그램에 입력되는 모든 데이터(성분명, 함량, 배합비, 수치 정보 등)의 정확성에 대한 책임은 사용자에게 있습니다. 사용자의 입력 오류 또는 관리 부주의로 인해 발생한 문제에 대해서는 개발자가 책임을 지지 않습니다.
+
+0.4 사용자 동의 및 고지
+    0.4.1 이용 고지
+        본 프로그램은 최초 로그인 시 다음 사항에 대한 고지를 제공하며, 사용자는 이에 동의한 후 프로그램을 사용할 수 있습니다.
+        - 프로그램의 사용 목적 인지
+        - 책임 범위 및 면책 사항 동의
+        - 내부 사용 제한 규정 준수
+        ※ 사용자의 동의 기록은 시스템에 저장되며, 추후 프로그램 버전 변경 시 재동의를 요구할 수 있습니다.
+
+0.5 저작권 및 지식재산권
+    0.5.1 저작권 정보
+        Copyright © 2025 luckfortma. All rights reserved.
+        본 프로그램의 소스코드, UI 구성, 기능 설계 및 설명 문서는 대한민국 저작권법의 보호를 받습니다.
+        사전 승인 없이 본 프로그램의 전부 또는 일부를 복제, 배포, 수정, 재사용하는 행위를 금지합니다.
+
+    0.5.2 개발 정보
+        개발자: luckfortma
+        이메일: luckfortma@gmail.com
+        개발 목적: 화장품 연구소 내부 관리 전용
+
+0.6 버전 및 변경 이력 관리
+    0.6.1 버전 정보
+        프로그램 버전: v59
+        최조 배포일: 2026.02.03
+    0.6.2 변경 이력
+        본 프로그램은 기능 개선 및 안정성 확보를 위해 지속적으로 업데이트될 수 있습니다. 주요 변경 사항은 본 설명서의 개정본 또는 별도의 Release Note를 통해 관리합니다.
+
+0.7 오픈소스 사용 고지
+    본 프로그램은 개발 과정에서 다음의 오픈소스 소프트웨어를 활용하였습니다. 각 라이브러리는 해당 라이선스 정책을 따릅니다.
+    Python, PyQt (or Tkinter), pandas, Numpy 등
+
+※ 본 고지 사항의 상세 내용은 제14장 '법적 고지 및 면책 조항'을 따른다.
+'''
+
+# Auto-install dependencies if missing (Self-Healing)
+def install_and_import(package_name, import_name=None):
+    if import_name is None:
+        import_name = package_name
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"[Self-Healing] Installing missing package: {package_name}...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            print(f"[Self-Healing] Successfully installed {package_name}")
+        except Exception as e:
+            print(f"[Self-Healing] Failed to install {package_name}: {e}")
+
+# Ensure critical dependencies are present
+install_and_import("customtkinter")
+install_and_import("Pillow", "PIL")
+install_and_import("sqlalchemy")
+install_and_import("bcrypt")
+install_and_import("openpyxl")
+install_and_import("pandas")
+install_and_import("tkcalendar")
+
+# 3. CMD 창 비활성화 (프로그램 시작 시)
+# 빌드된 환경(frozen)에서는 PyInstaller --noconsole 옵션으로 제어되지만,
+# 혹시 콘솔이 뜨는 경우를 대비해 ctypes로 숨김 처리 (Windows 전용)
+if sys.platform == 'win32':
+    import ctypes
+    try:
+        # Get console window handle
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd != 0:
+            # Hide console window (SW_HIDE = 0)
+            # 단, 오류 메시지는 볼 수 있어야 하므로 완전 숨김보다는
+            # PyInstaller 빌드 시 --noconsole 사용을 권장.
+            # 여기서는 명시적으로 요청된 "cmd 비활성화"를 위해 숨김 처리 시도
+            # (주의: 개발 중에는 print 로그를 볼 수 없게 됨)
+            # ctypes.windll.user32.ShowWindow(hwnd, 0)
+            pass 
+    except Exception:
+        pass
+
+# 표준 출력/에러 리다이렉션 (로그 삭제 요청 대응)
+# 오류 메시지창(stderr)은 남겨두고, 일반 출력(stdout)은 무시
+class NullWriter:
+    def write(self, text): pass
+    def flush(self): pass
+
+# 개발 환경이 아닐 때(또는 명시적 요청 시) 로그 출력 억제
+if getattr(sys, 'frozen', False):
+    sys.stdout = NullWriter() 
+# sys.stderr는 유지 (오류 확인용)
+
+# --- Fix for Tcl/Tk Encoding Issue on Windows (Korean Path) ---
+try:
+    base_path = sys.exec_prefix
+    # Common locations for Tcl/Tk in Conda/Python environments on Windows
+    # 1. Standard Python: tcl/tcl8.6
+    # 2. Conda: Library/lib/tcl8.6
+    
+    potential_tcl_paths = [
+        os.path.join(base_path, 'tcl', 'tcl8.6'),
+        os.path.join(base_path, 'Library', 'lib', 'tcl8.6'),
+        os.path.join(base_path, 'lib', 'tcl8.6'),
+    ]
+    
+    for path in potential_tcl_paths:
+        if os.path.exists(path):
+            os.environ['TCL_LIBRARY'] = path
+            # Assume tk is in the same parent dir
+            tk_path = path.replace('tcl8.6', 'tk8.6')
+            if os.path.exists(tk_path):
+                os.environ['TK_LIBRARY'] = tk_path
+            print(f"[Fix] Set TCL_LIBRARY to: {path}")
+            break
+            
+except Exception as e:
+    print(f"[Fix] Failed to set Tcl/Tk paths: {e}")
+# -------------------------------------------------------------
+
+import customtkinter as ctk  # type: ignore
+import configparser
 from tkinter import messagebox
 from tkinter import ttk
 from collections import deque
-import os
 import tkinter.font as tkfont
 import re
-import subprocess
-import time
-from PIL import Image
+from PIL import Image  # type: ignore
 
 # ==================== 단일 인스턴스 실행 체크 ====================
 def check_single_instance():
     """프로그램이 이미 실행 중인지 확인하고, 중복 실행을 방지합니다."""
     try:
         if sys.platform.startswith('win'):
-            # Windows: Named Mutex 사용
-            import win32event
-            import win32api
-            import winerror
+            # Windows: ctypes를 사용하여 Named Mutex 생성 (pywin32 의존성 제거)
+            import ctypes
             
             mutex_name = "Global\\RnD_Platform_Cosmetic_Management_System_Mutex"
             try:
-                # 뮤텍스 생성 시도
-                mutex = win32event.CreateMutex(None, False, mutex_name)
-                last_error = win32api.GetLastError()
+                kernel32 = ctypes.windll.kernel32
                 
-                if last_error == winerror.ERROR_ALREADY_EXISTS:
+                # CreateMutexW(security_attributes, initial_owner, name)
+                mutex = kernel32.CreateMutexW(None, False, mutex_name)
+                last_error = kernel32.GetLastError()
+                
+                ERROR_ALREADY_EXISTS = 183
+                
+                if last_error == ERROR_ALREADY_EXISTS:
                     # 이미 실행 중
                     import tkinter as tk
                     root = tk.Tk()
@@ -43,8 +191,9 @@ def check_single_instance():
                     root.destroy()
                     return False
                 
-                # 뮤텍스를 전역 변수로 저장 (프로그램 종료 시까지 유지)
-                globals()['_app_mutex'] = mutex
+                # 뮤텍스 핸들을 전역 변수로 저장 (프로그램 종료 시까지 유지)
+                # 핸들을 닫으면 뮤텍스가 해제되므로 변수에 할당해두어야 함
+                globals()['_app_mutex_handle'] = mutex
                 print("[단일 인스턴스] 프로그램 실행 허용")
                 return True
                 
@@ -91,127 +240,7 @@ def check_single_instance():
         # 오류 발생 시에도 프로그램은 계속 실행
         return True
 
-# ==================== PyInstaller 경로 처리 ====================
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-        # 임시 폴더 접근 가능 여부 확인
-        if not os.path.exists(base_path) or not os.access(base_path, os.R_OK):
-            raise Exception(f"_MEIPASS 경로 접근 불가: {base_path}")
-        print(f"[RESOURCE] Using _MEIPASS: {base_path}")
-    except Exception as e:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        print(f"[RESOURCE] _MEIPASS 사용 불가 ({e}), 스크립트 디렉토리 사용: {base_path}")
-    
-    # 아이콘 파일 특별 처리 (더 포괄적)
-    if relative_path.lower() in ['icon.ico', 'Icon.ico', 'app.ico', 'application.ico']:
-        icon_variants = [
-            'Icon.ico',           # 대문자 I
-            'icon.ico',           # 소문자 i
-            'ICON.ICO',           # 모두 대문자
-            'Icon.ICO',           # 혼합
-            'app.ico',            # 앱 아이콘
-            'application.ico',    # 어플리케이션 아이콘
-            'main.ico',           # 메인 아이콘
-        ]
-        
-        # 기본 경로에서 검색
-        for variant in icon_variants:
-            icon_path = os.path.join(base_path, variant)
-            if os.path.exists(icon_path):
-                print(f"[RESOURCE] Found icon at: {icon_path}")
-                return icon_path
-        
-        # data 폴더에서 검색
-        data_path = os.path.join(base_path, 'data')
-        if os.path.exists(data_path):
-            for variant in icon_variants:
-                icon_path = os.path.join(data_path, variant)
-                if os.path.exists(icon_path):
-                    print(f"[RESOURCE] Found icon in data folder: {icon_path}")
-                    return icon_path
-        
-        # assets 폴더에서 검색
-        assets_path = os.path.join(base_path, 'assets')
-        if os.path.exists(assets_path):
-            for variant in icon_variants:
-                icon_path = os.path.join(assets_path, variant)
-                if os.path.exists(icon_path):
-                    print(f"[RESOURCE] Found icon in assets folder: {icon_path}")
-                    return icon_path
-        
-        # 아이콘을 찾지 못한 경우 디렉토리 내용 출력 (더 상세히)
-        try:
-            base_files = [f for f in os.listdir(base_path) if f.lower().endswith(('.ico', '.png', '.jpg', '.jpeg'))]
-            print(f"[RESOURCE] Available image files in {base_path}: {base_files}")
-            
-            # 하위 폴더들도 검사
-            for subdir in ['data', 'assets', 'icons', 'images']:
-                subdir_path = os.path.join(base_path, subdir)
-                if os.path.exists(subdir_path):
-                    sub_files = [f for f in os.listdir(subdir_path) if f.lower().endswith(('.ico', '.png', '.jpg', '.jpeg'))]
-                    if sub_files:
-                        print(f"[RESOURCE] Available image files in {subdir_path}: {sub_files}")
-        except Exception as e:
-            print(f"[RESOURCE] Cannot list directory: {e}")
-        
-        # 기본 아이콘이 없는 경우 대체 아이콘 생성 (임시 해결책)
-        print("[RESOURCE] Creating fallback icon path")
-        return create_fallback_icon(base_path)
-    
-    # 일반 파일 처리
-    possible_paths = [
-        os.path.join(base_path, relative_path),  # 기본 경로
-        os.path.join(base_path, 'data', relative_path),  # data 폴더
-        os.path.join(base_path, 'assets', relative_path),  # assets 폴더
-        os.path.join(base_path, relative_path.capitalize()),  # 첫 글자 대문자
-        os.path.join(base_path, relative_path.upper()),  # 모두 대문자
-        os.path.join(base_path, relative_path.lower()),  # 모두 소문자
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            print(f"[RESOURCE] Found resource at: {path}")
-            return path
-    
-    print(f"[RESOURCE] Resource not found: {relative_path}")
-    print(f"[RESOURCE] Tried paths: {possible_paths}")
-    return possible_paths[0]  # 기본 경로 반환
-
-def create_fallback_icon(base_path):
-    """아이콘 파일이 없는 경우 임시 아이콘을 생성합니다"""
-    try:
-        from PIL import Image, ImageDraw
-        
-        # base_path 내 data/temp 폴더 사용 (AppData 사용 금지)
-        temp_dir = os.path.join(base_path, 'data', 'temp')
-        os.makedirs(temp_dir, exist_ok=True)
-        temp_icon_path = os.path.join(temp_dir, 'rnd_platform_temp_icon.ico')
-        print(f"[RESOURCE] 프로젝트 폴더 사용: {temp_dir}")
-        
-        # 간단한 임시 아이콘 생성
-        size = (64, 64)
-        image = Image.new('RGBA', size, (70, 130, 180, 255))  # Steel Blue
-        draw = ImageDraw.Draw(image)
-        
-        # 간단한 'R' 문자 그리기 (R&D를 의미)
-        draw.text((20, 20), "R", fill=(255, 255, 255, 255))
-        
-        # 임시 파일로 저장
-        image.save(temp_icon_path, format='ICO')
-        
-        print(f"[RESOURCE] Created fallback icon: {temp_icon_path}")
-        return temp_icon_path
-        
-    except Exception as e:
-        print(f"[RESOURCE] Failed to create fallback icon: {e}")
-        # 최후의 수단: None 반환하여 기본 아이콘 사용
-        return None
-
-
-from utils import center_window_on_mouse_display
+from utils import center_window_on_mouse_display, resource_path
 
 if getattr(sys, 'frozen', False):
     # PyInstaller로 빌드된 경우, .exe 파일이 있는 폴더
@@ -219,6 +248,39 @@ if getattr(sys, 'frozen', False):
 else:
     # 일반 Python 스크립트로 실행된 경우
     application_path = os.path.dirname(os.path.abspath(__file__))
+
+
+def create_fallback_icon(meipass_path: str | None) -> str | None:
+    """Create a simple fallback .ico file inside `meipass_path` (or cwd) and return its path.
+
+    The produced icon is a plain circle image saved as an ICO. Returns None on failure.
+    """
+    try:
+        from PIL import Image, ImageDraw
+        import os
+
+        target_dir = meipass_path if (meipass_path and os.path.isdir(meipass_path)) else os.getcwd()
+        os.makedirs(target_dir, exist_ok=True)
+
+        size = (256, 256)
+        img = Image.new('RGBA', size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        # Draw a rounded colored circle as a neutral fallback logo
+        margin = 32
+        draw.ellipse((margin, margin, size[0] - margin, size[1] - margin), fill=(100, 149, 237, 255))
+
+        out_path = os.path.join(target_dir, 'fallback_icon.ico')
+        # Save as ICO (Pillow supports ICO); include common sizes
+        img.save(out_path, format='ICO', sizes=[(256, 256), (128, 128), (64, 64)])
+        print(f"[RUNTIME-ASSETS] 생성된 대체 아이콘: {out_path}")
+        return out_path
+    except Exception as e:
+        try:
+            print(f"[RUNTIME-ASSETS] create_fallback_icon 실패: {e}")
+        except Exception:
+            pass
+        return None
 
 def get_persistent_config_path(app_dir_name: str = 'RnD_플랫폼') -> str:
     """프로젝트 폴더 내 config.ini 경로를 제공합니다.
@@ -255,10 +317,20 @@ db_path =
 CONFIG_FILE_PATH = get_persistent_config_path()
 print(f"[CONFIG] 최종 설정 파일 경로: {CONFIG_FILE_PATH}")
 
-
-from sqlalchemy import text
-from database.db_manager import db_manager
+# ✅ FIX: 동적 import 오류 처리
 from datetime import datetime
+
+try:
+    from sqlalchemy import text  # type: ignore
+except ImportError as ie:
+    print(f"[경고] SQLAlchemy text import 실패: {ie}")
+    text = None
+
+try:
+    from database.db_manager import db_manager  # type: ignore
+except (ImportError, ModuleNotFoundError) as ie:
+    print(f"[경고] db_manager import 실패: {ie} - 나중에 safe_import_modules()에서 로드됨")
+    db_manager = None
 
 # PyInstaller 빌드 환경을 고려한 안전한 모듈 임포트
 def safe_import_modules():
@@ -344,6 +416,95 @@ FRAME_PACKAGE = "package" # 패키지 관리 프레임 이름 추가
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        # Install global safe wrappers for widget focus operations to avoid
+        # TclError when scheduled callbacks try to focus a widget that was
+        # destroyed before the callback runs.
+        try:
+            import tkinter as _tk
+
+            _orig_misc_focus_set = getattr(_tk.Misc, 'focus_set', None)
+            _orig_misc_focus_force = getattr(_tk.Misc, 'focus_force', None)
+
+            def _safe_misc_focus_set(self, *a, **kw):
+                try:
+                    if getattr(self, 'winfo_exists', lambda: False)():
+                        if callable(_orig_misc_focus_set):
+                            return _orig_misc_focus_set(self, *a, **kw)
+                except Exception:
+                    try:
+                        import traceback as _tb
+                        txt = '[SAFE-FOCUS] focus_set ignored for destroyed widget.\n' + ''.join(_tb.format_stack(limit=10))
+                        try:
+                            # attempt to write to app log if available
+                            try:
+                                self._log_error(txt)
+                            except Exception:
+                                # fallback to stderr
+                                print(txt)
+                        except Exception:
+                            print(txt)
+                    except Exception:
+                        pass
+                return None
+
+            def _safe_misc_focus_force(self, *a, **kw):
+                try:
+                    if getattr(self, 'winfo_exists', lambda: False)():
+                        if callable(_orig_misc_focus_force):
+                            return _orig_misc_focus_force(self, *a, **kw)
+                except Exception:
+                    try:
+                        import traceback as _tb
+                        txt = '[SAFE-FOCUS] focus_force ignored for destroyed widget.\n' + ''.join(_tb.format_stack(limit=10))
+                        try:
+                            self._log_error(txt)
+                        except Exception:
+                            print(txt)
+                    except Exception:
+                        pass
+                return None
+
+            try:
+                if _orig_misc_focus_set:
+                    _tk.Misc.focus_set = _safe_misc_focus_set
+            except Exception:
+                pass
+            try:
+                if _orig_misc_focus_force:
+                    _tk.Misc.focus_force = _safe_misc_focus_force
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # Protect against TclErrors from scheduled 'focus' calls targeting
+        # windows that may be destroyed before the callback runs. Wrap the
+        # underlying tk interpreter call to ignore 'focus' errors.
+        try:
+            orig_tk_call = getattr(self.tk, 'call')
+            def _safe_tk_call(*a, **kw):
+                try:
+                    return orig_tk_call(*a, **kw)
+                except Exception as e:
+                    try:
+                        import _tkinter
+                        # If it's a TclError caused by focusing a destroyed window,
+                        # ignore it. Different callers may pass args in different
+                        # orders, so check both command name and common message text.
+                        if isinstance(e, _tkinter.TclError):
+                            msg = str(e).lower()
+                            cmd0 = (a[0].lower() if a and len(a) > 0 and isinstance(a[0], str) else '')
+                            if cmd0 == 'focus' or 'bad window path name' in msg:
+                                return None
+                    except Exception:
+                        pass
+                    raise
+            try:
+                self.tk.call = _safe_tk_call
+            except Exception:
+                # assignment may fail in some environments; ignore
+                pass
+        except Exception:
+            pass
         self.language = "korean" # 기본 언어 설정
         self.texts = get_texts(self.language) # 중앙 번역 객체 생성
         self.title("화장품 연구소 관리 시스템")
@@ -493,20 +654,108 @@ class App(ctk.CTk):
 
     def show_login_window(self):
         print(f"{datetime.now()}: show_login_window 호출")
-        
         # 재시작 시 자동 로그인 확인
         if self.check_restart_login():
             return
-        
+
+        # 먼저 로그인 창을 생성/표시한 뒤, 법적고지가 필요하면 그 위에 표시합니다.
         self.login_window = LoginWindow(
             master=self, 
             on_login_success=self.on_login_success,
-            config_path=CONFIG_FILE_PATH
+            config_path=CONFIG_FILE_PATH,
+            application_path=application_path
         )
         self.login_window.deiconify()
         self.login_window.lift()
-        self.login_window.focus_force()
+        try:
+            self.login_window.focus_force()
+        except Exception:
+            try:
+                self.login_window.focus_set()
+            except Exception:
+                pass
         print(f"{datetime.now()}: 로그인 창 강제 표시")
+
+        # 법적고지는 로그인 시 사용자가 입력을 완료하거나 로그인 시도할 때 확인합니다.
+
+    def check_legal_notice_agreement(self, continue_callback=None):
+        """법적 고지 동의 여부를 확인하고 필요한 경우 팝업을 띄웁니다.
+        
+        계정당 한 번만 동의하면 영구 저장됩니다 (버전 변경 시에도 재승인 불필요).
+        """
+        try:
+            # 1. Config 확인 - 동의 여부만 확인 (버전 비교 없음)
+            config = configparser.ConfigParser()
+            config.read(CONFIG_FILE_PATH, encoding='utf-8')
+            
+            has_agreed = False
+            if config.has_section('Legal'):
+                agreed_value = config.get('Legal', 'agreed_version', fallback=None)
+                # 동의 값이 존재하면 이미 동의한 것으로 간주
+                has_agreed = agreed_value is not None and agreed_value.strip() != ''
+            
+            print(f"[LEGAL] Has agreed: {has_agreed}")
+
+            # 2. 동의하지 않은 경우에만 팝업 표시
+            if not has_agreed:
+                print("[LEGAL] 법적 고지 동의 필요")
+                # LegalNoticeDialog 생성 및 on_agree 콜백을 안전하게 래핑합니다.
+                try:
+                    from modules.legal_notice import LegalNoticeDialog
+
+                    def on_agree():
+                        print("[LEGAL] 사용자가 동의했습니다.")
+                        # Config 업데이트 (안전하게 처리) - 버전 대신 "agreed" 플래그 저장
+                        try:
+                            if not config.has_section('Legal'):
+                                config.add_section('Legal')
+                            config.set('Legal', 'agreed_version', 'agreed')  # 영구 동의 플래그
+                            try:
+                                with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
+                                    config.write(f)
+                            except Exception as e:
+                                print(f"[LEGAL] Agreed version write failed: {e}")
+                        except Exception as e:
+                            print(f"[LEGAL] Config update failed: {e}")
+
+                        # Continue via provided callback if present, else try to show login window
+                        try:
+                            if continue_callback and callable(continue_callback):
+                                try:
+                                    continue_callback()
+                                except Exception as e:
+                                    print(f"[LEGAL] continue callback 호출 실패(무시): {e}")
+                            else:
+                                try:
+                                    self.show_login_window()
+                                except Exception as e:
+                                    print(f"[LEGAL] show_login_window 호출 실패(무시): {e}")
+                        except Exception:
+                            pass
+
+                    try:
+                        LegalNoticeDialog(self, "", on_agree, CONFIG_FILE_PATH)
+                    except Exception as e:
+                        # 다이얼로그 생성 실패 시 에러창을 띄우지 않고 계속 진행하도록 처리
+                        print(f"[LEGAL] LegalNoticeDialog 생성 실패(무시): {e}")
+                        try:
+                            messagebox.showwarning("법적 고지", "법적 고지 창을 표시할 수 없습니다. 프로그램을 계속합니다.", parent=self)
+                        except Exception:
+                            pass
+                        return True
+
+                except Exception as e:
+                    print(f"[LEGAL] 법적 고지 처리 중 오류(무시): {e}")
+                    return True
+
+                return False # 로그인 창 표시 보류
+            
+            return True # 이미 동의함 -> 로그인 창 진행
+
+        except Exception as e:
+            print(f"[LEGAL] 체크 중 오류 발생: {e}")
+            return True # 오류 시 차단하지 않고 진행
+
     
     def check_restart_login(self):
         """재시작 시 이전 로그인 정보로 자동 로그인"""
@@ -589,9 +838,9 @@ class App(ctk.CTk):
         self.on_login_success(user)
 
     def on_initial_setup(self):
-        """DB가 처음 생성될 때 호출되는 콜백. (admin 계정 생성하지 않음)"""
-        # admin 계정은 생성하지 않고, 사용자가 직접 회원가입하도록 유도
-        print("[초기화] DB 생성 완료 - admin 계정 생성하지 않음")
+        """DB가 처음 생성될 때 호출되는 콜백."""
+        # admin 계정을 미리 생성하지 않음 -> 사용자가 직접 등록하게 함
+        print("[초기화] DB 생성 완료 - 관리자 계정은 첫 사용자 등록 시 생성됩니다.")
         pass
 
     def show_pre_login_splash(self):
@@ -600,12 +849,9 @@ class App(ctk.CTk):
         splash.overrideredirect(True)
 
         width, height = 350, 350
-        try:
-            center_window_on_mouse_display(splash, width=width, height=height)
-        except Exception:
-            x = (splash.winfo_screenwidth() // 2) - (width // 2)
-            y = (splash.winfo_screenheight() // 2) - (height // 2)
-            splash.geometry(f'{width}x{height}+{x}+{y}')
+        
+        # 간소화된 중앙 배치 로직 호출
+        center_window_on_mouse_display(splash, width=width, height=height)
         
         splash.lift()
         splash.focus_force()
@@ -618,8 +864,10 @@ class App(ctk.CTk):
         except Exception:
             pass
 
-        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent")
-        bg_label.pack(fill="both", expand=True)
+        # Compute image area first, then create label with fixed size (CustomTkinter requires width/height in constructor)
+        img_area_w, img_area_h = width - 40, height - 140
+        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent", width=img_area_w, height=img_area_h)
+        bg_label.place(relx=0.5, rely=0.38, anchor="center")
 
         # 아이콘 로딩 시도
         icon_loaded = False
@@ -643,9 +891,10 @@ class App(ctk.CTk):
                             pil_img = pil_img.convert("RGBA")
                         
                         # 이미지 크기를 스플래시 화면에 맞게 조정
-                        pil_img = pil_img.resize((width-40, height-100), Image.Resampling.LANCZOS)
-                        
-                        splash_image = ctk.CTkImage(light_image=pil_img, size=(width-40, height-100))
+                        # Resize image to fit the image area while preserving aspect ratio
+                        target_size = (img_area_w, img_area_h)
+                        pil_img.thumbnail(target_size, Image.Resampling.LANCZOS)
+                        splash_image = ctk.CTkImage(light_image=pil_img, size=pil_img.size)
                         bg_label.configure(image=splash_image, text="")
                         print(f"[PRE-SPLASH] Successfully loaded icon: {icon_path}")
                         icon_loaded = True
@@ -685,20 +934,30 @@ class App(ctk.CTk):
             ]
             done_text = "Done!"
 
-        progress_label = ctk.CTkLabel(splash, text=initial_text, font=ctk.CTkFont(size=12),
-                                      fg_color=("white", "black"), text_color=("black", "white"), corner_radius=5)
-        progress_label.place(relx=0.5, rely=0.93, anchor="center")
+        # 텍스트 로그(진행상황 텍스트)는 제거하고 프로그래스바만 표시
+        # progress_label = ctk.CTkLabel(splash, text=initial_text, font=ctk.CTkFont(size=12),
+        #                               fg_color=("white", "black"), text_color=("black", "white"), corner_radius=5)
+        # progress_label.place(relx=0.5, rely=0.78, anchor="center")
+        
+        # 텍스트 라벨 대신 빈 라벨을 만들어 참조 오류 방지 (필요 시) 또는 로직 수정
+        # 여기서는 로직에서 progress_label을 참조하므로 더미(dummy)로 만들고 숨김
+        progress_label = ctk.CTkLabel(splash, text="", height=0) 
+        # place하지 않음 -> 화면에 안 보임
 
         progress_bar = ctk.CTkProgressBar(
             splash, 
-            width=280,
+            width=300,
             fg_color="#E0F2F1",
             progress_color="#69F0AE"
         )
         progress_bar.set(0)
-        progress_bar.place(relx=0.5, rely=0.98, anchor="center")
+        # Place progress bar slightly higher since text is gone
+        progress_bar.place(relx=0.5, rely=0.85, anchor="center")
 
         splash.update()
+
+        # Patch Logic Import
+        import apply_patches
 
         def init_database():
             try:
@@ -715,8 +974,28 @@ class App(ctk.CTk):
                 print(f"데이터베이스 초기화 실패: {e}")
                 return False
 
+        def run_auto_patches():
+            """자동 패치를 수행하고 결과를 스플래시 화면에 표시합니다."""
+            try:
+                print("\n=== 자동 패치 시작 ===")
+                logs = apply_patches.run_patches()
+                
+                # 로그가 있으면 잠시 보여주기 위해 텍스트 업데이트
+                for log in logs:
+                    print(f"[PATCH] {log}")
+                    progress_label.configure(text=log)
+                    splash.update()
+                    time.sleep(0.5) # 사용자가 볼 수 있게 짧은 대기
+                    
+                print("=== 자동 패치 완료 ===\n")
+                return True
+            except Exception as e:
+                print(f"자동 패치 실패: {e}")
+                return False
+
         tasks = [
             (task_descriptions[0], self.load_app_settings),
+            ("Applying latest patches...", run_auto_patches), 
             (task_descriptions[1], init_database),
         ]
         
@@ -747,10 +1026,8 @@ class App(ctk.CTk):
                 else:
                     self.show_sync_completed_message = False
                 
-                if not db_manager.has_users():
-                    self.show_initial_signup_window()
-                else:
-                    self.show_login_window()
+                # 항상 로그인 창 표시 (사용자가 직접 회원가입 버튼 클릭)
+                self.show_login_window()
                     
             except Exception as e:
                 error_msg = f"데이터베이스 초기화 확인 실패:\n{str(e)}"
@@ -784,15 +1061,30 @@ class App(ctk.CTk):
                 progress_label.configure(text=f"{description}")
                 splash.update_idletasks()
 
+                # 🔴 FIX: 작업 실패 시에도 다음 작업으로 진행하지 않고 정상 종료
+                task_failed = False
                 try:
                     task_func()
                     print(f"Task completed successfully: {description}")
                 except Exception as e:
                     print(f"Error in task '{description}': {e}")
+                    task_failed = True
+                    # 스플래시 화면 정리하고 에러 메시지 표시
+                    try:
+                        splash.update_idletasks()
+                    except:
+                        pass
                     messagebox.showerror("초기화 오류", 
                                        f"다음 작업 중 오류가 발생했습니다:\n{description}\n\n{str(e)}")
+                    # 초기화 실패 → 프로그램 종료
+                    try:
+                        splash.destroy()
+                    except:
+                        pass
+                    self.destroy()
                     return
                 
+                # 예외 없이 정상 진행
                 steps = 10
                 for i in range(steps + 1):
                     current_progress = start_progress + (end_progress - start_progress) * (i / steps)
@@ -801,8 +1093,10 @@ class App(ctk.CTk):
                     splash.update_idletasks()
                     time.sleep(0.02)
 
+                # 다음 작업 스케줄링 (50ms 후)
                 self.after(50, lambda: run_tasks(task_index + 1))
             else:
+                # 모든 작업 완료 → 최종 DB 연결 테스트
                 progress_label.configure(text=done_text)
                 progress_bar.set(1)
                 splash.update_idletasks()
@@ -816,11 +1110,17 @@ class App(ctk.CTk):
                         session.execute(text("SELECT 1"))
                         print("최종 DB 연결 테스트 성공")
                     
+                    # 성공 → 로그인 화면으로 진행
                     self.after(300, lambda: (splash.destroy(), on_load_complete()))
                 except Exception as e:
                     error_msg = f"최종 연결 테스트 실패:\n{str(e)}"
                     print(error_msg)
+                    # 🔴 FIX: 에러 표시 후 프로그램 정상 종료
                     messagebox.showerror("데이터베이스 오류", error_msg)
+                    try:
+                        splash.destroy()
+                    except:
+                        pass
                     self.destroy()
 
         self.after(100, run_tasks)
@@ -849,8 +1149,10 @@ class App(ctk.CTk):
         except Exception:
             pass
 
-        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent")
-        bg_label.pack(fill="both", expand=True)
+        # Compute image display area and create label with explicit size (required by CustomTkinter)
+        img_area_w, img_area_h = width - 40, height - 140
+        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent", width=img_area_w, height=img_area_h)
+        bg_label.place(relx=0.5, rely=0.38, anchor="center")
 
         # 아이콘 로딩 시도
         icon_loaded = False
@@ -872,11 +1174,11 @@ class App(ctk.CTk):
                         # 이미지 크기 조정 및 형식 변환
                         if pil_img.mode != 'RGBA':
                             pil_img = pil_img.convert("RGBA")
-                        
-                        # 이미지 크기를 스플래시 화면에 맞게 조정
-                        pil_img = pil_img.resize((width-40, height-100), Image.Resampling.LANCZOS)
-                        
-                        splash_image = ctk.CTkImage(light_image=pil_img, size=(width-40, height-100))
+
+                        # Resize image to fit the image area while preserving aspect ratio
+                        target_size = (img_area_w, img_area_h)
+                        pil_img.thumbnail(target_size, Image.Resampling.LANCZOS)
+                        splash_image = ctk.CTkImage(light_image=pil_img, size=pil_img.size)
                         bg_label.configure(image=splash_image, text="")
                         print(f"[POST-SPLASH] Successfully loaded icon: {icon_path}")
                         icon_loaded = True
@@ -921,16 +1223,16 @@ class App(ctk.CTk):
 
         progress_label = ctk.CTkLabel(splash, text=initial_text, font=ctk.CTkFont(size=12),
                                       fg_color=("white", "black"), text_color=("black", "white"), corner_radius=5)
-        progress_label.place(relx=0.5, rely=0.93, anchor="center")
+        progress_label.place(relx=0.5, rely=0.78, anchor="center")
 
         progress_bar = ctk.CTkProgressBar(
             splash, 
-            width=280,
+            width=300,
             fg_color="#E0F2F1",
             progress_color="#69F0AE"
         )
         progress_bar.set(0)
-        progress_bar.place(relx=0.5, rely=0.98, anchor="center")
+        progress_bar.place(relx=0.5, rely=0.88, anchor="center")
 
         splash.update()
 
@@ -1036,6 +1338,7 @@ class App(ctk.CTk):
         self.ACTION_CONFIG = {
             "document/formulation_mgt": {"icon": "℞", "title": self.texts.get('formulation_mgt', 'Formulation Mgt.')},
             "document/document_sub": {"icon": "📄", "title": self.texts.get('document_sub', 'Documents')},
+            "document/ingredient_lookup": {"icon": "🔍", "title": self.texts.get('ingredient_lookup', 'Ingredient Lookup')},
             "data/ingredient_mgt": {"icon": "🧪", "title": self.texts.get('ingredient_mgt', 'Ingredient Mgt.')},
             "data/client_mgt": {"icon": "🏢", "title": self.texts.get('client_mgt', 'Client Mgt.')},
             "data/user_mgt": {"icon": "👥", "title": self.texts.get('user_mgt', 'User Mgt.')},
@@ -1046,6 +1349,8 @@ class App(ctk.CTk):
             "quality/mfg_record": {"icon": "🔬", "title": self.texts.get('mfg_record', 'Mfg. Record')},
             "quality/ingredient_report": {"icon": "🔬", "title": self.texts.get('ingredient_report', 'Ingredient Report')},
             "package": {"icon": "📦", "title": "문서 관리 (패키지)"},  # 패키지 관리 추가
+            # 코드 관리 (DataManagement 내 탭 '코드 관리' -> key 'data/code_mgt')
+            "data/code_mgt": {"icon": "🏷️", "title": self.texts.get('code_mgt', '코드 관리')},
         }
 
         # Build reverse lookup from displayed title -> action key for resolving
@@ -1101,7 +1406,7 @@ class App(ctk.CTk):
             {"name": FRAME_HOME, "text": self.texts["home"], "requires": None},
             {"name": FRAME_DOCUMENT, "text": self.texts["document"], "requires": "research"},
             {"name": FRAME_QUALITY, "text": self.texts["quality"], "requires": "quality"},
-            {"name": FRAME_PACKAGE, "text": "문서 관리", "requires": "package"},
+            {"name": FRAME_PACKAGE, "text": "문서 관리", "requires": "package", "hidden": True},
         ]
 
         current_row = 1
@@ -1374,6 +1679,67 @@ class App(ctk.CTk):
         if '/' in name:
             frame_name, tab_name = name.split('/', 1)
 
+        # Lazy Loading: 프레임이 생성되지 않았다면 지금 생성
+        if frame_name not in self.frames:
+            print(f"[LazyLoading] '{frame_name}' 프레임 생성 중...")
+            self.show_loading_cursor(True) # 로딩 커서 표시 (선택 사항)
+            try:
+                if frame_name == FRAME_SETTINGS:
+                    self.frames[FRAME_SETTINGS] = SettingsManagementFrame(
+                        self.main_content_frame, 
+                        self.current_user, 
+                        self,
+                        config_path=CONFIG_FILE_PATH,
+                        application_path=application_path,
+                    )
+                elif frame_name == FRAME_DATA:
+                    # DataManagementFrame 내부 import가 필요한 경우 처리
+                    # from modules.data_management import DataManagementFrame (이미 전역에 있음)
+                    self.frames[FRAME_DATA] = DataManagementFrame(
+                        self.main_content_frame,
+                        self.current_user,
+                        self,
+                    )
+                elif frame_name == FRAME_DOCUMENT:
+                    from modules.document_management import DocumentManagementFrame
+                    self.frames[FRAME_DOCUMENT] = DocumentManagementFrame(
+                        self.main_content_frame,
+                        self.current_user,
+                        self,
+                        texts=self.texts,
+                        mode="research"
+                    )
+                elif frame_name == FRAME_QUALITY:
+                    self.frames[FRAME_QUALITY] = QualityManagementFrame(
+                        self.main_content_frame,
+                        self.current_user,
+                        self,
+                        texts=self.texts
+                    )
+                elif frame_name == FRAME_PACKAGE:
+                    from modules.document_management import DocumentManagementFrame
+                    self.frames[FRAME_PACKAGE] = DocumentManagementFrame(
+                        self.main_content_frame,
+                        self.current_user,
+                        self,
+                        texts=self.texts,
+                        mode="package_only"
+                    )
+                
+                # 공통 Grid 설정
+                if frame_name in self.frames:
+                    self.frames[frame_name].grid(row=0, column=0, sticky="nsew")
+                    print(f"[LazyLoading] '{frame_name}' 프레임 생성 완료")
+            except Exception as e:
+                print(f"[오류] '{frame_name}' 프레임 생성 실패: {e}")
+                import traceback
+                traceback.print_exc()
+                messagebox.showerror("로딩 오류", f"화면을 불러오는 중 오류가 발생했습니다.\n{e}")
+                self.show_loading_cursor(False)
+                return
+            finally:
+                self.show_loading_cursor(False)
+
         if frame_name not in self.frames:
             print(f"'{frame_name}' 프레임을 찾을 수 없습니다.")
             return
@@ -1394,6 +1760,20 @@ class App(ctk.CTk):
             print(f"[경고] 홈 새로고침 실패: {e}")
         if tab_name and hasattr(self.frames[frame_name], 'switch_to_tab'):
             self.frames[frame_name].switch_to_tab(tab_name)
+
+    def show_loading_cursor(self, show=True):
+        """마우스 커서를 로딩 상태로 변경합니다."""
+        try:
+            cursor = "watch" if show else "arrow"
+            self.configure(cursor=cursor)
+            for child in self.winfo_children():
+                try:
+                    child.configure(cursor=cursor)
+                except:
+                    pass
+            self.update_idletasks()
+        except Exception:
+            pass
 
     def open_material_by_id(self, material_id: int):
         """데이터 관리 > 성분 관리로 이동하여 해당 원료를 선택합니다."""
@@ -1754,78 +2134,45 @@ class App(ctk.CTk):
 
     def on_closing(self):
         """프로그램이 종료될 때 호출되는 함수입니다."""
-        print(f"{datetime.now()}: 프로그램 종료 중... 활동 기록 저장")
+        print(f"{datetime.now()}: 프로그램 종료 중...")
+        
         try:
             # 1. DB 동기화 타이머 중지
-            self.stop_db_sync_check()
+            try:
+                self.stop_db_sync_check()
+            except Exception as e:
+                print(f"[경고] DB 동기화 타이머 중지 실패: {e}")
             
             # 2. 설정 및 활동 기록 저장
-            self.save_app_settings()
-            self.save_recent_actions()
+            try:
+                self.save_app_settings()
+                self.save_recent_actions()
+                print(f"{datetime.now()}: 설정 저장 완료")
+            except Exception as e:
+                print(f"[경고] 설정 저장 실패: {e}")
             
-            # 3. DB 연결 완전히 해제
-            print(f"{datetime.now()}: DB 연결 해제 중...")
-            db_manager.dispose_engine()
-            print(f"{datetime.now()}: DB 연결 해제 완료")
+            # 3. DB 연결 정리 (타임아웃 30초)
+            try:
+                print(f"{datetime.now()}: DB 연결 해제 중...")
+                db_manager.dispose_engine()
+                print(f"{datetime.now()}: DB 연결 해제 완료")
+            except Exception as e:
+                print(f"[경고] DB 연결 해제 실패: {e}")
             
-            # 4. 모든 자식 창 강제 종료
-            for child in self.winfo_children():
-                try:
-                    if hasattr(child, 'destroy'):
-                        child.destroy()
-                except:
-                    pass
+            # 4. UI 정리
+            try:
+                self.quit()
+            except Exception as e:
+                print(f"[경고] quit() 실패: {e}")
             
-            # 5. 메인 창 파괴
-            self.destroy()
-            
-            # 6. 완전한 프로세스 종료
             print(f"{datetime.now()}: 프로그램 종료 완료")
             
         except Exception as e:
-            print(f"{datetime.now()}: 종료 중 오류 발생: {e}")
-        finally:
-            # 강제 종료 (모든 스레드와 프로세스 완전 종료)
-            try:
-                # 메인 루프 종료 시도
-                self.quit()
-            except:
-                pass
-            try:
-                self.destroy()
-            except:
-                pass
-            # Windows 환경에서 드물게 프로세스가 남는 경우를 대비한 최후의 수단
-            try:
-                if os.name == 'nt':
-                    import threading, ctypes
-                    def _force_kill():
-                        try:
-                            ctypes.windll.kernel32.TerminateProcess(ctypes.windll.kernel32.GetCurrentProcess(), 0)
-                        except Exception:
-                            pass
-                    # os._exit 실패/무시 대비해서 0.5초 후 강제 종료 시도
-                    t = threading.Timer(0.5, _force_kill)
-                    t.daemon = True  # 종료 방해하지 않도록 데몬 스레드로 실행
-                    t.start()
-            except Exception:
-                pass
-            
-            # 즉시/지연 이중 종료 보장
-            try:
-                # 1) 짧게 지연된 강제 종료 (데몬 타이머)
-                import threading
-                t2 = threading.Timer(0.2, lambda: os._exit(0))
-                t2.daemon = True
-                t2.start()
-            except Exception:
-                pass
-            try:
-                # 2) 정상 종료 시도
-                sys.exit(0)
-            except Exception:
-                # 3) 최후의 수단: 즉시 종료 (남아있는 비-데몬 스레드가 있어도 종료)
-                os._exit(0)
+            print(f"{datetime.now()}: 종료 중 예기치 않은 오류 발생: {e}")
+        
+        # 🔴 FIX: 강제 종료 로직 제거 - 정상 종료만 사용
+        # sys.exit(0) 은 마지막 수단으로만 사용
+        sys.exit(0)
 
     def get_config_value(self, section, option, fallback=None):
         """config.ini에서 값을 읽어옵니다."""
@@ -2048,7 +2395,11 @@ class App(ctk.CTk):
             def resolve_shared_file(path):
                 if not path:
                     return None
-                path = path.strip()
+                # 인라인 주석(#) 제거 및 공백 정리
+                if '#' in path:
+                    path = path.split('#')[0]
+                path = path.strip().strip('"').strip("'")
+                
                 if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
                     return path
                 return os.path.join(path, 'cosmetic.db')
@@ -2164,6 +2515,9 @@ class App(ctk.CTk):
 
                     print(f"[DB동기화] 실제 변경 감지! 크기변경: {significant_size_change} ({self.last_shared_db_info[0]} -> {current_db_info[0]}), 시간차: {time_diff}초")
                     
+                    # 알림 설정 확인
+                    show_alert = config.getboolean('Notifications', 'show_db_sync_alert', fallback=True)
+
                     # 현재 사용자가 관리자인 경우, 자신의 변경일 가능성이 있으므로 더 신중하게 처리
                     if self.current_user.is_admin:
                         # 관리자의 경우 더 큰 변경이거나 오래된 변경일 때만 알림 (더 보수적)
@@ -2175,10 +2529,20 @@ class App(ctk.CTk):
                             )
                             if changes_summary_text:
                                 details_text += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
-                            details_text += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
-                                              "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
-                            if messagebox.askyesno("데이터베이스 업데이트", details_text, parent=self):
-                                self.sync_with_shared_db_safe(shared_db_file)
+                            
+                            # 알림 설정에 따른 분기
+                            if show_alert:
+                                details_text += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
+                                                  "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
+                                if messagebox.askyesno("데이터베이스 업데이트", details_text, parent=self):
+                                    self.sync_with_shared_db_safe(shared_db_file)
+                            else:
+                                # 알림 끔 -> 홈 화면에 표시
+                                if "home" in self.frames:
+                                    self.frames["home"].show_update_available_notice(
+                                        details_text, 
+                                        lambda: self.sync_with_shared_db_safe(shared_db_file)
+                                    )
                         else:
                             # 관리자의 경우 작은 변경은 자신의 변경으로 간주하고 조용히 업데이트
                             print(f"[DB동기화] 관리자 변경으로 추정되어 조용히 업데이트 (시간차: {time_diff}초)")
@@ -2189,10 +2553,19 @@ class App(ctk.CTk):
                         user_details = "관리자에 의해 데이터가 변경되었습니다."
                         if changes_summary_text:
                             user_details += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
-                        user_details += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
-                                         "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
-                        if messagebox.askyesno("데이터베이스 업데이트", user_details, parent=self):
-                            self.sync_with_shared_db_safe(shared_db_file)
+                        
+                        if show_alert:
+                            user_details += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
+                                             "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
+                            if messagebox.askyesno("데이터베이스 업데이트", user_details, parent=self):
+                                self.sync_with_shared_db_safe(shared_db_file)
+                        else:
+                             # 알림 끔 -> 홈 화면에 표시
+                            if "home" in self.frames:
+                                self.frames["home"].show_update_available_notice(
+                                    user_details, 
+                                    lambda: self.sync_with_shared_db_safe(shared_db_file)
+                                )
                 else:
                     # 미미한 변경사항은 무시하고 정보만 업데이트
                     print(f"[DB동기화] 미미한 변경 무시 (크기차: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)")
@@ -2207,7 +2580,7 @@ class App(ctk.CTk):
             print("[DB동기화] 오류로 인해 동기화 타이머를 일시 중지합니다.")
 
     def sync_with_shared_db_safe(self, shared_db_path):
-        """안전한 공유 DB 동기화 - 실시간으로 데이터를 다시 불러옴"""
+        """안전한 공유 DB 동기화 - 임시 파일 다운로드 후 교체 방식"""
         try:
             print(f"[DB동기화] 실시간 동기화 시작: {shared_db_path}")
             
@@ -2232,40 +2605,101 @@ class App(ctk.CTk):
             local_db_path = os.path.join(application_path, 
                                         db_manager.get_db_relative_path(),
                                         "cosmetic.db")
+            temp_db_path = local_db_path + ".new_download"
             
             print(f"[DB동기화] 로컬 DB: {local_db_path}")
             print(f"[DB동기화] 공유 DB: {shared_db_file}")
+
+            # 3. 공유 DB를 임시 파일로 먼저 복사 (DB 연결 해제 전)
+            # 이렇게 하면 네트워크 문제나 공유 파일 잠금 문제로 인한 실패 시 
+            # 로컬 DB 연결을 끊지 않아도 됨
+            import shutil
+            try:
+                print(f"[DB동기화] 공유 DB -> 임시 파일 다운로드 시작")
+                shutil.copy2(shared_db_file, temp_db_path)
+                print(f"[DB동기화] 임시 파일 생성 완료: {temp_db_path}")
+            except Exception as download_error:
+                print(f"[DB동기화] 공유 DB 다운로드 실패: {download_error}")
+                messagebox.showerror("동기화 오류", 
+                                   f"공유 DB 파일을 가져오는데 실패했습니다:\n{download_error}\n\n"
+                                   f"네트워크 연결이나 파일 접근 권한을 확인해주세요.", 
+                                   parent=self)
+                return
             
-            # 3. DB 연결 완전히 해제
+            # 4. DB 연결 완전히 해제
             try:
                 print("[DB동기화] 기존 DB 연결 해제 중...")
                 db_manager.dispose_engine()
+                
+                # 가비지 컬렉션으로 모든 참조 해제
+                import gc
+                gc.collect()
+                
                 print("[DB동기화] DB 연결 해제 완료")
             except Exception as e:
                 print(f"[DB동기화] DB 연결 해제 중 오류: {e}")
             
-            # 4. 파일 잠금 해제 대기
+            # 5. 파일 교체 (재시도 로직 포함)
             import time
-            time.sleep(0.5)
+            max_retries = 5
+            retry_delay = 1.0
+            replace_success = False
+            last_error = None
             
-            # 5. 파일 복사
-            try:
-                import shutil
-                # 백업 생성
-                backup_path = local_db_path + ".backup"
-                if os.path.exists(local_db_path):
-                    shutil.copy2(local_db_path, backup_path)
-                    print(f"[DB동기화] 백업 생성: {backup_path}")
-                
-                # 공유 DB를 로컬로 복사
-                shutil.copy2(shared_db_file, local_db_path)
-                print(f"[DB동기화] DB 파일 복사 완료")
-                
-            except Exception as copy_error:
-                print(f"[DB동기화] 파일 복사 실패: {copy_error}")
+            for attempt in range(max_retries):
+                try:
+                    # 백업 생성
+                    backup_path = local_db_path + ".backup"
+                    if os.path.exists(local_db_path):
+                        try:
+                            shutil.copy2(local_db_path, backup_path)
+                        except Exception as backup_err:
+                            print(f"[DB동기화] 백업 생성 실패 (무시): {backup_err}")
+                    
+                    # 파일 교체 (먼저 삭제 후 이동)
+                    if os.path.exists(local_db_path):
+                        try:
+                            os.remove(local_db_path)
+                        except OSError:
+                            # 삭제 실패 시 (잠금 등) 잠시 대기 후 이동 시도
+                            pass
+                            
+                    shutil.move(temp_db_path, local_db_path)
+                    print(f"[DB동기화] DB 파일 교체 완료")
+                    replace_success = True
+                    break
+                    
+                except PermissionError as pe:
+                    last_error = pe
+                    print(f"[DB동기화] 파일 교체 시도 {attempt + 1}/{max_retries} 실패 (권한 오류): {pe}")
+                except Exception as e:
+                    last_error = e
+                    print(f"[DB동기화] 파일 교체 시도 {attempt + 1}/{max_retries} 실패: {e}")
+
+                if attempt < max_retries - 1:
+                    print(f"[DB동기화] {retry_delay}초 후 재시도...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 1.5
+                    import gc
+                    gc.collect()
+            
+            # 실패 시 처리
+            if not replace_success:
+                # 임시 파일 정리
+                if os.path.exists(temp_db_path):
+                    try: os.remove(temp_db_path)
+                    except: pass
+                    
                 messagebox.showerror("동기화 오류", 
-                                   f"DB 파일 복사 중 오류가 발생했습니다:\n\n{copy_error}", 
+                                   f"DB 파일 교체 중 오류가 발생했습니다:\n\n{last_error}\n\n"
+                                   f"파일이 다른 프로그램에 의해 사용 중일 수 있습니다.\n"
+                                   f"프로그램을 재시작하면 해결될 수 있습니다.", 
                                    parent=self)
+                # DB 재연결 시도 (원래 파일로)
+                try:
+                    db_manager.setup_database(application_path, CONFIG_FILE_PATH, None)
+                except:
+                    pass
                 return
             
             # 6. DB 재연결
@@ -2585,25 +3019,27 @@ if __name__ == "__main__":
             print(f"[WARNING] 기본 테마도 실패: {fallback_error}")
             # 테마 없이 진행
 
-    # 실행 PC 하드웨어 바인딩 검증 (최초 실행 시 생성)
+    # Hardware binding validation (PC 박제 기능)
     try:
-        from utils.hw_binding import ensure_machine_binding
-        ensure_machine_binding(CONFIG_FILE_PATH)
-        print("[STARTUP] 하드웨어 바인딩 검증 완료")
-    except SystemExit:
-        # ensure_machine_binding에서 차단 시 종료
-        raise
-    except Exception as bind_e:
-        # 바인딩 로직 실패 시 안전을 위해 실행 차단 (요구사항: 불일치 시 실행 차단)
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk(); root.withdraw()
-            messagebox.showerror("실행 차단", f"하드웨어 바인딩 처리 중 오류가 발생했습니다.\n{bind_e}")
-            root.destroy()
-        except Exception:
-            pass
-        raise SystemExit(1)
+        from modules.security import SecurityManager
+        
+        # ✅ 개발/테스트 모드: setup.key가 없으면 경고만 표시하고 진행
+        security_manager = SecurityManager()
+        
+        # setup.key 또는 license.dat가 없으면 경고만 표시
+        if not os.path.exists(security_manager.setup_flag) and not os.path.exists(security_manager.license_file):
+            print("[보안] ⚠️ 경고: setup.key 또는 license.dat를 찾을 수 없습니다.")
+            print("[보안] 이는 개발/테스트 환경에서 정상입니다.")
+            print("[보안] 배포 시에는 setup.key를 포함해주세요.\n")
+        elif not security_manager.verify_access():
+            sys.exit(1)
+            
+    except ImportError:
+        pass 
+    except Exception as e:
+        print(f"[보안] Security check failed: {e}")
+        # 테스트 환경에서는 계속 진행
+        pass 
     
     app = App()
     app.mainloop()

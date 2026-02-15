@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import os
 import sys
+from tkinter import filedialog, messagebox
 
 # 프로젝트 루트 경로를 sys.path에 추가 (상대 경로 import를 위함)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,8 +15,65 @@ from datetime import datetime
 import configparser
 import base64
 
+class PasswordChangeDialog(ctk.CTkToplevel):
+    def __init__(self, master, username):
+        super().__init__(master)
+        self.title("비밀번호 변경")
+        self.geometry("350x250")
+        self.username = username
+        self.success = False
+        
+        self.transient(master)
+        self.grab_set()
+        self.resizable(False, False)
+        
+        self.setup_ui()
+        try:
+            center_window_on_mouse_display(self)
+        except:
+            pass
+            
+    def setup_ui(self):
+        self.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self, text="🔒 비밀번호 변경 필요", font=("Arial", 16, "bold")).pack(pady=(20, 10))
+        ctk.CTkLabel(self, text="관리자가 비밀번호를 초기화했습니다.\n새로운 비밀번호를 설정해주세요.", font=("Arial", 12)).pack(pady=(0, 20))
+        
+        self.pw1 = ctk.CTkEntry(self, placeholder_text="새 비밀번호", show="*", width=250)
+        self.pw1.pack(pady=5)
+        
+        self.pw2 = ctk.CTkEntry(self, placeholder_text="비밀번호 확인", show="*", width=250)
+        self.pw2.pack(pady=5)
+        
+        ctk.CTkButton(self, text="변경하기", command=self.change_password, width=250).pack(pady=20)
+        
+    def change_password(self):
+        p1 = self.pw1.get()
+        p2 = self.pw2.get()
+        
+        if not p1 or not p2:
+            messagebox.showwarning("경고", "비밀번호를 입력해주세요.", parent=self)
+            return
+            
+        if p1 != p2:
+            messagebox.showwarning("경고", "비밀번호가 일치하지 않습니다.", parent=self)
+            return
+            
+        if len(p1) < 4:
+            messagebox.showwarning("경고", "비밀번호는 4자 이상이어야 합니다.", parent=self)
+            return
+            
+        try:
+            if db_manager.update_user_password(self.username, p1):
+                messagebox.showinfo("성공", "비밀번호가 성공적으로 변경되었습니다.", parent=self)
+                self.success = True
+                self.destroy()
+            else:
+                messagebox.showerror("오류", "비밀번호 변경에 실패했습니다.", parent=self)
+        except Exception as e:
+            messagebox.showerror("오류", f"오류 발생: {e}", parent=self)
+
 class LoginWindow(ctk.CTkToplevel):
-    def __init__(self, master=None, on_login_success=None, config_path=None):
+    def __init__(self, master=None, on_login_success=None, config_path=None, application_path=None):
         super().__init__(master)
         print(f"{datetime.now()}: LoginWindow 초기화 시작")
         self.title("로그인")
@@ -24,6 +82,7 @@ class LoginWindow(ctk.CTkToplevel):
 
         self.on_login_success = on_login_success
         self.config_path = config_path
+        self.application_path = application_path
         self.config = configparser.ConfigParser()
         try:
             if os.path.exists(self.config_path):
@@ -48,7 +107,19 @@ class LoginWindow(ctk.CTkToplevel):
         # 자동 로그인 체크
         self.check_auto_login()
         
+        # 첫 사용자 확인 (등록된 사용자가 없으면 회원가입 창 자동 실행)
+        self.check_first_run()
+
         print(f"{datetime.now()}: LoginWindow 초기화 완료")
+
+    def check_first_run(self):
+        try:
+            if not db_manager.has_users():
+                print("[Login] 등록된 사용자 없음 - 초기 설정(회원가입) 모드 진입")
+                messagebox.showinfo("초기 설정", "등록된 사용자가 없습니다.\n최초 관리자(Master) 계정을 등록해주세요.", parent=self)
+                self.after(100, lambda: self.open_signup(is_initial_setup=True))
+        except Exception as e:
+            print(f"[Login] 첫 사용자 확인 실패: {e}")
 
     def setup_ui(self):
         print(f"{datetime.now()}: setup_ui 호출")
@@ -167,6 +238,21 @@ class LoginWindow(ctk.CTkToplevel):
         )
         self.signup_button.pack()
         
+        # DB 설정 버튼
+        self.db_settings_button = ctk.CTkButton(
+            self.buttons_frame,
+            text="DB 경로 설정",
+            fg_color="transparent",
+            text_color=("gray50", "gray50"),
+            hover_color=("gray90", "gray20"),
+            command=self.open_db_settings,
+            width=120,
+            height=25,
+            font=ctk.CTkFont(size=10),
+            corner_radius=5
+        )
+        self.db_settings_button.pack(pady=(10, 0))
+        
         # 메시지 라벨
         self.message_label = ctk.CTkLabel(
             self.main_frame, 
@@ -228,7 +314,11 @@ class LoginWindow(ctk.CTkToplevel):
     def on_id_change(self, event):
         username = self.id_entry.get()
         if username:
-            self.fetch_user_settings_from_db(username)
+            try:
+                self.fetch_user_settings_from_db(username)
+            except Exception as e:
+                # DB 연결이 안 되어 있을 경우 무시
+                print(f"{datetime.now()}: 사용자 설정 조회 실패 (DB 미연결?): {e}")
 
     def fetch_user_settings_from_db(self, username):
         print(f"{datetime.now()}: DB에서 '{username}'의 설정 가져오기")
@@ -318,50 +408,106 @@ class LoginWindow(ctk.CTkToplevel):
         if not username or not password:
             self.show_message("아이디와 비밀번호를 모두 입력하세요.")
             return
+        # Before attempting authentication, ensure legal notice is agreed.
+        app = getattr(self, 'master', None)
 
-        # 로그인 버튼 비활성화 (중복 클릭 방지)
-        self.login_button.configure(state="disabled", text="로그인 중...")
-        self.update()
-
-        login_success = False
-        try:
-            user = db_manager.verify_user(username, password)
-
-            if user:
-                print(f"{datetime.now()}: 사용자 '{username}' 인증 성공")
-                self.show_message("로그인 성공!", "green")
-                
-                # DB에 사용자 설정 업데이트
-                db_manager.update_user_settings(username, self.remember_id_var.get(), self.auto_login_var.get())
-                
-                # 로컬 설정 저장 (자동 로그인 시 비밀번호도 포함)
-                self.save_settings_to_config(username, password if self.auto_login_var.get() else None)
-                
-                login_success = True
-                
-                self.after(10, self.destroy)
-                print(f"{datetime.now()}: LoginWindow 파괴")
-            else:
-                self.show_message("아이디 또는 비밀번호가 일치하지 않습니다.")
-                
-        except Exception as e:
-            print(f"{datetime.now()}: 로그인 중 오류: {e}")
-            self.show_message("로그인 중 오류가 발생했습니다.")
-        
-        # 로그인 실패한 경우에만 버튼 상태 복원
-        if not login_success:
+        def _perform_auth():
+            # 로그인 버튼 비활성화 (중복 클릭 방지)
             try:
-                self.login_button.configure(state="normal", text="로그인")
-            except:
-                pass  # 창이 파괴된 경우 무시
-        else:
-            # 성공한 경우에만 콜백 호출
-            if self.on_login_success:
-                self.on_login_success(user)
+                self.login_button.configure(state="disabled", text="로그인 중...")
+                self.update()
+            except Exception:
+                pass
+
+            login_success = False
+            try:
+                user = db_manager.verify_user(username, password)
+
+                if user:
+                    # 비밀번호 강제 변경 확인
+                    if getattr(user, 'force_password_change', False):
+                        print(f"{datetime.now()}: 사용자 '{username}' 비밀번호 강제 변경 대상")
+                        
+                        # 다이얼로그 띄우기
+                        pw_dialog = PasswordChangeDialog(self, username)
+                        self.wait_window(pw_dialog)
+                        
+                        if not pw_dialog.success:
+                            print(f"{datetime.now()}: 비밀번호 변경 취소 또는 실패")
+                            self.show_message("비밀번호를 변경해야 로그인할 수 있습니다.")
+                            # 버튼 복원
+                            try:
+                                self.login_button.configure(state="normal", text="로그인")
+                            except:
+                                pass
+                            return
+
+                        # 비밀번호 변경 성공 시 다시 유저 정보 가져오기 (상태 업데이트됨)
+                        user = db_manager.verify_user(username, pw_dialog.pw1.get())
+                        if not user:
+                            self.show_message("로그인 재시도 필요")
+                            try:
+                                self.login_button.configure(state="normal", text="로그인")
+                            except:
+                                pass
+                            return
+
+                    print(f"{datetime.now()}: 사용자 '{username}' 인증 성공")
+                    self.show_message("로그인 성공!", "green")
+
+                    # DB에 사용자 설정 업데이트
+                    db_manager.update_user_settings(username, self.remember_id_var.get(), self.auto_login_var.get())
+
+                    # 로컬 설정 저장 (자동 로그인 시 비밀번호도 포함)
+                    self.save_settings_to_config(username, password if self.auto_login_var.get() else None)
+
+                    login_success = True
+
+                    try:
+                        self.after(10, self.destroy)
+                        print(f"{datetime.now()}: LoginWindow 파괴")
+                    except Exception:
+                        pass
+                else:
+                    self.show_message("아이디 또는 비밀번호가 일치하지 않습니다.")
+
+            except Exception as e:
+                print(f"{datetime.now()}: 로그인 중 오류: {e}")
+                self.show_message("로그인 중 오류가 발생했습니다.")
+
+            # 로그인 실패한 경우에만 버튼 상태 복원
+            if not login_success:
+                try:
+                    self.login_button.configure(state="normal", text="로그인")
+                except:
+                    pass  # 창이 파괴된 경우 무시
+            else:
+                # 성공한 경우에만 콜백 호출
+                if self.on_login_success:
+                    try:
+                        self.on_login_success(user)
+                    except Exception:
+                        pass
+
+        # If app provides legal notice check, defer to it with continuation
+        try:
+            if app and hasattr(app, 'check_legal_notice_agreement'):
+                try:
+                    res = app.check_legal_notice_agreement(continue_callback=_perform_auth)
+                    # If check returned False, dialog was shown and auth will continue via callback
+                    if res is False:
+                        return
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # No legal dialog needed or check passed -> proceed immediately
+        _perform_auth()
             
-    def open_signup(self):
-        print(f"{datetime.now()}: open_signup 호출")
-        signup_win = SignupWindow(self)
+    def open_signup(self, is_initial_setup=False):
+        print(f"{datetime.now()}: open_signup 호출 (초기설정: {is_initial_setup})")
+        signup_win = SignupWindow(self, is_initial_setup=is_initial_setup)
         signup_win.transient(self)
         signup_win.grab_set()
         self.wait_window(signup_win)
@@ -381,6 +527,70 @@ class LoginWindow(ctk.CTkToplevel):
         x = max(0, (screen_width // 2) - (win_width // 2))
         y = max(0, (screen_height // 2) - (win_height // 2))
         self.geometry(f'{win_width}x{win_height}+{x}+{y}')
+
+
+    def open_db_settings(self):
+        """DB 경로 설정 및 즉시 적용"""
+        print(f"{datetime.now()}: DB 설정 시작")
+        
+        config = configparser.ConfigParser(interpolation=None)
+        try:
+            if os.path.exists(self.config_path):
+                config.read(self.config_path, encoding='utf-8')
+        except Exception as e:
+            print(f"{datetime.now()}: config 오류: {e}")
+        
+        current = config.get('Paths', 'shared_db_path', fallback='') if config.has_section('Paths') else ''
+        
+        folder = filedialog.askdirectory(
+            title="DB 저장 폴더 선택",
+            initialdir=current if current and os.path.exists(current) else os.path.expanduser('~')
+        )
+        
+        if folder:
+            try:
+                # 1. config.ini에 저장
+                if not config.has_section('Paths'):
+                    config.add_section('Paths')
+                config.set('Paths', 'shared_db_path', folder)
+                
+                with open(self.config_path, 'w', encoding='utf-8') as f:
+                    config.write(f)
+                
+                print(f"{datetime.now()}: DB 경로 저장 완료: {folder}")
+                
+                # 2. DB 즉시 재연결
+                try:
+                    db_file = os.path.join(folder, 'cosmetic.db')
+                    print(f"{datetime.now()}: DB 재연결 시도: {db_file}")
+                    
+                    # application_path 확보 (명시적 전달 우선, 그 다음 master 속성)
+                    app_path = self.application_path or getattr(self.master, 'application_path', None)
+                    
+                    if app_path:
+                        # 기존 DB 연결 해제
+                        db_manager.dispose_engine()
+                        print(f"{datetime.now()}: 기존 DB 연결 해제 완료")
+                        
+                        # 새 경로로 DB 재설정
+                        db_manager.setup_database(app_path, self.config_path, None)
+                        print(f"{datetime.now()}: DB 재연결 성공")
+                        
+                        self.show_message(f"DB 연결 성공!\n{folder}", "green")
+                    else:
+                        # 폴백: application_path를 찾을 수 없는 경우
+                        self.show_message(f"DB 경로 설정 완료\n(재시작 필요)\n{folder}", "orange")
+                        print(f"{datetime.now()}: application_path 없음, 재시작 필요")
+                        
+                except Exception as db_error:
+                    print(f"{datetime.now()}: DB 재연결 실패: {db_error}")
+                    import traceback
+                    traceback.print_exc()
+                    self.show_message(f"DB 재연결 실패\n{str(db_error)}\n재시작 후 적용됩니다", "orange")
+                    
+            except Exception as e:
+                self.show_message(f"설정 실패: {e}", "red")
+                print(f"{datetime.now()}: DB 경로 설정 실패: {e}")
 
     def on_closing(self):
         """로그인 창을 닫을 때 프로그램 전체를 종료합니다."""

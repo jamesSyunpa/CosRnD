@@ -7,10 +7,11 @@ import configparser
 from sqlalchemy.orm import sessionmaker, joinedload, subqueryload
 from datetime import datetime
 from types import SimpleNamespace
+import json
 
-from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem, ProductionFormulation, ProductionStep, ProductionRun
+from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem, ProductionFormulation, ProductionStep, ProductionRun, ProductCodeRule
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 21
 
 def file_exists_including_hidden(path: str) -> bool:
     """숨김 파일을 포함하여 파일 존재 여부를 확인합니다."""
@@ -235,6 +236,9 @@ class DBManager:
         def resolve_shared_file(path):
             if not path:
                 return None
+            # 인라인 주석(#) 제거 및 공백 함수
+            if '#' in path:
+                path = path.split('#')[0]
             # 따옴표로 감싸진 값 방지 및 공백 제거
             path = path.strip().strip('"').strip("'")
             # if user or older code stored full file path, accept it
@@ -290,15 +294,18 @@ class DBManager:
 
                 # 엔진 채택 후 마이그레이션/트리거 보장 진행 (버전 불일치여도 시도)
                 self.engine = test_engine
+                
+                # [강제 보정] 공유 DB 사용 시에도 누락된 컬럼(manufacturing_date 등)을 강제로 확인하고 추가합니다.
+                try:
+                    print("[INFO] 공유 DB 스키마 강제 보정 시작...")
+                    self._run_migrations()
+                except Exception as mig_e:
+                    print(f"[경고] 공유 DB 스키마 보정 실패(무시): {mig_e}")
+
                 try:
                     self._check_and_run_migrations()
                 except Exception as mig_e:
                     print(f"[경고] 공유 DB 버전/마이그레이션 처리 실패(무시): {mig_e}")
-                    try:
-                        # 최소한 누락 컬럼 보수 시도
-                        self._run_migrations()
-                    except Exception as mig2:
-                        print(f"[경고] 공유 DB 보수 마이그레이션 2차 실패(무시): {mig2}")
                 try:
                     self.ensure_change_tracking()
                 except Exception as trg_e:
@@ -331,9 +338,13 @@ class DBManager:
             is_new_db = not file_exists_including_hidden(self.db_path)
             self.cleanup_db_files()
             
-            # 3. DB 파일 생성
-            if not self._create_new_db_file(self.db_path):
-                raise RuntimeError("DB 파일 생성 실패")
+            # 3. DB 파일 생성 (없을 경우에만)
+            if is_new_db:
+                print(f"  * 새 DB 파일 생성 필요 (경로: {self.db_path})")
+                if not self._create_new_db_file(self.db_path):
+                    raise RuntimeError("DB 파일 생성 실패")
+            else:
+                print(f"  * 기존 DB 파일 유지 (경로: {self.db_path})")
             
             # 4. DB 엔진 초기화
             print("\n=== DB 엔진 초기화 ===")
@@ -390,6 +401,13 @@ class DBManager:
                 with self.Session() as test_session:
                     test_session.execute(text("SELECT 1"))
                 print("  * 세션 팩토리 생성 및 테스트 완료")
+                # 자동 기본 코드 규칙 보장
+                try:
+                    print("[AUTO-PATCH] 기본 코드 규칙 보장 시작...")
+                    self.ensure_default_code_rules()
+                    print("[AUTO-PATCH] 기본 코드 규칙 보장 완료")
+                except Exception as e:
+                    print(f"[AUTO-PATCH] 기본 코드 규칙 보장 실패(무시): {e}")
                 
             except Exception as e:
                 if self.engine:
@@ -424,6 +442,77 @@ class DBManager:
         if not self.Session:
             raise RuntimeError("Database is not set up. Call setup_database() first.")
         return self.Session()
+
+    def ensure_default_code_rules(self):
+        """Insert built-in default ProductCodeRule entries if missing.
+        This allows some rules to be provided by the application while still
+        letting users add their own rules via the UI.
+        """
+        try:
+            session = self.get_session()
+        except Exception:
+            # Session not ready
+            return
+
+        try:
+            from database.models import ProductCodeRule
+
+            defaults = [
+                {
+                    'rule_name': '반제품 기본 규칙',
+                    'code_type': 'SEMI',
+                    'prefix': 'S',
+                    'year_format': 'YY',
+                    'separator': '-',
+                    'sequence_length': 3,
+                    'current_sequence': 0,
+                    'suffix': '',
+                    'attribute_schema': json.dumps([
+                        {"key":"TEMP","label":"온도","type":"select","options":["RT","HEAT"],"token_map":{"RT":"R","HEAT":"H"}},
+                        {"key":"EQUIP","label":"장비","type":"select","options":["DISP","HOMOG"],"token_map":{"DISP":"D","HOMOG":"H"}}
+                    ], ensure_ascii=False)
+                },
+                {
+                    'rule_name': '완제품 기본 규칙',
+                    'code_type': 'FINISHED',
+                    'prefix': 'P',
+                    'year_format': 'YY',
+                    'separator': '-',
+                    'sequence_length': 4,
+                    'current_sequence': 0,
+                    'suffix': '',
+                    'attribute_schema': json.dumps([], ensure_ascii=False)
+                }
+            ]
+
+            for d in defaults:
+                exist = session.query(ProductCodeRule).filter_by(code_type=d['code_type']).first()
+                if not exist:
+                    rule = ProductCodeRule(
+                        rule_name=d['rule_name'],
+                        code_type=d['code_type'],
+                        prefix=d['prefix'],
+                        year_format=d['year_format'],
+                        separator=d['separator'],
+                        sequence_length=d['sequence_length'],
+                        current_sequence=d['current_sequence'],
+                        suffix=d['suffix'],
+                        attribute_schema=d['attribute_schema']
+                    )
+                    session.add(rule)
+                    print(f"[AUTO-PATCH] 기본 규칙 생성: {d['code_type']}")
+            session.commit()
+        except Exception as e:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            print(f"[AUTO-PATCH] 기본 규칙 생성 중 오류: {e}")
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
 
     def dispose_engine(self):
         """엔진을 정리하고 관련 파일들을 정리합니다."""
@@ -484,6 +573,42 @@ class DBManager:
 
     def _run_migrations(self):
         print("데이터베이스 스키마 확인 및 업데이트 시작...")
+        
+        # 1. 명시적 컬럼 보정 (자동 감지 실패 대비)
+        with self.engine.connect() as connection:
+            try:
+                # formulations 테이블의 manufacturing_date 컬럼 확인 및 추가
+                try:
+                    connection.execute(text("SELECT manufacturing_date FROM formulations LIMIT 1"))
+                except Exception:
+                    print("[보정] formulations 테이블에 manufacturing_date 컬럼 추가 중...")
+                    with connection.begin() as trans:
+                        connection.execute(text("ALTER TABLE formulations ADD COLUMN manufacturing_date VARCHAR(20)"))
+            except Exception as e:
+                print(f"[오류] manufacturing_date 컬럼 보정 실패: {e}")
+
+            try:
+                # production_runs 테이블의 production_date 컬럼 확인 및 추가
+                try:
+                    connection.execute(text("SELECT production_date FROM production_runs LIMIT 1"))
+                except Exception:
+                    print("[보정] production_runs 테이블에 production_date 컬럼 추가 중...")
+                    with connection.begin() as trans:
+                        connection.execute(text("ALTER TABLE production_runs ADD COLUMN production_date DATE"))
+            except Exception as e:
+                print(f"[오류] production_date 컬럼 보정 실패: {e}")
+
+            try:
+                # users 테이블의 force_password_change 컬럼 확인 및 추가
+                try:
+                    connection.execute(text("SELECT force_password_change FROM users LIMIT 1"))
+                except Exception:
+                    print("[보정] users 테이블에 force_password_change 컬럼 추가 중...")
+                    with connection.begin() as trans:
+                        connection.execute(text("ALTER TABLE users ADD COLUMN force_password_change BOOLEAN DEFAULT 0"))
+            except Exception as e:
+                print(f"[오류] force_password_change 컬럼 보정 실패: {e}")
+
         inspector = inspect(self.engine)
         
         # 기존 DB의 모든 테이블 확인
@@ -542,21 +667,48 @@ class DBManager:
                     result = connection.execute(text("SELECT version FROM _schema_version")).scalar_one_or_none()
                     db_version = result if result is not None else 0
 
+                    # 버전과 관계없이 항상 마이그레이션 실행 (누락된 컬럼 자동 복구)
+                    print(f"[DB] 스키마 검증 및 업데이트 시작 (현재 DB: v{db_version}, 코드: v{SCHEMA_VERSION})")
+                    self._run_migrations()
+
                     if db_version != SCHEMA_VERSION:
                         if db_version > SCHEMA_VERSION:
                             print(f"[경고] DB 스키마 버전이 코드보다 최신입니다 (DB: v{db_version}, 코드: v{SCHEMA_VERSION})")
                             print(f"[정보] 기존 데이터를 유지하며 호환 모드로 실행합니다.")
                         else:
-                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 마이그레이션 시작.")
-                        
-                        # 버전과 관계없이 누락된 컬럼 추가 (기존 데이터 보존)
-                        self._run_migrations()
-                        
-                        # 버전 업데이트 (낮은 버전만)
-                        if db_version < SCHEMA_VERSION:
-                            connection.execute(text("DELETE FROM _schema_version"))
-                            connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
-                            print(f"스키마 버전 업데이트: v{db_version} → v{SCHEMA_VERSION}")
+                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 업그레이드를 시도합니다.")
+
+                            # 우선 Alembic을 사용해 가능한 경우 자동 업그레이드를 시도합니다.
+                            try:
+                                from alembic.config import Config as AlembicConfig
+                                from alembic import command as alembic_command
+
+                                print("[Alembic] 자동 업그레이드 시도 (alembic.ini 경로 사용)")
+                                alembic_ini = os.path.join(self.application_path or '.', 'alembic.ini')
+                                cfg = AlembicConfig(alembic_ini)
+                                # 명시적으로 연결 URL을 설정
+                                try:
+                                    cfg.set_main_option('sqlalchemy.url', str(self.engine.url))
+                                except Exception:
+                                    # 일부 환경에서는 engine.url이 아닌 문자열 형식을 요구할 수 있음
+                                    cfg.set_main_option('sqlalchemy.url', f'sqlite:///{self.db_path}')
+
+                                alembic_command.upgrade(cfg, 'head')
+                                print('[Alembic] 업그레이드 완료')
+                                # Alembic이 성공하면 _schema_version을 최신으로 갱신
+                                connection.execute(text("DELETE FROM _schema_version"))
+                                connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                                print(f"스키마 버전 업데이트 완료: v{db_version} → v{SCHEMA_VERSION} (alembic 적용)")
+                            except Exception as alembic_err:
+                                # Alembic 실패 시 기존의 보정/컬럼 추가 로직으로 복구
+                                print(f"[Alembic] 자동 업그레이드 실패: {alembic_err} - 코드 보정 로직으로 계속 진행합니다.")
+                                # 버전 정보만 강제로 갱신하여 이후 로직이 정상 동작하게 함
+                                try:
+                                    connection.execute(text("DELETE FROM _schema_version"))
+                                    connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                                    print(f"스키마 버전 강제 업데이트: v{db_version} → v{SCHEMA_VERSION}")
+                                except Exception as ver_err:
+                                    print(f"스키마 버전 강제 업데이트 실패: {ver_err}")
             except Exception as e:
                 print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
 
@@ -800,6 +952,56 @@ class DBManager:
         finally:
             session.close()
 
+    def update_user_password(self, username, new_password):
+        session = self.get_session()
+        try:
+            user = session.query(User).filter_by(username=username).first()
+            if user:
+                hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+                user.password = hashed_password.decode('utf-8')
+                user.force_password_change = False # 비밀번호 변경 강제 해제
+                session.commit()
+                print(f"{datetime.now()}: '{username}' 비밀번호 변경 완료")
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            print(f"비밀번호 변경 실패: {e}")
+            return False
+        finally:
+            session.close()
+
+    def reset_user_password(self, username, temp_password):
+        """관리자가 사용자 비밀번호를 강제 초기화 (다음 로그인 시 변경 강제)"""
+        session = self.get_session()
+        try:
+            user = session.query(User).filter_by(username=username).first()
+            if user:
+                hashed_password = bcrypt.hashpw(temp_password.encode('utf-8'), bcrypt.gensalt())
+                user.password = hashed_password.decode('utf-8')
+                user.force_password_change = True # 비밀번호 변경 강제 설정
+                session.commit()
+                print(f"{datetime.now()}: '{username}' 비밀번호 초기화 완료")
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            print(f"비밀번호 초기화 실패: {e}")
+            return False
+        finally:
+            session.close()
+
+    def get_all_users(self):
+        """모든 사용자 목록 조회 (관리자용)"""
+        session = self.get_session()
+        try:
+            users = session.query(User).order_by(User.username).all()
+            # Detach objects so they can be used outside session
+            session.expunge_all()
+            return users
+        finally:
+            session.close()
+
     def get_all_clients(self):
         session = self.get_session()
         try:
@@ -830,13 +1032,19 @@ class DBManager:
                 filters = [
                     Material.name.like(search_pattern),
                     Material.code.like(search_pattern),
-                    Client.name.like(search_pattern)
+                    Client.name.like(search_pattern),
+                    Material.manufacturer.like(search_pattern),
+                    Material.name_en.like(search_pattern),
+                    Material.origin.like(search_pattern),
+                    Material.hs_code.like(search_pattern),
+                    Material.nmpa_reg_num.like(search_pattern)
                 ]
                 if search_ingredients:
                     query = query.outerjoin(Material.ingredients)
                     filters.extend([
                         Ingredient.name_ko.like(search_pattern),
-                        Ingredient.name_en.like(search_pattern)
+                        Ingredient.name_en.like(search_pattern),
+                        Ingredient.cas_no.like(search_pattern)
                     ])
                 query = query.outerjoin(Material.supplier).filter(or_(*filters))
             
@@ -848,9 +1056,7 @@ class DBManager:
     def search_clients(self, search_term: str):
         session = self.get_session()
         try:
-            query = session.query(Client).filter(
-                or_(Client.client_type != '원료', Client.client_type == None)
-            )
+            query = session.query(Client)
             if search_term:
                 search_pattern = f"%{search_term}%"
                 query = query.filter(
@@ -904,7 +1110,7 @@ class DBManager:
         print("사용자 데이터가 리셋되었습니다 (admin 계정 제외).")
 
     def reset_clients_data(self, session):
-        session.query(Material).update({Material.client_id: None}, synchronize_session=False)
+        session.query(Material).update({Material.supplier_id: None}, synchronize_session=False)
         session.query(Formulation).update({Formulation.target_client_id: None, Formulation.oem_odm_client_id: None}, synchronize_session=False)
         session.query(Client).delete(synchronize_session=False)
         print("거래처 데이터가 리셋되었습니다.")

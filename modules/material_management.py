@@ -3,12 +3,13 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk, messagebox
 from database.db_manager import db_manager
-from database.models import Material, Ingredient, Client
+from database.models import Material, Ingredient, Client, FormulationItem
 import modules.excel_handler as excel_handler
 from datetime import datetime
 from sqlalchemy.orm import joinedload
 from modules.history_popup import HistoryPopup
 from utils.autocomplete import AutocompleteEntry
+import time
 
 class MaterialManagementFrame(ctk.CTkFrame):
     def __init__(self, master, user, app=None):
@@ -80,8 +81,83 @@ class MaterialManagementFrame(ctk.CTkFrame):
             
     def refresh_data(self):
         """이 화면에 필요한 모든 데이터를 DB에서 새로 불러옵니다."""
-        self.load_clients_to_combobox()
-        self.load_materials()
+        # Load clients asynchronously
+        try:
+            self.load_clients_to_combobox()
+            # Load materials asynchronously using the consolidated method
+            self.load_materials()
+        except Exception as e:
+            print(f"refresh_data 오류: {e}")
+
+    def _load_materials_async(self, search_term=""):
+        """원료 목록을 비동기적으로 로드합니다."""
+        if getattr(self, '_materials_loader_running', False):
+            return
+
+        def _materials_loader():
+            setattr(self, '_materials_loader_running', True)
+            try:
+                # Reuse existing load_materials logic but perform DB call off main thread
+                materials = db_manager.search_materials(search_term, load_ingredients=False, search_ingredients=True)
+                material_data_list = []
+                for i, mat in enumerate(materials):
+                    supplier_name = mat.supplier.name if mat.supplier else ""
+                    tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+                    values = (
+                        i + 1, mat.id, mat.code, mat.name,
+                        f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
+                        mat.package_unit, supplier_name, mat.manufacturer, mat.hs_code,
+                        mat.origin, mat.name_en or "", mat.nmpa_reg_num or "",
+                    )
+                    material_data_list.append((values, tag))
+
+                def _apply_initial_and_schedule():
+                    try:
+                        # 초기 화면에는 상위 CHUNK 개만 빠르게 표시
+                        CHUNK = 200
+                        initial = material_data_list[:CHUNK]
+                        for item in self.material_tree.get_children():
+                            self.material_tree.delete(item)
+                        for values, tag in initial:
+                            self.material_tree.insert("", "end", tags=(tag,), values=values)
+
+                        # 나머지 항목은 배치로 점진 추가
+                        if len(material_data_list) > CHUNK:
+                            def _append_batches():
+                                try:
+                                    for start in range(CHUNK, len(material_data_list), CHUNK):
+                                        batch = material_data_list[start:start+CHUNK]
+                                        def _apply_batch(b=batch):
+                                            try:
+                                                for values, tag in b:
+                                                    self.material_tree.insert("", "end", tags=(tag,), values=values)
+                                            except Exception:
+                                                pass
+                                        try:
+                                            self.after(0, _apply_batch)
+                                        except Exception:
+                                            pass
+                                        time.sleep(0.02)
+                                finally:
+                                    setattr(self, '_materials_loader_running', False)
+
+                            import threading as _th
+                            _th.Thread(target=_append_batches, daemon=True).start()
+                        else:
+                            setattr(self, '_materials_loader_running', False)
+                    except Exception:
+                        setattr(self, '_materials_loader_running', False)
+
+                try:
+                    self.after(10, _apply_initial_and_schedule)
+                except Exception:
+                    setattr(self, '_materials_loader_running', False)
+            except Exception as e:
+                print(f"원료 비동기 로드 중 오류: {e}")
+                setattr(self, '_materials_loader_running', False)
+
+        import threading
+        threading.Thread(target=_materials_loader, daemon=True).start()
 
     def setup_permission_controls(self):
         """사용자 권한에 따라 UI 요소들을 제어합니다."""
@@ -437,8 +513,49 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 
                 print(f"가져올 원료 데이터: {len(materials_data)}개")
                 print(f"가져올 전성분 데이터: {len(ingredients_data)}개")
+
+                # [추가] 진행률 표시 팝업 생성
+                total_steps = (len(materials_data) if materials_data else 0) + (len(ingredients_data) if ingredients_data else 0)
+                current_step = 0
+                
+                progress_popup = ctk.CTkToplevel(self)
+                progress_popup.title("데이터 가져오는 중...")
+                progress_popup.geometry("400x150")
+                progress_popup.transient(self.winfo_toplevel()) # 부모 창 위에 표시
+                progress_popup.grab_set() # 모달 모드
+                
+                # 화면 중앙 배치
+                try:
+                    self.update_idletasks()
+                    x = self.winfo_rootx() + (self.winfo_width() // 2) - 200
+                    y = self.winfo_rooty() + (self.winfo_height() // 2) - 75
+                    progress_popup.geometry(f"+{x}+{y}")
+                except:
+                    pass
+                
+                ctk.CTkLabel(progress_popup, text="엑셀 데이터를 가져오는 중입니다...\n잠시만 기다려 주세요.", font=("맑은 고딕", 14, "bold")).pack(pady=(20, 10))
+                
+                progress_label = ctk.CTkLabel(progress_popup, text="준비 중...", font=("맑은 고딕", 12))
+                progress_label.pack(pady=(0, 10))
+                
+                progress_bar = ctk.CTkProgressBar(progress_popup, width=300)
+                progress_bar.pack(pady=10)
+                progress_bar.set(0)
+                
+                progress_popup.update()
+
+                def update_progress(step_inc=1, msg=None):
+                    nonlocal current_step
+                    current_step += step_inc
+                    if total_steps > 0:
+                        val = min(current_step / total_steps, 1.0)
+                        progress_bar.set(val)
+                    if msg:
+                        progress_label.configure(text=msg)
+                    progress_popup.update()
                 
                 # 1단계: 원료 정보 처리 (개선된 거래처 처리 포함)
+
                 for i, mat_row in enumerate(materials_data):
                     try:
                         code = get_val(mat_row, "코드", "code")
@@ -597,8 +714,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
                         is_active_val = get_val(mat_row, "사용여부(Y/N)", "is_active") or "Y"
                         material.is_active = str(is_active_val).upper() in ["Y", "TRUE", "1", "YES"]
 
-                        # 기존 전성분 삭제 (새로운 전성분으로 대체하기 위해)
-                        material.ingredients.clear()
+
+
+
+
                         
                         processed_materials[code] = material
                         materials_count += 1
@@ -606,6 +725,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     except Exception as e:
                         print(f"재료 {i+1} 처리 중 오류: {e}")
                         continue
+                    
+                    # [추가] 진행률 업데이트
+                    update_progress(1, f"원료 처리 중... ({i+1}/{len(materials_data)})")
+
 
                 # 세션 플러시하여 재료 ID 생성
                 session.flush()
@@ -653,6 +776,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     except Exception as e:
                         print(f"전성분 {i+1} 처리 중 오류: {e}")
                         continue
+
+                    # [추가] 진행률 업데이트 (단순 파싱 단계)
+                    update_progress(1, f"전성분 데이터 읽는 중... ({i+1}/{len(ingredients_data)})")
+
                 
                 # 원료별로 전성분 추가
                 for material_code, ingredients_list in ingredient_groups.items():
@@ -660,8 +787,39 @@ class MaterialManagementFrame(ctk.CTkFrame):
                         parent_material = processed_materials[material_code]
                         print(f"원료 '{material_code}'에 {len(ingredients_list)}개의 전성분 추가")
                         
+                        # [수정] 전성분 추가 직전에 기존 전성분 초기화 (메모리/DB 동기화 및 원자성 보장)
+                        # 이 시점에 초기화해야 "삭제 후 추가"가 확실하게 동작함
+                        parent_material.ingredients = []
+                        session.flush()
+
+                        
+                        print(f"원료 '{material_code}'에 {len(ingredients_list)}개의 전성분 후보 확인")
+                        
+                        # [수정] 엑셀 내 중복 데이터 제거 (이름/CAS/조성비가 모두 같으면 중복으로 간주)
+                        unique_ingredients = []
+                        seen_ingredients = set()
+                        
                         for ing_data in ingredients_list:
+                            # 중복 식별 키: 한글명, 영문명, CAS No, 조성비
+                            # 조성비가 다르면 다른 성분일 수 있으므로 키에 포함 (예: 동일 성분 2회 투입?)
+                            # 하지만 사용자는 "똑같은게 여러개 뜬다"고 했으므로, 완전히 같은 행을 제거하는 것이 목적.
+                            key = (
+                                str(ing_data['name_ko']).strip(),
+                                str(ing_data['name_en']).strip(),
+                                str(ing_data['cas_no']).strip(),
+                                float(ing_data['composition_ratio'])
+                            )
+                            
+                            if key not in seen_ingredients:
+                                seen_ingredients.add(key)
+                                unique_ingredients.append(ing_data)
+                        
+                        print(f"  -> 중복 제거 후 {len(unique_ingredients)}개 적용")
+
+                        for ing_data in unique_ingredients:
+
                             new_ingredient = Ingredient(
+                                # material_id=parent_material.id, # [수정] 관계 사용시 ID 자동 할당 (ORM)
                                 name_ko=ing_data['name_ko'],
                                 name_en=ing_data['name_en'],
                                 cas_no=ing_data['cas_no'],
@@ -673,7 +831,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
                                 nmpa_reg_num=ing_data['nmpa_reg_num'],
                                 remark=ing_data['remark']
                             )
+                            # session.add(new_ingredient) # [수정] 관계 통해 추가
                             parent_material.ingredients.append(new_ingredient)
+
+
                             ingredients_count += 1
                     
                     except Exception as e:
@@ -857,6 +1018,13 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
                 # 모든 DB 작업이 끝난 후 UI 새로고침
                 self.bulk_importing = False
+                
+                # [추가] 완료 시 팝업 닫기
+                try:
+                    progress_popup.destroy()
+                except:
+                    pass
+
                 self.refresh_data() # UI 전체 새로고침으로 변경
 
             except Exception as e:
@@ -906,36 +1074,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.search_timer = self.after(500, self.load_materials)
 
     def load_materials(self):
-        """DB에서 원료 목록을 검색하고 Treeview에 표시합니다."""
+        """DB에서 원료 목록을 비동기적으로 검색하고 Treeview에 표시합니다."""
         search_term = self.material_search_entry.get().strip()
-        # 검색 시에는 전성분도 함께 검색하도록 search_ingredients=True로 변경합니다.
-        # 목록 표시에는 전성분 정보가 필요 없으므로 load_ingredients=False로 유지합니다.
-        materials = db_manager.search_materials(search_term, load_ingredients=False, search_ingredients=True)
-        
-        # 1. UI 렌더링 성능 최적화 - 데이터를 먼저 메모리에 리스트로 준비
-        material_data_list = []
-        try:
-            for i, mat in enumerate(materials):
-                supplier_name = mat.supplier.name if mat.supplier else ""
-                tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-                values = (
-                    i + 1, mat.id, mat.code, mat.name,
-                    f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
-                    mat.package_unit, supplier_name, mat.manufacturer, mat.hs_code,
-                    mat.origin, mat.name_en or "", mat.nmpa_reg_num or "",
-                )
-                material_data_list.append((values, tag))
-
-            # 2. Treeview를 한번에 업데이트
-            # 기존 모든 행 삭제
-            for item in self.material_tree.get_children():
-                self.material_tree.delete(item)
-            # 메모리에 준비된 데이터로 Treeview 채우기
-            for values, tag in material_data_list:
-                self.material_tree.insert("", "end", tags=(tag,), values=values)
-
-        except Exception as e:
-            print(f"원료 목록 로드 중 오류 발생: {e}")
+        self._load_materials_async(search_term)
 
     def load_clients_to_combobox(self):
         """거래처 정보를 콤보박스와 자동완성에 로드합니다 - 개선된 버전"""
@@ -943,31 +1084,69 @@ class MaterialManagementFrame(ctk.CTkFrame):
         if getattr(self, "bulk_importing", False):
             print("대량 가져오기 중이므로 콤보박스 업데이트 건너뜀")
             return
-        
-        session = db_manager.get_session()
-        try:
-            # '원료' 타입의 활성 거래처만 불러옵니다.
-            suppliers = session.query(Client).filter_by(is_active=True, client_type='원료').all()
-            
-            # 거래처 매핑 딕셔너리 생성
-            self.supplier_map = {s.name: s.id for s in suppliers}  # 이름 -> ID
-            self.supplier_id_map = {s.id: s.name for s in suppliers}  # ID -> 이름
-            
-            supplier_names = list(self.supplier_map.keys())
-            
-            print(f"로드된 공급처: {len(suppliers)}개")
-            
-            # AutocompleteEntry에 거래처 목록 설정 (오류 수정)
-            if hasattr(self, 'supplier_entry'):
-                self.supplier_entry.set_completion_list(supplier_names)
-                print(f"AutocompleteEntry에 {len(supplier_names)}개 공급처 설정 완료")
+        # 방해되지 않도록 백그라운드에서 로드하고 UI 스레드에서 적용합니다.
+        if getattr(self, '_supplier_loader_thread_running', False):
+            return
 
-        except Exception as e:
-            print(f"거래처 로드 중 오류: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            session.close()
+        def _loader():
+            setattr(self, '_supplier_loader_thread_running', True)
+            session = db_manager.get_session()
+            try:
+                suppliers = session.query(Client).filter_by(is_active=True, client_type='원료').all()
+                supplier_map = {s.name: s.id for s in suppliers}
+                supplier_id_map = {s.id: s.name for s in suppliers}
+                supplier_names = list(supplier_map.keys())
+                # UI 업데이트는 메인 스레드에서 수행
+                def _apply():
+                    try:
+                        self.supplier_map = supplier_map
+                        self.supplier_id_map = supplier_id_map
+                        if hasattr(self, 'supplier_entry'):
+                            try:
+                                # 초기에는 상위 N개만 설정하여 UI 반응성 확보
+                                CHUNK = 200
+                                initial = supplier_names[:CHUNK]
+                                self.supplier_entry.set_completion_list(initial)
+
+                                # 나머지는 별도 스레드에서 배치로 점진 적용
+                                def _append_remaining():
+                                    try:
+                                        for i in range(CHUNK, len(supplier_names), CHUNK):
+                                            nxt = supplier_names[: i + CHUNK if i + CHUNK < len(supplier_names) else len(supplier_names)]
+                                            try:
+                                                self.after(0, lambda lst=nxt: self.supplier_entry.set_completion_list(lst))
+                                            except Exception:
+                                                pass
+                                            time.sleep(0.03)
+                                    except Exception:
+                                        pass
+
+                                if len(supplier_names) > CHUNK:
+                                    import threading as _th
+                                    _th.Thread(target=_append_remaining, daemon=True).start()
+                            except Exception:
+                                pass
+                        print(f"로드된 공급처: {len(supplier_names)}개 (비동기, 청크 적용)")
+                    finally:
+                        setattr(self, '_supplier_loader_thread_running', False)
+
+                try:
+                    # 소수 밀리초 지연 후 UI 스레드에 적용
+                    self.after(10, _apply)
+                except Exception:
+                    # 프레임이 이미 파괴된 경우 안전하게 무시
+                    setattr(self, '_supplier_loader_thread_running', False)
+            except Exception as e:
+                print(f"거래처 비동기 로드 중 오류: {e}")
+            finally:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+        import threading
+        t = threading.Thread(target=_loader, daemon=True)
+        t.start()
 
     def on_material_tree_select(self, event):
         """원료 트리뷰에서 항목 선택 시 호출되는 메서드 - 개선된 버전"""
@@ -1610,6 +1789,24 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     print(f"[경고] 원료 변경 이력 기록 실패: {_log_err}")
 
                 session.commit()
+
+                # ===== 처방(Formulation)에 포함된 원료 정보 동기화 =====
+                try:
+                    # 이 원료를 사용하는 모든 처방 아이템을 한 번에 업데이트합니다.
+                    updated_rows = session.query(FormulationItem).filter(FormulationItem.material_id == material.id).update({
+                        "material_code": material.code,
+                        "material_name": material.name
+                    }, synchronize_session=False)
+                    
+                    if updated_rows > 0:
+                        session.commit()
+                        print(f"'{material.name}' 원료 변경사항을 {updated_rows}개 처방에 반영했습니다.")
+                    
+                except Exception as e:
+                    print(f"[경고] 처방 정보 동기화 중 오류 발생: {e}")
+                    session.rollback()
+                # =======================================================
+                
                 messagebox.showinfo("성공", "원료가 성공적으로 저장되었습니다.")
                 
                 # UI 새로고침

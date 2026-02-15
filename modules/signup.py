@@ -13,11 +13,7 @@ class SignupWindow(ctk.CTkToplevel):
         self.is_initial_setup = is_initial_setup
         self.on_success = on_success
 
-        if self.is_initial_setup:
-            self.title("초기 관리자 계정 생성")
-            self.protocol("WM_DELETE_WINDOW", self.on_closing_initial_setup) # 창 닫기 방지
-        else:
-            self.title("회원가입")
+        self.title("회원가입")
 
         self.geometry("450x720")  # 높이 증가
         self.resizable(False, False)
@@ -30,19 +26,22 @@ class SignupWindow(ctk.CTkToplevel):
         except Exception:
             pass
 
+        # 회원가입 창이 뜰 때 법적 고지(약관) 내용도 자동으로 띄움
+        # 동의하지 않고 닫으면 프로그램 종료됨 (LegalNoticeDialog 로직)
+        self.after(200, self.open_legal_notice)
+
 
     def setup_ui(self):
         """회원가입 창의 UI 요소를 설정합니다."""
         main_frame = ctk.CTkFrame(self)
         main_frame.pack(padx=20, pady=20, fill="both", expand=True)
 
-        title_text = "초기 관리자 계정 생성" if self.is_initial_setup else "신규 사용자 등록"
-        title_label = ctk.CTkLabel(main_frame, text=title_text, font=ctk.CTkFont(size=20, weight="bold"))
+        title_label = ctk.CTkLabel(main_frame, text="신규 사용자 등록", font=ctk.CTkFont(size=20, weight="bold"))
         title_label.pack(pady=20)
-
-        if self.is_initial_setup:
-            info_label = ctk.CTkLabel(main_frame, text="프로그램을 사용하기 위한 첫 관리자 계정을 생성합니다.", wraplength=300)
-            info_label.pack(pady=(0, 20))
+        
+        info_label = ctk.CTkLabel(main_frame, text="※ DB에 첫 번째 사용자로 등록하면\n자동으로 관리자 권한이 부여됩니다.", 
+                                  wraplength=350, font=ctk.CTkFont(size=10), text_color="gray")
+        info_label.pack(pady=(0, 10))
 
         input_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         input_frame.pack(fill="x", padx=20)
@@ -133,8 +132,59 @@ class SignupWindow(ctk.CTkToplevel):
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         button_frame.pack(pady=20, padx=20, fill="x")
 
+        # Legal Notice Agreement Section
+        legal_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        legal_frame.pack(pady=(10, 0), padx=20, fill="x")
+        
+        self.legal_agreed = ctk.BooleanVar(value=False)
+        
+        self.legal_check = ctk.CTkCheckBox(
+            legal_frame, 
+            text="이용약관 및 법적고지에 동의합니다.", 
+            variable=self.legal_agreed,
+            font=ctk.CTkFont(size=12)
+        )
+        self.legal_check.pack(side="left")
+        
+        self.view_legal_btn = ctk.CTkButton(
+            legal_frame,
+            text="내용 보기",
+            width=80,
+            height=24,
+            fg_color="gray",
+            font=ctk.CTkFont(size=11),
+            command=self.open_legal_notice
+        )
+        self.view_legal_btn.pack(side="right")
+
         register_button = ctk.CTkButton(button_frame, text="등록하기", command=self.register_user)
         register_button.pack(side="right")
+
+    def open_legal_notice(self):
+        """법적 고지 팝업을 엽니다."""
+        from modules.legal_notice import LegalNoticeDialog
+        import os
+        
+        # 프로젝트 루트 경로 찾기 (sys.path에 이미 추가되어 있다고 가정하거나 상대경로 사용)
+        # signup.py는 modules 폴더에 있으므로 상위 폴더가 프로젝트 루트
+        PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        # 현재 버전 가져오기 시도
+        try:
+            with open(os.path.join(PROJECT_ROOT, 'VERSION'), 'r', encoding='utf-8') as f:
+                ver = f.read().strip()
+                # Normalize version string (ensure leading 'v')
+                if ver and not ver.startswith('v') and re.match(r'^\d+(?:\.\d+)*$', ver):
+                    ver = 'v' + ver
+        except:
+             ver = "v??"
+
+        # 회원가입 시에는 무조건 동의를 받아야 함 (already_agreed=False)
+        # 동의 시 체크박스 자동 선택 콜백
+        def on_dialog_agree():
+            self.legal_agreed.set(True)
+
+        LegalNoticeDialog(self, ver, on_dialog_agree, None, already_agreed=False)
 
 
     def register_user(self):
@@ -160,6 +210,11 @@ class SignupWindow(ctk.CTkToplevel):
             messagebox.showwarning("입력 오류", "사용자 ID와 비밀번호는 필수 항목입니다.", parent=self)
             return
 
+        # 1-1. 이용약관 동의 확인 (추가)
+        if not self.legal_agreed.get():
+            messagebox.showwarning("동의 필요", "이용약관 및 법적고지에 동의해야 가입할 수 있습니다.\n[내용 보기]를 눌러 확인해주세요.", parent=self)
+            return
+
         # 2. 비밀번호 일치 여부 확인
         if password != password_confirm:
             messagebox.showwarning("입력 오류", "비밀번호가 일치하지 않습니다.", parent=self)
@@ -173,8 +228,20 @@ class SignupWindow(ctk.CTkToplevel):
                 messagebox.showwarning("입력 오류", "이미 사용 중인 ID입니다.", parent=self)
                 return
 
-            # 3-1. 일반 가입 시 MSAD/RQD 권한 제한 (정책상 무조건 RD 생성)
-            if not self.is_initial_setup and role_code in ("MSAD", "RQD"):
+            # 3-0. 첫 번째 사용자 확인
+            user_count = session.query(User).count()
+            is_first_user = (user_count == 0)
+            
+            if is_first_user:
+                print("  * [첫 사용자] 자동으로 관리자(MSAD) 권한 부여")
+                role_code = "MSAD"
+                messagebox.showinfo("첫 사용자", 
+                    "DB에 첫 번째 사용자를 등록합니다.\n"
+                    "자동으로 최고 관리자(MSAD) 권한이 부여됩니다.", 
+                    parent=self)
+
+            # 3-1. 일반 가입 시 MSAD/RQD 권한 제한
+            if not self.is_initial_setup and not is_first_user and role_code in ("MSAD", "RQD"):
                 messagebox.showerror("권한 오류", 
                     "일반 회원가입으로는 관리자 권한을 부여할 수 없습니다.\n"
                     "관리자에게 요청하여 권한을 변경하세요.", parent=self)

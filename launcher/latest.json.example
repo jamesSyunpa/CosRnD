@@ -1,0 +1,7 @@
+{
+  "version": "v56",
+  "download_url": "https://example.com/CosRnD_v56.zip",
+  "checksum": "put_actual_sha256_checksum_here",
+  "changelog": "- New features added\n- Bug fixes\n- Performance improvements",
+  "release_date": "2025-12-19"
+}
