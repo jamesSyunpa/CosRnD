@@ -149,6 +149,23 @@ class DBManager:
             return None
         db_dir = os.path.join(self.application_path, self.get_db_relative_path())
         return os.path.join(db_dir, "cosmetic.db")
+    
+    def get_current_db_path(self) -> str:
+        return getattr(self, 'db_path', None)
+    
+    def get_config_shared_db_file(self) -> str:
+        try:
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(self.config_path, encoding='utf-8')
+            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+            if not shared_db_path:
+                return None
+            p = shared_db_path.strip().strip('"').strip("'")
+            if p.lower().endswith('.db') or os.path.basename(p).lower() == 'cosmetic.db':
+                return p
+            return os.path.join(p, 'cosmetic.db')
+        except Exception:
+            return None
 
     def cleanup_db_files(self):
         """WAL, SHM, 백업 파일들을 정리합니다."""
@@ -267,71 +284,26 @@ class DBManager:
             except Exception as e:
                 print(f"[경고] 초기 DB 경로 저장 실패: {e}")
         
-        # 3. 공유 DB 사용 시도
-        # Try using shared DB file if it exists (shared_db_file resolves folder->file)
+        other_to_merge = None
+        chosen_path = None
         if shared_db_file and file_exists_including_hidden(shared_db_file):
-            try:
-                print(f"[INFO] 공유 DB 파일 확인: {shared_db_file}")
-                self.db_path = shared_db_file
-
-                # 공유 DB 연결 엔진 생성
-                test_engine = create_engine(
-                    f'sqlite:///{shared_db_file}',
-                    connect_args={'check_same_thread': False}
-                )
-                db_version = None
-                try:
-                    with test_engine.connect() as conn:
-                        try:
-                            db_version = conn.execute(text("SELECT version FROM _schema_version")).scalar()
-                            print(f"[INFO] 공유 DB 스키마 버전 감지: v{db_version}")
-                        except Exception as schema_e:
-                            print(f"[경고] 공유 DB 스키마 버전 확인 실패: {schema_e} (버전 테이블이 없을 수 있음)")
-                except Exception as conn_e:
-                    print(f"[경고] 공유 DB 연결 테스트 실패: {conn_e}")
-                    test_engine.dispose()
-                    raise
-
-                # 엔진 채택 후 마이그레이션/트리거 보장 진행 (버전 불일치여도 시도)
-                self.engine = test_engine
-                
-                # [강제 보정] 공유 DB 사용 시에도 누락된 컬럼(manufacturing_date 등)을 강제로 확인하고 추가합니다.
-                try:
-                    print("[INFO] 공유 DB 스키마 강제 보정 시작...")
-                    self._run_migrations()
-                except Exception as mig_e:
-                    print(f"[경고] 공유 DB 스키마 보정 실패(무시): {mig_e}")
-
-                try:
-                    self._check_and_run_migrations()
-                except Exception as mig_e:
-                    print(f"[경고] 공유 DB 버전/마이그레이션 처리 실패(무시): {mig_e}")
-                try:
-                    self.ensure_change_tracking()
-                except Exception as trg_e:
-                    print(f"[경고] 공유 DB 트리거 보장 실패(무시): {trg_e}")
-
-                self.Session = sessionmaker(bind=self.engine)
-                print(f"[INFO] 공유 DB 연결 성공 (마이그레이션/트리거 보장 완료)")
-                self._save_init_state(True)
-                return
-            except Exception as e:
-                print(f"[경고] 공유 DB 연결 실패: {e}")
-                if 'test_engine' in locals():
-                    try:
-                        test_engine.dispose()
-                    except Exception:
-                        pass
+            chosen_path = shared_db_file
+            if file_exists_including_hidden(local_db_path) and os.path.normpath(local_db_path) != os.path.normpath(shared_db_file):
+                other_to_merge = local_db_path
+            print("[INFO] 경로 선택 정책: 공유 DB 우선")
+        else:
+            chosen_path = local_db_path
+            print("[INFO] 경로 선택 정책: 로컬 DB 사용")
         
         # 4. 로컬 DB 사용
-        print("\n=== 로컬 DB 설정 시작 ===")
+        print("\n=== DB 설정 시작 ===")
         try:
             # 1. 초기화
             if self.engine:
                 print("  * 기존 DB 엔진 정리")
                 self.dispose_engine()
             
-            self.db_path = local_db_path
+            self.db_path = chosen_path
             print(f"  * DB 경로: {self.db_path}")
             
             # 2. DB 파일 처리
@@ -401,10 +373,26 @@ class DBManager:
                 with self.Session() as test_session:
                     test_session.execute(text("SELECT 1"))
                 print("  * 세션 팩토리 생성 및 테스트 완료")
+                
+                if other_to_merge and file_exists_including_hidden(other_to_merge):
+                    try:
+                        print(f"[INFO] 이전 DB 병합 시작: {other_to_merge} -> {self.db_path}")
+                        result = self.merge_from_old_db(other_to_merge)
+                        if result.get("ok"):
+                            try:
+                                os.remove(other_to_merge)
+                                print(f"[INFO] 이전 DB 삭제 완료: {other_to_merge}")
+                            except Exception as del_e:
+                                print(f"[경고] 이전 DB 삭제 실패: {del_e}")
+                        else:
+                            print(f"[경고] 이전 DB 병합 실패: {result.get('error')}")
+                    except Exception as merge_e:
+                        print(f"[경고] 이전 DB 병합 중 오류: {merge_e}")
                 # 자동 기본 코드 규칙 보장
                 try:
                     print("[AUTO-PATCH] 기본 코드 규칙 보장 시작...")
                     self.ensure_default_code_rules()
+                    print("[AUTO-PATCH] 기본 코드 규칙 보장 완료")
                     print("[AUTO-PATCH] 기본 코드 규칙 보장 완료")
                 except Exception as e:
                     print(f"[AUTO-PATCH] 기본 코드 규칙 보장 실패(무시): {e}")
@@ -464,7 +452,7 @@ class DBManager:
                     'prefix': 'S',
                     'year_format': 'YY',
                     'separator': '-',
-                    'sequence_length': 3,
+                    'sequence_length': 4,
                     'current_sequence': 0,
                     'suffix': '',
                     'attribute_schema': json.dumps([
@@ -608,6 +596,17 @@ class DBManager:
                         connection.execute(text("ALTER TABLE users ADD COLUMN force_password_change BOOLEAN DEFAULT 0"))
             except Exception as e:
                 print(f"[오류] force_password_change 컬럼 보정 실패: {e}")
+            
+            try:
+                # clients 테이블의 unique_code 컬럼 확인 및 추가
+                try:
+                    connection.execute(text("SELECT unique_code FROM clients LIMIT 1"))
+                except Exception:
+                    print("[보정] clients 테이블에 unique_code 컬럼 추가 중...")
+                    with connection.begin() as trans:
+                        connection.execute(text("ALTER TABLE clients ADD COLUMN unique_code VARCHAR(50)"))
+            except Exception as e:
+                print(f"[오류] unique_code 컬럼 보정 실패: {e}")
 
         inspector = inspect(self.engine)
         
@@ -676,39 +675,13 @@ class DBManager:
                             print(f"[경고] DB 스키마 버전이 코드보다 최신입니다 (DB: v{db_version}, 코드: v{SCHEMA_VERSION})")
                             print(f"[정보] 기존 데이터를 유지하며 호환 모드로 실행합니다.")
                         else:
-                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 업그레이드를 시도합니다.")
-
-                            # 우선 Alembic을 사용해 가능한 경우 자동 업그레이드를 시도합니다.
-                            try:
-                                from alembic.config import Config as AlembicConfig
-                                from alembic import command as alembic_command
-
-                                print("[Alembic] 자동 업그레이드 시도 (alembic.ini 경로 사용)")
-                                alembic_ini = os.path.join(self.application_path or '.', 'alembic.ini')
-                                cfg = AlembicConfig(alembic_ini)
-                                # 명시적으로 연결 URL을 설정
-                                try:
-                                    cfg.set_main_option('sqlalchemy.url', str(self.engine.url))
-                                except Exception:
-                                    # 일부 환경에서는 engine.url이 아닌 문자열 형식을 요구할 수 있음
-                                    cfg.set_main_option('sqlalchemy.url', f'sqlite:///{self.db_path}')
-
-                                alembic_command.upgrade(cfg, 'head')
-                                print('[Alembic] 업그레이드 완료')
-                                # Alembic이 성공하면 _schema_version을 최신으로 갱신
-                                connection.execute(text("DELETE FROM _schema_version"))
-                                connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
-                                print(f"스키마 버전 업데이트 완료: v{db_version} → v{SCHEMA_VERSION} (alembic 적용)")
-                            except Exception as alembic_err:
-                                # Alembic 실패 시 기존의 보정/컬럼 추가 로직으로 복구
-                                print(f"[Alembic] 자동 업그레이드 실패: {alembic_err} - 코드 보정 로직으로 계속 진행합니다.")
-                                # 버전 정보만 강제로 갱신하여 이후 로직이 정상 동작하게 함
-                                try:
-                                    connection.execute(text("DELETE FROM _schema_version"))
-                                    connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
-                                    print(f"스키마 버전 강제 업데이트: v{db_version} → v{SCHEMA_VERSION}")
-                                except Exception as ver_err:
-                                    print(f"스키마 버전 강제 업데이트 실패: {ver_err}")
+                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 버전 정보 업데이트.")
+                        
+                        # 버전 업데이트 (낮은 버전만)
+                        if db_version < SCHEMA_VERSION:
+                            connection.execute(text("DELETE FROM _schema_version"))
+                            connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                            print(f"스키마 버전 업데이트 완료: v{db_version} → v{SCHEMA_VERSION}")
             except Exception as e:
                 print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
 
@@ -1135,4 +1108,57 @@ class DBManager:
         finally:
             session.close()
 
+    def merge_from_old_db(self, old_db_path: str):
+        """기존(이전) DB 파일을 현재 DB로 병합하고, 성공 시 이전 DB를 삭제합니다.
+        - 테이블 공통 컬럼만 병합합니다
+        - 기본키/유니크 충돌은 INSERT OR IGNORE로 우회합니다
+        """
+        if not old_db_path or not os.path.isfile(old_db_path):
+            return {"ok": False, "error": "이전 DB 파일 경로가 올바르지 않습니다."}
+        result = {"ok": True, "copied": [], "skipped": [], "errors": []}
+        try:
+            with self.engine.connect() as conn:
+                try:
+                    conn.execute(text(f"ATTACH DATABASE :old AS olddb"), {"old": old_db_path})
+                except Exception as e:
+                    result["ok"] = False
+                    result["error"] = f"이전 DB 연결 실패: {e}"
+                    return result
+                inspector = inspect(self.engine)
+                new_tables = inspector.get_table_names()
+                for table in new_tables:
+                    try:
+                        exists = conn.execute(text("SELECT name FROM olddb.sqlite_master WHERE type='table' AND name=:t"), {"t": table}).scalar()
+                        if not exists:
+                            result["skipped"].append(table)
+                            continue
+                        new_cols = [r[1] for r in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()]
+                        old_cols = [r[1] for r in conn.execute(text(f"PRAGMA olddb.table_info({table})")).fetchall()]
+                        common = [c for c in new_cols if c in old_cols]
+                        if not common:
+                            result["skipped"].append(table)
+                            continue
+                        col_list = ",".join([f'"{c}"' for c in common])
+                        sql = f'INSERT OR IGNORE INTO "{table}" ({col_list}) SELECT {col_list} FROM olddb."{table}"'
+                        before_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar()
+                        conn.execute(text(sql))
+                        after_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar()
+                        added = (after_cnt or 0) - (before_cnt or 0)
+                        result["copied"].append({"table": table, "rows_added": added})
+                    except Exception as te:
+                        result["errors"].append({"table": table, "error": str(te)})
+                try:
+                    conn.execute(text("DETACH DATABASE olddb"))
+                except Exception:
+                    pass
+            # 이전 DB 삭제 (병합 수행 후)
+            try:
+                os.remove(old_db_path)
+                result["old_deleted"] = True
+            except Exception as de:
+                result["old_deleted"] = False
+                result["errors"].append({"table": "_delete_old_db", "error": str(de)})
+            return result
+        except Exception as e:
+            return {"ok": False, "error": f"병합 중 오류: {e}", "copied": result.get("copied", []), "errors": result.get("errors", [])}
 db_manager = DBManager()

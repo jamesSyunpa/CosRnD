@@ -82,8 +82,8 @@ TRANSLATIONS = {
         "client_info": "거래처 정보", "client_search": "거래처 검색", "client_type": "거래처 유형", "is_active": "사용 여부", "client_list": "거래처 목록",
         "client_type_values": ["원료", "OEM/ODM", "부자재", "기타"],
         "client_type_filter_values": ["- 유형 선택 -", "원료", "OEM/ODM", "부자재", "기타"],
-        "client_labels": {"code": "거래처코드(사업자번호)", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소", "classification_code": "거래처 구분코드"},
-        "client_tree_columns": {"id": "ID", "type": "유형", "code": "거래처코드", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소", "active": "사용여부"},
+        "client_labels": {"code": "거래처코드(사업자번호)", "unique": "고유코드", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소"},
+        "client_tree_columns": {"id": "ID", "type": "유형", "code": "거래처코드", "unique_code": "고유코드", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소", "active": "사용여부"},
 
         # Document Management
         "doc_mgt_help_title": "처방 관리 도움말",
@@ -252,8 +252,8 @@ TRANSLATIONS = {
         "client_info": "Client Information", "client_search": "Client Search", "client_type": "Client Type", "is_active": "Is Active", "client_list": "Client List",
         "client_type_values": ["Raw Material", "OEM/ODM", "Packaging", "Other"],
         "client_type_filter_values": ["- Select Type -", "Raw Material", "OEM/ODM", "Packaging", "Other"],
-        "client_labels": {"code": "Client Code(Biz No.)", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address", "classification_code": "Classification Code"},
-        "client_tree_columns": {"id": "ID", "type": "Type", "code": "Client Code", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address", "active": "Is Active"},
+        "client_labels": {"code": "Client Code(Biz No.)", "unique": "Unique Code", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address"},
+        "client_tree_columns": {"id": "ID", "type": "Type", "code": "Client Code", "unique_code": "Unique Code", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address", "active": "Is Active"},
 
         # Document Management
         "doc_mgt_help_title": "Formulation Management Help",

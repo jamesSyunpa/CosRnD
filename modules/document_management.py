@@ -31,6 +31,7 @@ from database.models import (
     ProductionFormulation,
     ProductionStep,
     Ingredient,
+    ProductCatalog,
 )
 import json
 from datetime import datetime, date
@@ -4035,58 +4036,54 @@ class DocumentManagementFrame(ctk.CTkFrame):
             name_e.insert(0, src.experiment_name or "")
             lab_e = add_row(1, "LAB NO.")
             lab_e.insert(0, src.lab_no or "")
-            prodcode_e = add_row(2, "반제품 코드")
-            # 거래처 선택 및 할당된 코드 선택 (백업에서 가져온 동작 통합)
-            ctk.CTkLabel(frm, text="거래처 선택 (할당된 코드 사용)").grid(row=2, column=2, sticky="w", padx=8, pady=4)
-            import tkinter as _tk
-            # load clients for selection
+            # 반제품 코드 선택(카탈로그) + 수동 입력 병행
+            ctk.CTkLabel(frm, text="반제품 코드").grid(row=2, column=0, sticky="w", pady=4)
+            prodcode_frame = ctk.CTkFrame(frm)
+            prodcode_frame.grid(row=2, column=1, sticky="ew", pady=4)
+            prodcode_frame.grid_columnconfigure(1, weight=1)
+            # Dropdown: 카탈로그에서 로드
+            semi_codes = []
             try:
-                clients = session.query(Client).order_by(Client.name).all()
+                semi_rows = session.query(ProductCatalog).filter_by(code_type='SEMI').order_by(ProductCatalog.code.asc()).all()
+                semi_codes = [f"{r.code} — {r.name}" for r in semi_rows]
             except Exception:
-                clients = []
-            client_map = { (c.name or ''): c.id for c in clients }
-            client_names = list(client_map.keys())
-            client_var = _tk.StringVar(value=client_names[0] if client_names else '')
-            client_opt = ctk.CTkOptionMenu(frm, variable=client_var, values=client_names)
-            client_opt.grid(row=3, column=2, sticky='ew', padx=8, pady=4)
-
-            ctk.CTkLabel(frm, text="할당된 코드").grid(row=4, column=2, sticky="w", padx=8, pady=4)
-            assign_var = _tk.StringVar(value='')
-            assign_opt = ctk.CTkOptionMenu(frm, variable=assign_var, values=[''])
-            assign_opt.grid(row=5, column=2, sticky='ew', padx=8, pady=4)
-
-            # helper: populate assignment options when client changes
-            def refresh_assignments_for_client(_evt=None):
-                try:
-                    sel_name = client_var.get()
-                    cid = client_map.get(sel_name)
-                    values = ['']
-                    if cid:
-                        assigns = session.query(ProductCodeAssignment).filter_by(client_id=cid).all()
-                        for a in assigns:
-                            label = f"{a.id}: {a.rule.rule_name if a.rule else ''} | {a.product_name or ''} | {a.code_value or '<auto>'}"
-                            values.append(label)
+                semi_codes = []
+            semi_var = tk.StringVar(value=(semi_codes[0] if semi_codes else ""))
+            semi_opt = ctk.CTkOptionMenu(prodcode_frame, variable=semi_var, values=semi_codes or [""])
+            semi_opt.grid(row=0, column=0, sticky="w", padx=(0,6))
+            # 수동 입력(우선 적용)
+            prodcode_e = ctk.CTkEntry(prodcode_frame)
+            prodcode_e.grid(row=0, column=1, sticky="ew")
+            # 선택 변경 시 코드/제품명 자동 반영
+            def on_semi_changed(_evt=None):
+                val = semi_var.get().strip()
+                if val and " — " in val:
+                    code, name = val.split(" — ", 1)
                     try:
-                        assign_opt.configure(values=values)
-                        if len(values) > 1:
-                            assign_var.set(values[1])
-                        else:
-                            assign_var.set('')
+                        prodcode_e.delete(0, "end"); prodcode_e.insert(0, code.strip())
                     except Exception:
                         pass
+                    # 제품명 비어있으면 자동 채우기
+                    try:
+                        if not name_e.get().strip():
+                            name_e.insert(0, name.strip())
+                    except Exception:
+                        pass
+            try:
+                semi_opt.bind("<Configure>", on_semi_changed)
+            except Exception:
+                pass
+            # 새로고침 버튼
+            def refresh_semi_codes():
+                try:
+                    rows = session.query(ProductCatalog).filter_by(code_type='SEMI').order_by(ProductCatalog.code.asc()).all()
+                    values = [f"{r.code} — {r.name}" for r in rows]
+                    semi_opt.configure(values=values or [""])
+                    if values:
+                        semi_var.set(values[0]); on_semi_changed()
                 except Exception:
                     pass
-
-            # bind change (optmenu may support command)
-            try:
-                client_opt.configure(command=refresh_assignments_for_client)
-            except Exception:
-                pass
-            # initial populate
-            try:
-                refresh_assignments_for_client()
-            except Exception:
-                pass
+            ctk.CTkButton(prodcode_frame, text="새로고침", width=80, command=refresh_semi_codes).grid(row=0, column=2, padx=(6,0))
             rev_e = add_row(3, "차수")
             rev_e.insert(0, src.revision or "")
             base_e = add_row(4, "생산량(kg)")
@@ -4249,71 +4246,6 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     )
                     session.add(newp)
                     session.commit()
-
-                    # 후처리: 선택된 할당이 있으면 연결 및 코드 자동 생성/기입
-                    try:
-                        sel_assign = None
-                        try:
-                            sel_label = assign_var.get() if 'assign_var' in locals() else ''
-                            if sel_label:
-                                aid = int(str(sel_label).split(':', 1)[0])
-                                sel_assign = session.query(ProductCodeAssignment).get(aid)
-                        except Exception:
-                            sel_assign = None
-
-                        # determine production code to use
-                        final_code = newp.production_code or None
-
-                        if sel_assign and (not final_code):
-                            # if assignment has explicit code_value, use it
-                            if sel_assign.code_value:
-                                final_code = sel_assign.code_value
-                            else:
-                                # generate via linked rule if available
-                                try:
-                                    if sel_assign.rule_id:
-                                        r = session.query(ProductCodeRule).get(sel_assign.rule_id)
-                                        if r and getattr(r, 'code_type', '') != 'SEMI':
-                                            next_seq = int(r.current_sequence or 0) + 1
-                                            year_fmt = (r.year_format or 'YY')
-                                            y = datetime.now().strftime('%y' if year_fmt == 'YY' else '%Y') if year_fmt in ('YY','YYYY') else ''
-                                            sep = r.separator or ''
-                                            prefix = r.prefix or ''
-                                            seq = str(next_seq).zfill(int(r.sequence_length or 3))
-                                            final_code = f"{prefix}{y}{sep}{seq}{r.suffix or ''}"
-                                            # persist rule sequence
-                                            r.current_sequence = next_seq
-                                            session.add(r); session.commit()
-                                except Exception:
-                                    final_code = None
-
-                        if sel_assign:
-                            try:
-                                # link assignment to production
-                                sel_assign.production_formulation_id = newp.id
-                                # if assignment had no explicit code_value but we generated one, save it
-                                if final_code and not sel_assign.code_value:
-                                    sel_assign.code_value = final_code
-                                session.add(sel_assign); session.commit()
-                            except Exception:
-                                try:
-                                    session.rollback()
-                                except Exception:
-                                    pass
-
-                        # if we have final_code and it's not yet on newp, update
-                        if final_code and (not newp.production_code or newp.production_code.strip() == ''):
-                            try:
-                                newp.production_code = final_code
-                                session.add(newp); session.commit()
-                            except Exception:
-                                try:
-                                    session.rollback()
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-
                     messagebox.showinfo("완료", "생산처방이 생성되었습니다.", parent=dlg)
                     dlg.destroy()
                     self.refresh_production_list()

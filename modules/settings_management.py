@@ -311,6 +311,15 @@ class SettingsManagementFrame(ctk.CTkFrame):
             hover_color="#1976D2"
         )
         validate_button.grid(row=1, column=0, padx=5, pady=10, sticky="ew")
+        
+        merge_button = ctk.CTkButton(
+            validation_frame,
+            text="🔄 이전 DB 병합 및 삭제",
+            command=self.merge_old_db_into_current,
+            fg_color="#2E7D32",
+            hover_color="#1B5E20"
+        )
+        merge_button.grid(row=2, column=0, padx=5, pady=10, sticky="ew")
 
     def setup_admin_only_features(self, parent_frame):
         # --- 엑셀 폼 내보내기 ---
@@ -350,6 +359,48 @@ class SettingsManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(reset_frame, text="사용자 데이터", command=lambda: self.confirm_reset("users"), **reset_button_style).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
         all_reset_style = {"fg_color": "#B71C1C", "hover_color": "#7f0000"}
         ctk.CTkButton(reset_frame, text="전체 데이터", command=lambda: self.confirm_reset("all"), **all_reset_style).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
+
+    def merge_old_db_into_current(self):
+        """이전 DB 파일을 선택하여 현재 DB로 병합하고, 성공 시 이전 DB 파일을 삭제합니다."""
+        try:
+            old_path = filedialog.askopenfilename(
+                title="이전 DB 파일 선택",
+                filetypes=[("SQLite DB", "*.db"), ("All Files", "*.*")]
+            )
+            if not old_path:
+                return
+            if not os.path.isfile(old_path):
+                messagebox.showerror("오류", "선택한 파일을 찾을 수 없습니다.", parent=self)
+                return
+            res = db_manager.merge_from_old_db(old_path)
+            if not res.get("ok"):
+                messagebox.showerror("병합 실패", str(res.get("error") or "알 수 없는 오류"), parent=self)
+                return
+            copied = res.get("copied", [])
+            skipped = res.get("skipped", [])
+            errors = res.get("errors", [])
+            lines = []
+            if copied:
+                lines.append("다음 테이블에서 데이터가 병합되었습니다:")
+                for item in copied:
+                    lines.append(f" - {item['table']}: {item['rows_added']}행 추가")
+            if skipped:
+                lines.append("\n스키마 불일치로 건너뛴 테이블:")
+                for t in skipped:
+                    lines.append(f" - {t}")
+            if errors:
+                lines.append("\n오류가 발생한 테이블:")
+                for e in errors:
+                    lines.append(f" - {e.get('table')}: {e.get('error')}")
+            deleted = res.get("old_deleted", False)
+            lines.append("\n이전 DB 파일 삭제: " + ("성공" if deleted else "실패"))
+            messagebox.showinfo("병합 완료", "\n".join(lines), parent=self)
+            try:
+                self.app.refresh_data_in_all_frames()
+            except Exception:
+                pass
+        except Exception as e:
+            messagebox.showerror("오류", f"병합 중 오류가 발생했습니다:\n{e}", parent=self)
 
     def load_settings(self):
         config = configparser.ConfigParser()
