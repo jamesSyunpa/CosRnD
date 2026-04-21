@@ -947,8 +947,8 @@ class App(ctk.CTk):
         empty_space.grid(row=current_row, column=0, sticky="nsew")
         current_row += 1
  
-        # 데이터 관리 버튼 - RQD, MSAD만 표시
-        if self.current_user.can_manage_all_data():
+        # 데이터 관리 버튼 - 모든 권한이 접근 가능
+        if self.current_user.can_access_data_management():
             self.data_button = ctk.CTkButton(
                 self.navigation_frame,
                 text=self.texts["data"],
@@ -1637,11 +1637,39 @@ class App(ctk.CTk):
             config = configparser.ConfigParser()
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
             shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
-            
-            if shared_db_path and os.path.exists(shared_db_path):
-                shared_db_stat = os.stat(shared_db_path)
+
+            # 공유 DB 파일 경로 해석 (폴더/파일 입력 모두 지원)
+            def resolve_shared_file(path):
+                if not path:
+                    return None
+                path = path.strip()
+                if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
+                    return path
+                return os.path.join(path, 'cosmetic.db')
+
+            shared_db_file = resolve_shared_file(shared_db_path)
+
+            # 기준선: 실제 DB 파일을 기준으로 설정 (폴더 아님)
+            if shared_db_file and os.path.exists(shared_db_file):
+                shared_db_stat = os.stat(shared_db_file)
                 self.last_shared_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
-                print(f"[DB동기화] 기준선 설정 완료: 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
+                print(f"[DB동기화] 기준선 설정 완료: 파일={shared_db_file}, 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
+
+                # 변경 로그 기준선도 설정 (있을 경우)
+                self.last_change_log_id = 0
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(shared_db_file)
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
+                    if cur.fetchone():
+                        cur.execute("SELECT IFNULL(MAX(id), 0) FROM change_log")
+                        row = cur.fetchone()
+                        self.last_change_log_id = int(row[0] or 0)
+                        print(f"[DB동기화] 변경 로그 기준선 ID={self.last_change_log_id}")
+                    conn.close()
+                except Exception as e:
+                    print(f"[DB동기화] 변경 로그 기준선 설정 실패(무시): {e}")
             else:
                 print("[DB동기화] 공유 DB 경로가 설정되지 않음 또는 파일 없음")
         except Exception as e:
@@ -1664,18 +1692,28 @@ class App(ctk.CTk):
             config = configparser.ConfigParser()
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
             shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
-            
-            if shared_db_path and os.path.exists(shared_db_path):
-                shared_db_stat = os.stat(shared_db_path)
+
+            def resolve_shared_file(path):
+                if not path:
+                    return None
+                path = path.strip()
+                if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
+                    return path
+                return os.path.join(path, 'cosmetic.db')
+
+            shared_db_file = resolve_shared_file(shared_db_path)
+
+            if shared_db_file and os.path.exists(shared_db_file):
+                shared_db_stat = os.stat(shared_db_file)
                 self.last_shared_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
-                print(f"[DB동기화] 기준선 업데이트: 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
+                print(f"[DB동기화] 기준선 업데이트: 파일={shared_db_file}, 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
             else:
                 print("[DB동기화] 공유 DB 경로 없음 - 기준선 업데이트 스킵")
         except Exception as e:
             print(f"[DB동기화] 기준선 업데이트 중 오류: {e}")
 
     def check_shared_db(self):
-        """공유 DB 파일의 상태를 확인하고, 변경 시 업데이트를 제안합니다."""
+        """공유 DB 파일의 상태를 확인하고, '특정 체크'로 의미 있는 변경 시에만 업데이트를 제안합니다."""
         try:
             config = configparser.ConfigParser()
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
@@ -1691,17 +1729,28 @@ class App(ctk.CTk):
                     self.db_path_warning_shown = True
                 return
 
-            if not os.path.exists(shared_db_path):
+            # 실제 DB 파일 경로로 변환
+            def resolve_shared_file(path):
+                if not path:
+                    return None
+                path = path.strip()
+                if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
+                    return path
+                return os.path.join(path, 'cosmetic.db')
+
+            shared_db_file = resolve_shared_file(shared_db_path)
+
+            if not shared_db_file or not os.path.exists(shared_db_file):
                 if self.current_user.is_admin and not self.db_path_warning_shown:
                      messagebox.showwarning(
                         "DB 동기화 경로 오류",
-                        f"설정된 공유 DB 경로를 찾을 수 없습니다:\n{shared_db_path}\n\n[설정] 메뉴에서 경로를 다시 확인해주세요.",
+                        f"설정된 공유 DB 파일을 찾을 수 없습니다:\n{shared_db_file or shared_db_path}\n\n[설정] 메뉴에서 경로를 다시 확인해주세요.",
                         parent=self
                     )
                      self.db_path_warning_shown = True
                 return
             
-            shared_db_stat = os.stat(shared_db_path)
+            shared_db_stat = os.stat(shared_db_file)
             # 파일 크기와 수정 시간을 더 정확하게 체크
             current_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
 
@@ -1722,6 +1771,32 @@ class App(ctk.CTk):
                 significant_time_change = time_diff > 15
                 
                 if significant_size_change or significant_time_change:
+                    # 특정 체크: change_log가 있으면, 최근 변경이 'formulations' 또는 'formulation_items' 인 경우에만 알림
+                    specific_change_detected = True  # 기본값 (change_log 없으면 보수적으로 True)
+                    try:
+                        import sqlite3
+                        conn = sqlite3.connect(shared_db_file)
+                        cur = conn.cursor()
+                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
+                        if cur.fetchone():
+                            last_id = getattr(self, 'last_change_log_id', 0)
+                            cur.execute("SELECT id, table_name FROM change_log WHERE id > ? ORDER BY id", (last_id,))
+                            rows = cur.fetchall()
+                            relevant_tables = {"formulations", "formulation_items"}
+                            specific_change_detected = any(r[1] in relevant_tables for r in rows)
+                            # 기준선 ID 업데이트
+                            if rows:
+                                self.last_change_log_id = rows[-1][0]
+                        conn.close()
+                    except Exception as e:
+                        print(f"[DB동기화] 특정 변경 확인 실패(무시): {e}")
+
+                    if not specific_change_detected:
+                        # 관련 없는 변경이면 조용히 기준선만 갱신
+                        print("[DB동기화] 관련 없는 변경 감지 -> 알림 없이 기준선만 갱신")
+                        self.last_shared_db_info = current_db_info
+                        return
+
                     print(f"[DB동기화] 실제 변경 감지! 크기변경: {significant_size_change} ({self.last_shared_db_info[0]} -> {current_db_info[0]}), 시간차: {time_diff}초")
                     
                     # 현재 사용자가 관리자인 경우, 자신의 변경일 가능성이 있으므로 더 신중하게 처리
@@ -1748,7 +1823,7 @@ class App(ctk.CTk):
                                              "최신 데이터로 동기화하시겠습니까?\n\n"
                                              "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.\n"
                                              "※ 동기화 후 프로그램이 재시작됩니다.", parent=self):
-                            self.sync_with_shared_db_safe(shared_db_path)
+                            self.sync_with_shared_db_safe(shared_db_file)
                 else:
                     # 미미한 변경사항은 무시하고 정보만 업데이트
                     print(f"[DB동기화] 미미한 변경 무시 (크기차: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)")

@@ -1254,8 +1254,29 @@ class MaterialManagementFrame(ctk.CTkFrame):
         if not self._selected_material_id:
             messagebox.showwarning("선택 오류", "이력을 조회할 원료를 선택해주세요.")
             return
-        
-        HistoryPopup(self, "Material", self._selected_material_id)
+        # 선택된 원료 객체를 조회하여 단일 항목 이력 팝업을 띄웁니다.
+        session = db_manager.get_session()
+        try:
+            material = session.query(Material).get(self._selected_material_id)
+            if not material:
+                messagebox.showerror("오류", "선택한 원료를 찾을 수 없습니다.")
+                return
+            if not material.change_log:
+                messagebox.showinfo("정보", "선택한 원료의 변경 이력이 없습니다.")
+                return
+            # HistoryPopup은 items의 iterable을 기대하므로 단일 항목도 리스트로 감쌉니다.
+            HistoryPopup(self, "원료 변경 이력", [material], item_name_key='name', item_code_key='code')
+        finally:
+            session.close()
 
     def show_all_material_history(self):
-        HistoryPopup(self, "Material")
+        # 전체 원료 목록을 조회하여 이력 팝업을 띄웁니다.
+        session = db_manager.get_session()
+        try:
+            materials = session.query(Material).all()
+            if not materials or not any(m.change_log for m in materials):
+                messagebox.showinfo("정보", "표시할 변경 이력이 없습니다.")
+                return
+            HistoryPopup(self, "전체 원료 변경 이력", materials, item_name_key='name', item_code_key='code')
+        finally:
+            session.close()

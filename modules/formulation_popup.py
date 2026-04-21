@@ -952,6 +952,9 @@ class FormulationEditPopup(ctk.CTkToplevel):
                 form.target_viscosity_initial, form.target_viscosity_next_day, form.target_machine = None, None, None
                 form.target_client_id = None
 
+            # 샘플 발송 횟수 저장
+            form.sample_sent_count = self.sample_sent_count
+
             # '새 버전으로 저장'이 아닐 경우, 기존의 변경 이력을 그대로 유지합니다.
             if not is_new_revision and self.formulation_id:
                 change_log_text = form.change_log
