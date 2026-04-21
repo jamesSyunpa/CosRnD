@@ -82,6 +82,9 @@ class DataManagementFrame(ctk.CTkFrame):
             self.tab_view.add(tab_texts["user"])
             self.setup_client_management_tab(self.tab_view.tab(tab_texts["client"]))
             self.setup_user_management_tab(self.tab_view.tab(tab_texts["user"]))
+            
+            # 사용자 관리 탭 초기화 후 권한 옵션 업데이트
+            self.update_role_options()
 
     def show_help(self):
         """데이터 관리 도움말을 표시합니다."""
@@ -167,7 +170,7 @@ class DataManagementFrame(ctk.CTkFrame):
         """성분 관리 탭의 UI를 설정합니다."""
         tab_frame.grid_columnconfigure(0, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
-        material_frame = MaterialManagementFrame(tab_frame, self.current_user)
+        material_frame = MaterialManagementFrame(tab_frame, self.current_user, self.app)
         material_frame.grid(row=0, column=0, sticky="nsew") # MaterialManagementFrame needs language
 
     def setup_user_management_tab(self, tab_frame):
@@ -196,9 +199,79 @@ class DataManagementFrame(ctk.CTkFrame):
             self.user_entries[key] = entry
             current_row += 1
         
+        # 권한 선택 추가
+        ctk.CTkLabel(user_form_frame, text="권한").grid(row=current_row, column=0, padx=10, pady=5, sticky="w")
+        
+        # 관리자 존재 여부에 따라 권한 옵션 결정
+        self.has_admin = db_manager.has_admin_users()
+        
+        if self.has_admin:
+            # 이미 관리자가 있으면 MSAD 제외
+            self.role_options = {
+                "QC - 품질관리원": "QC",
+                "RD - 연구원": "RD",
+                "RQ - 연구/품질 통합관리자": "RQ",
+                "RQD - 연구/품질/데이터 관리자": "RQD"
+            }
+            role_info_text = (
+                "QC: 품질 서류 관리 (원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서)\n"
+                "     + 거래처 관리 (검색/참고만)\n"
+                "RD: 연구 서류 관리 (처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료)\n"
+                "     + 성분/거래처 관리 (검색/참고만)\n"
+                "RQ: 연구/품질 통합관리 (RD + QC 모든 기능)\n"
+                "RQD: RQ 기능 + 모든 데이터 수정/삭제 권한\n"
+                "\n※ 관리자 계정이 이미 존재하여 MSAD 권한은 선택할 수 없습니다."
+            )
+        else:
+            # 관리자가 없으면 모든 권한 허용
+            self.role_options = {
+                "QC - 품질관리원": "QC",
+                "RD - 연구원": "RD",
+                "RQ - 연구/품질 통합관리자": "RQ",
+                "RQD - 연구/품질/데이터 관리자": "RQD",
+                "MSAD - 모든 관리자": "MSAD"
+            }
+            role_info_text = (
+                "QC: 품질 서류 관리 (원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서)\n"
+                "     + 거래처 관리 (검색/참고만)\n"
+                "RD: 연구 서류 관리 (처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료)\n"
+                "     + 성분/거래처 관리 (검색/참고만)\n"
+                "RQ: 연구/품질 통합관리 (RD + QC 모든 기능)\n"
+                "RQD: RQ 기능 + 모든 데이터 수정/삭제 권한\n"
+                "MSAD: 마스터 관리자 (모든 기능 + 데이터 삭제 전 백업 권한)"
+            )
+        
+        self.user_role_combo = ctk.CTkOptionMenu(
+            user_form_frame,
+            values=list(self.role_options.keys()),
+            width=250
+        )
+        self.user_role_combo.set("RD - 연구원")
+        self.user_role_combo.grid(row=current_row, column=1, padx=10, pady=5, sticky="w")
+        current_row += 1
+        
+        # 권한 설명
+        role_info = ctk.CTkLabel(
+            user_form_frame, 
+            text=role_info_text,
+            font=ctk.CTkFont(size=9),
+            text_color="gray",
+            justify="left"
+        )
+        role_info.grid(row=current_row, column=1, padx=10, sticky="w")
+        current_row += 1
+        
+        # 관리자 체크박스는 숨기고 권한 콤보박스로만 관리
         self.is_admin_var = ctk.StringVar(value="off")
-        is_admin_check = ctk.CTkCheckBox(user_form_frame, text=self.texts['admin_privilege'], variable=self.is_admin_var, onvalue="on", offvalue="off")
-        is_admin_check.grid(row=current_row, column=1, padx=10, pady=10, sticky="e")
+        # is_admin_check는 표시하지 않음 (권한이 자동으로 결정됨)
+        
+        # 권한 정보 안내
+        ctk.CTkLabel(
+            user_form_frame, 
+            text="※ 권한은 위의 드롭다운에서 선택하신 항목으로 자동 설정됩니다.",
+            font=ctk.CTkFont(size=9),
+            text_color="#1f538d"
+        ).grid(row=current_row, column=1, padx=10, pady=5, sticky="w")
         current_row += 1
 
         # 이력 보기 버튼
@@ -234,22 +307,27 @@ class DataManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(user_excel_frame, text=self.texts['export_data'], command=self.export_user_data).pack(side="left", padx=5)
         self.user_import_button = ctk.CTkButton(user_excel_frame, text=self.texts['import_data'], command=self.import_user_data)
 
-        if not self.current_user.is_admin:
+        # 사용자 관리는 MSAD(마스터 관리자)만 가능
+        if not self.current_user.is_master_admin():
             self.user_save_button.configure(state="disabled")
             self.user_new_button.configure(state="disabled")
             self.user_delete_button.configure(state="disabled")
-            is_admin_check.configure(state="disabled")
+            self.user_role_combo.configure(state="disabled")
+            user_role = getattr(self.current_user, 'role', 'Unknown')
+            print(f"사용자 관리 - 조회 전용 모드 (권한: {user_role}) - 사용자 관리는 MSAD 권한 필요")
         else:
-            # 관리자일 때만 가져오기 버튼 표시
+            # MSAD일 때만 가져오기 버튼 표시
             self.user_import_button.pack(side="left", padx=5)
 
         user_tree_columns = self.texts['user_tree_columns']
         user_column_ids = [k for k in user_tree_columns if k != 'id']
         self.user_tree = ttk.Treeview(user_list_frame, columns=user_column_ids, show="headings", selectmode="browse")
-        self.user_tree.heading("username", text=user_tree_columns['username']); self.user_tree.column("username", width=150) # noqa
+        self.user_tree.heading("username", text=user_tree_columns['username']); self.user_tree.column("username", width=120) # noqa
+        self.user_tree.heading("real_name", text=user_tree_columns['real_name']); self.user_tree.column("real_name", width=100) # noqa
         self.user_tree.heading("manager_code", text=user_tree_columns['manager_code']); self.user_tree.column("manager_code", width=100, anchor="center") # noqa
         self.user_tree.heading("position", text=user_tree_columns['position']); self.user_tree.column("position", width=120) # noqa
         self.user_tree.heading("contact", text=user_tree_columns['contact']); self.user_tree.column("contact", width=120) # noqa
+        self.user_tree.heading("role", text=user_tree_columns['role']); self.user_tree.column("role", width=80, anchor="center") # noqa
         self.user_tree.heading("is_admin", text=user_tree_columns['is_admin']); self.user_tree.column("is_admin", width=100, anchor="center") # noqa
         self.user_tree.grid(row=1, column=0, sticky="nsew")
 
@@ -337,12 +415,16 @@ class DataManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(client_excel_frame, text=self.texts['export_data'], command=self.export_client_data).pack(side="left", padx=5)
         self.client_import_button = ctk.CTkButton(client_excel_frame, text=self.texts['import_data'], command=self.import_client_data)
 
-        if not self.current_user.is_admin:
+        # 거래처 데이터 편집 권한 확인 (RQD, MSAD만 가능)
+        if not self.current_user.can_edit_client_data():
             self.client_save_button.configure(state="disabled")
             self.client_new_button.configure(state="disabled")
             self.client_delete_button.configure(state="disabled")
+            # QC, RD는 검색/참고만 가능한 메시지 추가
+            user_role = getattr(self.current_user, 'role', 'Unknown')
+            print(f"거래처 관리 - 검색/참고 전용 모드 (권한: {user_role})")
         else:
-            # 관리자일 때만 가져오기 버튼 표시
+            # RQD, MSAD일 때만 가져오기 버튼 표시
             self.client_import_button.pack(side="left", padx=5)
 
         tree_columns = self.texts['client_tree_columns']
@@ -390,10 +472,11 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("정보", "내보낼 사용자 데이터가 없습니다.")
             return
 
-        headers = ["사용자 ID", "직책", "연락처", "우편번호", "주소", "관리자여부", "생성일"]
+        headers = ["사용자 ID", "실명", "직책", "연락처", "우편번호", "주소", "관리자여부", "생성일"]
         data_rows = [
             (
                 user.username,
+                user.real_name or "",
                 user.position,
                 user.contact,
                 user.zip_code,
@@ -425,6 +508,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 
                 hashed_password = bcrypt.hashpw(str(password).encode('utf-8'), bcrypt.gensalt())
                 user.password = hashed_password.decode('utf-8')
+                user.real_name = get_val(row, "실명", "real_name")
                 user.position = get_val(row, "직책", "position")
                 user.contact = get_val(row, "연락처", "contact")
                 user.zip_code = get_val(row, "우편번호", "zip_code")
@@ -513,15 +597,61 @@ class DataManagementFrame(ctk.CTkFrame):
         users = session.query(User).all()
         session.close()
         for i, user in enumerate(users):
-            admin_status = "Admin" if user.is_admin else "General"
+            # 권한 표시 개선
+            user_role = getattr(user, 'role', 'RD')
+            role_display = {
+                'QC': 'QC',
+                'RD': 'RD', 
+                'RQ': 'RQ',
+                'RQD': 'RQD',
+                'MSAD': 'MSAD'
+            }.get(user_role, user_role)
+            
+            admin_status = "Yes" if user.is_admin else "No"
             tag = 'oddrow' if i % 2 == 0 else 'evenrow'
             self.user_tree.insert("", "end", iid=user.id, tags=(tag,), values=( # iid에 user.id 할당
                 user.username,
+                user.real_name or "",
                 user.manager_code or "",
                 user.position or "",
                 user.contact or "",
+                role_display,
                 admin_status
             ))
+    
+    def update_role_options(self):
+        """관리자 존재 여부에 따라 권한 옵션을 업데이트합니다."""
+        self.has_admin = db_manager.has_admin_users()
+        
+        if self.has_admin:
+            # 이미 관리자가 있으면 MSAD 제외
+            new_role_options = {
+                "QC - 품질관리원": "QC",
+                "RD - 연구원": "RD", 
+                "RQ - 연구/품질 통합관리자": "RQ",
+                "RQD - 연구/품질/데이터 관리자": "RQD"
+            }
+        else:
+            # 관리자가 없으면 모든 권한 허용
+            new_role_options = {
+                "QC - 품질관리원": "QC",
+                "RD - 연구원": "RD",
+                "RQ - 연구/품질 통합관리자": "RQ", 
+                "RQD - 연구/품질/데이터 관리자": "RQD",
+                "MSAD - 마스터 관리자": "MSAD"
+            }
+        
+        # 권한 옵션이 변경된 경우에만 업데이트
+        if new_role_options != self.role_options:
+            self.role_options = new_role_options
+            current_value = self.user_role_combo.get()
+            
+            # 콤보박스 값 업데이트
+            self.user_role_combo.configure(values=list(self.role_options.keys()))
+            
+            # 현재 선택된 값이 새 옵션에 없으면 기본값으로 설정
+            if current_value not in self.role_options.keys():
+                self.user_role_combo.set("RD - 연구원")
 
     def on_user_tree_select(self, event):
         selected_item = self.user_tree.selection()
@@ -539,12 +669,28 @@ class DataManagementFrame(ctk.CTkFrame):
 
             self.user_entries["username"].insert(0, user.username or "")
             self.user_entries["username"].configure(state="disabled") # ID는 수정 불가
+            self.user_entries["real_name"].insert(0, user.real_name or "")
             self.user_entries["manager_code"].insert(0, user.manager_code or "")
             self.user_entries["position"].insert(0, user.position or "")
             self.user_entries["contact"].insert(0, user.contact or "")
             self.user_entries["zip_code"].insert(0, user.zip_code or "")
             self.user_entries["address"].insert(0, user.address or "")
-            self.is_admin_var.set("on" if user.is_admin else "off")
+            
+            # 권한 설정 (role 필드 기준으로 설정)
+            user_role = getattr(user, 'role', 'RD')  # 기본값 RD
+            role_display = None
+            for display, code in self.role_options.items():
+                if code == user_role:
+                    role_display = display
+                    break
+            if role_display:
+                self.user_role_combo.set(role_display)
+            else:
+                self.user_role_combo.set("RD - 연구원")  # 기본값
+            
+            # is_admin은 자동으로 설정 (표시용)
+            self.is_admin_var.set("on" if user_role == "MSAD" else "off")
+            
             self._selected_user_id = user.id
             self.user_history_button.configure(state="normal")
 
@@ -576,20 +722,42 @@ class DataManagementFrame(ctk.CTkFrame):
                 session.add(user)
 
             # --- 변경 사항 로깅 ---
+            # 권한 가져오기
+            role_display = self.user_role_combo.get()
+            role_code = self.role_options.get(role_display, "RD")
+            
+            # 신규 사용자에 대한 MSAD 권한 제한 검증
+            if not (hasattr(self, '_selected_user_id') and self._selected_user_id):  # 신규 사용자인 경우
+                if role_code == "MSAD" and self.has_admin:  # 이미 관리자가 있는데 MSAD 권한을 시도하는 경우
+                    messagebox.showerror("권한 오류", 
+                        "이미 관리자 계정이 존재합니다.\n"
+                        "보안상 추가 관리자 계정 생성은 제한됩니다.\n"
+                        "다른 권한을 선택해주세요.")
+                    return
+            
+            # is_admin은 권한 코드에 따라 자동 설정
+            is_admin_value = (role_code == "MSAD")
+            self.is_admin_var.set("on" if is_admin_value else "off")
+            
             new_values = {
+                "real_name": self.user_entries["real_name"].get(),
                 "manager_code": self.user_entries["manager_code"].get(),
                 "position": self.user_entries["position"].get(),
                 "contact": self.user_entries["contact"].get(),
                 "zip_code": self.user_entries["zip_code"].get(),
                 "address": self.user_entries["address"].get(),
-                "관리자 권한": self.is_admin_var.get() == "on"
+                "관리자 권한": is_admin_value,
+                "role": role_code
             }
 
             if not user.id: # 신규 생성
                 log_action = "신규 생성"
                 log_entries.append(f"사용자 ID: '{username}'")
                 for field, value in new_values.items():
-                    log_entries.append(f"{self.get_user_label_by_key(field)}: '{value}'")
+                    if field == "role":
+                        log_entries.append(f"권한: '{value}'")
+                    else:
+                        log_entries.append(f"{self.get_user_label_by_key(field)}: '{value}'")
                 if password:
                     log_entries.append("초기 비밀번호 설정됨")
             else: # 수정
@@ -598,12 +766,19 @@ class DataManagementFrame(ctk.CTkFrame):
                     if old_val != new_val:
                         log_entries.append(f"{self.get_user_label_by_key(field_name)}: '{old_val}' -> '{new_val}'")
                 
+                log_change("real_name", user.real_name or "", new_values["real_name"])
                 log_change("manager_code", user.manager_code or "", new_values["manager_code"])
                 log_change("position", user.position or "", new_values["position"])
                 log_change("contact", user.contact or "", new_values["contact"])
                 log_change("zip_code", user.zip_code or "", new_values["zip_code"])
                 log_change("address", user.address or "", new_values["address"])
                 log_change("관리자 권한", user.is_admin, new_values["관리자 권한"])
+                
+                # 권한 변경 로깅
+                old_role = getattr(user, 'role', 'RD')
+                if old_role != new_values["role"]:
+                    log_entries.append(f"권한: '{old_role}' -> '{new_values['role']}'")
+                
                 if password:
                     log_entries.append("비밀번호가 변경되었습니다.")
 
@@ -612,12 +787,14 @@ class DataManagementFrame(ctk.CTkFrame):
                 hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
                 user.password = hashed_password.decode('utf-8')
             
+            user.real_name = new_values["real_name"]
             user.manager_code = new_values["manager_code"]
             user.position = new_values["position"]
             user.contact = new_values["contact"]
             user.zip_code = new_values["zip_code"]
             user.address = new_values["address"]
             user.is_admin = new_values["관리자 권한"]
+            user.role = new_values["role"]  # 권한 저장
             
             if log_entries:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -630,11 +807,17 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("성공", "사용자 정보가 저장되었습니다.")
         except Exception as e:
             session.rollback()
-            messagebox.showerror("데이터베이스 오류", f"저장 중 오류 발생: {e}")
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"사용자 저장 에러: {e}")
+            print(f"상세 에러: {error_details}")
+            messagebox.showerror("데이터베이스 오류", f"저장 중 오류 발생: {e}\n\n상세 정보는 콘솔을 확인하세요.")
         finally:
             session.close()
             self.clear_user_form()
             self.load_users()
+            # 권한 옵션 업데이트 (관리자 생성/삭제 시 권한 선택지 변경)
+            self.update_role_options()
 
     def delete_user(self):
         if not hasattr(self, '_selected_user_id') or not self._selected_user_id:
@@ -662,6 +845,8 @@ class DataManagementFrame(ctk.CTkFrame):
             session.close()
             self.clear_user_form()
             self.load_users()
+            # 권한 옵션 업데이트 (관리자 삭제 시 권한 선택지 변경 가능)
+            self.update_role_options()
 
     def clear_user_form(self):
         self._selected_user_id = None
@@ -671,13 +856,14 @@ class DataManagementFrame(ctk.CTkFrame):
                 entry.configure(state="normal")
             entry.delete(0, "end")
         self.is_admin_var.set("off")
+        self.user_role_combo.set("RD - 연구원")  # 권한 초기화
         self.user_history_button.configure(state="disabled")
         if self.user_tree.selection():
             self.user_tree.selection_remove(self.user_tree.selection()[0])
 
     def get_user_label_by_key(self, key):
         """user_entries의 키(영문)로 레이블(한글)을 찾습니다."""
-        user_labels = {"username": "사용자 ID", "password": "비밀번호", "manager_code": "담당번호", "position": "직책", "contact": "연락처", "zip_code": "우편번호", "address": "주소"}
+        user_labels = {"username": "사용자 ID", "real_name": "실명", "password": "비밀번호", "manager_code": "담당번호", "position": "직책", "contact": "연락처", "zip_code": "우편번호", "address": "주소"}
         # 역 매핑을 생성하거나 직접 찾기
         reverse_map = {v: k for k, v in user_labels.items()}
         return reverse_map.get(key, key)

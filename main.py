@@ -18,10 +18,13 @@ def resource_path(relative_path):
     try:
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
+        # 임시 폴더 접근 가능 여부 확인
+        if not os.path.exists(base_path) or not os.access(base_path, os.R_OK):
+            raise Exception(f"_MEIPASS 경로 접근 불가: {base_path}")
         print(f"[RESOURCE] Using _MEIPASS: {base_path}")
-    except Exception:
+    except Exception as e:
         base_path = os.path.dirname(os.path.abspath(__file__))
-        print(f"[RESOURCE] Using script directory: {base_path}")
+        print(f"[RESOURCE] _MEIPASS 사용 불가 ({e}), 스크립트 디렉토리 사용: {base_path}")
     
     # 아이콘 파일 특별 처리 (더 포괄적)
     if relative_path.lower() in ['icon.ico', 'Icon.ico', 'app.ico', 'application.ico']:
@@ -104,6 +107,15 @@ def create_fallback_icon(base_path):
         from PIL import Image, ImageDraw
         import tempfile
         
+        # 안전한 임시 디렉토리 사용
+        if not os.path.exists(base_path) or not os.access(base_path, os.W_OK):
+            # base_path가 쓰기 불가능하면 시스템 임시 디렉토리 사용
+            temp_dir = tempfile.gettempdir()
+            temp_icon_path = os.path.join(temp_dir, 'rnd_platform_temp_icon.ico')
+            print(f"[RESOURCE] base_path 쓰기 불가, 시스템 임시 폴더 사용: {temp_dir}")
+        else:
+            temp_icon_path = os.path.join(base_path, 'temp_icon.ico')
+        
         # 간단한 임시 아이콘 생성
         size = (64, 64)
         image = Image.new('RGBA', size, (70, 130, 180, 255))  # Steel Blue
@@ -113,7 +125,6 @@ def create_fallback_icon(base_path):
         draw.text((20, 20), "R", fill=(255, 255, 255, 255))
         
         # 임시 파일로 저장
-        temp_icon_path = os.path.join(base_path, 'temp_icon.ico')
         image.save(temp_icon_path, format='ICO')
         
         print(f"[RESOURCE] Created fallback icon: {temp_icon_path}")
@@ -121,8 +132,8 @@ def create_fallback_icon(base_path):
         
     except Exception as e:
         print(f"[RESOURCE] Failed to create fallback icon: {e}")
-        # 최후의 수단: 빈 파일 경로 반환
-        return os.path.join(base_path, 'icon.ico')
+        # 최후의 수단: None 반환하여 기본 아이콘 사용
+        return None
 
 
 # --- build/debug helper: print where runtime will look for bundled data ---
@@ -258,6 +269,9 @@ class App(ctk.CTk):
         self.texts = get_texts(self.language) # 중앙 번역 객체 생성
         self.title("화장품 연구소 관리 시스템")
 
+        # PyInstaller 임시 폴더 관련 오류 처리
+        self.handle_pyinstaller_temp_issues()
+
         self.db_sync_timer = None
         self.db_path_warning_shown = False
         self.last_shared_db_info = (0, 0)
@@ -273,6 +287,40 @@ class App(ctk.CTk):
         
         # 앱 시작 시 로딩 스플래시 화면 표시
         self.after(50, self.show_pre_login_splash)
+
+    def handle_pyinstaller_temp_issues(self):
+        """PyInstaller 임시 폴더 관련 문제를 처리합니다."""
+        try:
+            if getattr(sys, 'frozen', False):
+                # PyInstaller 실행 환경
+                if hasattr(sys, '_MEIPASS'):
+                    meipass = sys._MEIPASS
+                    # 임시 폴더 접근성 확인
+                    if not os.path.exists(meipass):
+                        print(f"[PYINSTALLER] _MEIPASS 폴더 접근 불가: {meipass}")
+                        # 임시 폴더가 접근 불가능한 경우 환경 변수 제거
+                        if '_MEIPASS' in os.environ:
+                            del os.environ['_MEIPASS']
+                            print("[PYINSTALLER] 환경 변수에서 _MEIPASS 제거")
+                    else:
+                        print(f"[PYINSTALLER] _MEIPASS 정상 접근: {meipass}")
+                        
+                        # 임시 폴더 내 필수 파일들 존재 여부 확인
+                        essential_files = ['modules', 'database', 'utils', 'customtkinter']
+                        missing_files = []
+                        for file_or_dir in essential_files:
+                            path = os.path.join(meipass, file_or_dir)
+                            if not os.path.exists(path):
+                                missing_files.append(file_or_dir)
+                        
+                        if missing_files:
+                            print(f"[PYINSTALLER] 누락된 파일/폴더: {missing_files}")
+                        else:
+                            print("[PYINSTALLER] 필수 파일들 정상 확인")
+                            
+        except Exception as e:
+            print(f"[PYINSTALLER] 임시 폴더 처리 중 오류: {e}")
+            # 오류 발생 시에도 계속 진행
 
     def show_login_window(self):
         print(f"{datetime.now()}: show_login_window 호출")
@@ -299,32 +347,36 @@ class App(ctk.CTk):
             
         # 환경 변수에서 사용자 정보 복원
         user_id = os.environ.get('RESTART_USER_ID')
-        user_is_admin = os.environ.get('RESTART_USER_IS_ADMIN') == 'True'
         
         if user_id:
-            # 사용자 객체 재구성
-            class RestartUser:
-                def __init__(self, user_id, is_admin):
-                    self.id = user_id
-                    self.username = user_id  # username과 id를 동일하게 설정
-                    self.is_admin = is_admin
-            
-            restart_user = RestartUser(user_id, user_is_admin)
-            self.current_user = restart_user
-            print(f"[RESTART] 자동 로그인: {user_id} (관리자: {user_is_admin})")
-            
-            # 환경 변수 정리
-            for key in ['APP_RESTARTING', 'RESTART_USER_ID', 'RESTART_USER_IS_ADMIN']:
-                if key in os.environ:
-                    del os.environ[key]
-            
-            self.on_login_success(restart_user)
-            return True
+            # DB에서 실제 User 객체 가져오기
+            session = db_manager.get_session()
+            try:
+                from database.models import User
+                restart_user = session.query(User).filter_by(id=user_id).first()
+                
+                if restart_user:
+                    self.current_user = restart_user
+                    print(f"[RESTART] 자동 로그인: {restart_user.username} (권한: {restart_user.role})")
+                    
+                    # 환경 변수 정리
+                    for key in ['APP_RESTARTING', 'RESTART_USER_ID', 'RESTART_USER_IS_ADMIN']:
+                        if key in os.environ:
+                            del os.environ[key]
+                    
+                    self.on_login_success(restart_user)
+                    return True
+                else:
+                    print(f"[RESTART] 사용자 ID {user_id}를 찾을 수 없음")
+            except Exception as e:
+                print(f"[RESTART] 자동 로그인 실패: {e}")
+            finally:
+                session.close()
         
         return False
     
     def show_initial_signup_window(self):
-        """최초 실행 시 관리자 계정 생성을 위한 회원가입 창을 띄웁니다."""
+        """최초 실행 시 첫 관리자 계정 생성을 위한 회원가입 창을 띄웁니다."""
         from modules.signup import SignupWindow
         # on_success 콜백으로 on_login_success를 전달하여 가입 후 바로 로그인되도록 함
         signup_win = SignupWindow(self, is_initial_setup=True, on_success=self.on_first_login_success)
@@ -353,7 +405,7 @@ class App(ctk.CTk):
             
         # 2. 공유 DB 설정 안내
         messagebox.showinfo("초기 설정 안내",
-            "프로그램 초기 설정이 완료되었습니다.\n\n"
+            "첫 관리자 계정이 생성되었습니다.\n\n"
             "다른 사용자와 데이터를 공유하려면 설정 메뉴에서\n"
             "공유 DB 경로를 네트워크 드라이브나 공유 폴더로 변경해주세요.",
             parent=self)
@@ -362,8 +414,10 @@ class App(ctk.CTk):
         self.on_login_success(user)
 
     def on_initial_setup(self):
-        """DB가 처음 생성될 때 호출되는 콜백. 기본 admin 계정을 생성합니다."""
-        db_manager.create_default_admin()
+        """DB가 처음 생성될 때 호출되는 콜백. (admin 계정 생성하지 않음)"""
+        # admin 계정은 생성하지 않고, 사용자가 직접 회원가입하도록 유도
+        print("[초기화] DB 생성 완료 - admin 계정 생성하지 않음")
+        pass
 
     def show_pre_login_splash(self):
         """앱 시작 시 초기화 작업을 보여주는 스플래시 화면"""
@@ -746,11 +800,6 @@ class App(ctk.CTk):
 
         def show_splash_and_main_ui():
             """로그인 창이 완전히 파괴된 후 스플래시 화면과 메인 UI를 표시합니다."""
-            if user.username == 'admin' and db_manager.get_admin_user_count() == 1:
-                messagebox.showinfo("초기 설정 필요", "초기 관리자 계정(admin)으로 로그인했습니다.\n보안을 위해 새로운 관리자 계정을 생성해주세요.")
-                self.show_initial_signup_window()
-                return
-
             def show_main_window():
                 self.center_on_mouse_screen()
                 self.deiconify()
@@ -866,14 +915,23 @@ class App(ctk.CTk):
         
         self.nav_buttons = {}
         all_nav_items = [
-            {"name": FRAME_HOME, "text": self.texts["home"], "admin_only": False},
-            {"name": FRAME_DOCUMENT, "text": self.texts["document"], "admin_only": False},
-            {"name": FRAME_QUALITY, "text": self.texts["quality"], "admin_only": False},
+            {"name": FRAME_HOME, "text": self.texts["home"], "requires": None},
+            {"name": FRAME_DOCUMENT, "text": self.texts["document"], "requires": "research"},
+            {"name": FRAME_QUALITY, "text": self.texts["quality"], "requires": "quality"},
         ]
 
         current_row = 1
         for item in all_nav_items:
-            if not item["admin_only"] or self.current_user.is_admin:
+            # 권한 체크
+            show_item = False
+            if item["requires"] is None:
+                show_item = True  # 홈은 모두 표시
+            elif item["requires"] == "research":
+                show_item = self.current_user.has_research_access()
+            elif item["requires"] == "quality":
+                show_item = self.current_user.has_quality_access()
+            
+            if show_item:
                 button = ctk.CTkButton(
                     self.navigation_frame,
                     text=item["text"],
@@ -889,15 +947,17 @@ class App(ctk.CTk):
         empty_space.grid(row=current_row, column=0, sticky="nsew")
         current_row += 1
  
-        self.data_button = ctk.CTkButton(
-            self.navigation_frame,
-            text=self.texts["data"],
-            command=lambda: self.navigate_and_record("data/ingredient_mgt"),
-            width=140, height=35, font=ctk.CTkFont(size=12),
-            fg_color="#E65100", hover_color="#BF360C", anchor="center"
-        )
-        self.data_button.grid(row=current_row, column=0, padx=15, pady=8)
-        current_row += 1
+        # 데이터 관리 버튼 - RQD, MSAD만 표시
+        if self.current_user.can_manage_all_data():
+            self.data_button = ctk.CTkButton(
+                self.navigation_frame,
+                text=self.texts["data"],
+                command=lambda: self.navigate_and_record("data/ingredient_mgt"),
+                width=140, height=35, font=ctk.CTkFont(size=12),
+                fg_color="#E65100", hover_color="#BF360C", anchor="center"
+            )
+            self.data_button.grid(row=current_row, column=0, padx=15, pady=8)
+            current_row += 1
 
         self.settings_button = ctk.CTkButton(
             self.navigation_frame,
@@ -1597,6 +1657,22 @@ class App(ctk.CTk):
         if self.db_sync_timer:
             self.after_cancel(self.db_sync_timer)
             self.db_sync_timer = None
+            
+    def update_db_sync_baseline(self):
+        """DB 동기화 기준선을 현재 상태로 업데이트합니다 (자체 변경사항 반영용)."""
+        try:
+            config = configparser.ConfigParser()
+            config.read(CONFIG_FILE_PATH, encoding='utf-8')
+            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+            
+            if shared_db_path and os.path.exists(shared_db_path):
+                shared_db_stat = os.stat(shared_db_path)
+                self.last_shared_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
+                print(f"[DB동기화] 기준선 업데이트: 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
+            else:
+                print("[DB동기화] 공유 DB 경로 없음 - 기준선 업데이트 스킵")
+        except Exception as e:
+            print(f"[DB동기화] 기준선 업데이트 중 오류: {e}")
 
     def check_shared_db(self):
         """공유 DB 파일의 상태를 확인하고, 변경 시 업데이트를 제안합니다."""
@@ -1823,6 +1899,14 @@ class App(ctk.CTk):
                         os.path.join(current_dir, 'utils'),
                         env.get('PYTHONPATH', '')
                     ])
+                    
+                    # 임시 폴더 오류 방지를 위한 추가 설정
+                    env['PYINSTALLER_SUPPRESS_TEMP_ERRORS'] = '1'
+                    
+                    # 이전 _MEIPASS 환경 변수 제거 (새 프로세스가 새 임시 폴더 생성하도록)
+                    if '_MEIPASS' in env:
+                        del env['_MEIPASS']
+                        print(f"{datetime.now()}: 이전 _MEIPASS 환경 변수 제거")
                 
                 # 재시작 시 사용자 정보 전달
                 if hasattr(self, 'current_user') and self.current_user:
@@ -1931,6 +2015,16 @@ def check_sqlite_availability():
         return False
 
 if __name__ == "__main__":
+    # PyInstaller 임시 폴더 관련 전역 오류 처리
+    try:
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            temp_path = sys._MEIPASS
+            if not os.path.exists(temp_path) or not os.access(temp_path, os.R_OK):
+                print(f"[STARTUP] PyInstaller 임시 폴더 접근 문제 감지: {temp_path}")
+                print("[STARTUP] 오류가 발생할 수 있지만 계속 진행합니다...")
+    except Exception as temp_error:
+        print(f"[STARTUP] 임시 폴더 체크 중 오류: {temp_error}")
+    
     # SQLite 가용성 확인
     if not check_sqlite_availability():
         import tkinter as tk
@@ -1940,7 +2034,7 @@ if __name__ == "__main__":
         root.withdraw()
         
         messagebox.showerror(
-            "시스템 오류",
+            "시스템 오러",
             "SQLite 데이터베이스 모듈을 로드할 수 없습니다.\n\n"
             "이는 빌드 과정에서 필요한 모듈이 포함되지 않았기 때문입니다.\n"
             "개발자에게 문의해주세요.\n\n"

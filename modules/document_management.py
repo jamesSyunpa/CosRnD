@@ -810,7 +810,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 if formulation:
                     formulation_name = formulation.experiment_name
                     lab_no = formulation.lab_no
-                    manager_name = formulation.manager_name
+                    # 담당자명을 ID에서 이름으로 변환
+                    manager_name = self.get_manager_display_name(formulation.manager_name or "", session)
             finally:
                 session.close()
 
@@ -858,7 +859,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             quotation_data = {
                 "details": {
                     "실험품명": formulation.experiment_name,
-                    "담당자": formulation.manager_name,
+                    "담당자": self.get_manager_display_name(formulation.manager_name or "", session),
                     "LAB NO.": formulation.lab_no,
                     "기준 중량": self.quotation_weight_entry.get() + "g",
                 },
@@ -915,8 +916,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
             for f in formulations:
                 exp_date = f.experiment_date or ""
                 sample_date = f.sample_delivery_date.isoformat() if getattr(f, 'sample_delivery_date', None) else ""
+                # 담당자명을 ID에서 이름으로 변환
+                manager_name = self.get_manager_display_name(f.manager_name or "", session)
                 data_rows.append([
-                    f.id, exp_date, f.experiment_name or "", f.lab_no or "", f.revision or "", f.sample_sent_count or 0, sample_date, f.manager_name or "", f.experiment_comment or ""
+                    f.id, exp_date, f.experiment_name or "", f.lab_no or "", f.revision or "", f.sample_sent_count or 0, sample_date, manager_name, f.experiment_comment or ""
                 ])
 
                 # 각 처방의 원료들을 원료별 목록 시트용으로 확장
@@ -937,6 +940,30 @@ class DocumentManagementFrame(ctk.CTkFrame):
             messagebox.showerror("내보내기 오류", f"전체 처방 내보내기 중 오류가 발생했습니다: {e}", parent=self)
         finally:
             session.close()
+
+    def get_manager_display_name(self, manager_value, session):
+        """담당자 필드의 값을 표시용 이름으로 변환합니다"""
+        if not manager_value or not manager_value.strip():
+            return ""
+        
+        manager_value = manager_value.strip()
+        
+        # 숫자로만 이루어진 경우 사용자 ID로 판단하여 이름으로 변환
+        if manager_value.isdigit():
+            try:
+                from database.models import User
+                user = session.query(User).filter_by(id=int(manager_value)).first()
+                if user:
+                    # real_name이 있으면 우선 사용, 없으면 username 사용
+                    return user.real_name or user.username
+                else:
+                    return manager_value  # 사용자를 찾을 수 없으면 원래 값 반환
+            except Exception as e:
+                print(f"담당자 이름 변환 중 오류: {e}")
+                return manager_value
+        
+        # 이미 이름인 경우 그대로 반환
+        return manager_value
 
     def reset_selection_and_tabs(self):
         """
@@ -3058,36 +3085,48 @@ class DocumentManagementFrame(ctk.CTkFrame):
             forms = session.query(Formulation).order_by(Formulation.created_at).all()
             for f in forms:
                 changed_at, summary_text, full = summarize_log(f.change_log, "처방")
-                identifier = f.lab_no or f.experiment_name
-                form_rows.append(("처방", f.id, identifier, changed_at, f.manager_name or "", summary_text, full))
-            sheets['처방'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': form_rows, 'style': True}
+                # 변경 이력이 있는 경우만 추가
+                if full and summary_text:
+                    identifier = f.lab_no or f.experiment_name
+                    form_rows.append(("처방", f.id, identifier, changed_at, f.manager_name or "", summary_text, full))
+            if form_rows:  # 데이터가 있을 때만 시트 추가
+                sheets['처방'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': form_rows, 'style': True}
 
             # Materials
             mat_rows = []
             mats = session.query(Material).order_by(Material.id).all()
             for m in mats:
                 changed_at, summary_text, full = summarize_log(m.change_log, "원료")
-                identifier = m.code or m.name
-                mat_rows.append(("원료", m.id, identifier, changed_at, "", summary_text, full))
-            sheets['원료'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': mat_rows, 'style': True}
+                # 변경 이력이 있는 경우만 추가
+                if full and summary_text:
+                    identifier = m.code or m.name
+                    mat_rows.append(("원료", m.id, identifier, changed_at, "", summary_text, full))
+            if mat_rows:  # 데이터가 있을 때만 시트 추가
+                sheets['원료'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': mat_rows, 'style': True}
 
             # Clients
             client_rows = []
             clients = session.query(Client).order_by(Client.id).all()
             for c in clients:
                 changed_at, summary_text, full = summarize_log(c.change_log, "거래처")
-                identifier = c.name
-                client_rows.append(("거래처", c.id, identifier, changed_at, c.manager_name or "", summary_text, full))
-            sheets['거래처'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': client_rows, 'style': True}
+                # 변경 이력이 있는 경우만 추가
+                if full and summary_text:
+                    identifier = c.name
+                    client_rows.append(("거래처", c.id, identifier, changed_at, c.manager_name or "", summary_text, full))
+            if client_rows:  # 데이터가 있을 때만 시트 추가
+                sheets['거래처'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': client_rows, 'style': True}
 
             # Users
             user_rows = []
             users = session.query(User).order_by(User.id).all()
             for u in users:
                 changed_at, summary_text, full = summarize_log(u.change_log)
-                identifier = u.username
-                user_rows.append(("사용자", u.id, identifier, changed_at, u.username or "", summary_text, full))
-            sheets['사용자'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': user_rows, 'style': True}
+                # 변경 이력이 있는 경우만 추가
+                if full and summary_text:
+                    identifier = u.username
+                    user_rows.append(("사용자", u.id, identifier, changed_at, u.username or "", summary_text, full))
+            if user_rows:  # 데이터가 있을 때만 시트 추가
+                sheets['사용자'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': user_rows, 'style': True}
 
             # 호출하여 엑셀로 저장
             excel_handler.export_multisheet_data_to_excel(sheets, default_filename="이력_내보내기.xlsx")
