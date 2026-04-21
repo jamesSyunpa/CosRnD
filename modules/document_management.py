@@ -218,12 +218,11 @@ def try_convert_to_float(value):
         return value
 
 class DocumentManagementFrame(ctk.CTkFrame):
-    def __init__(self, master, user, app, language="korean"):
+    def __init__(self, master, user, app, texts):
         super().__init__(master)
         self.current_user = user
         self.app = app
-        self.language = language
-        self.texts = get_texts(language)
+        self.texts = texts # App으로부터 중앙 texts 객체를 전달받음
         self.client_map = {} # 처방 목록 필터용
         self._selected_formulation_id = None
         self.current_view = "folders"  # 현재 뷰 상태 ('folders' 또는 'files')
@@ -255,20 +254,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.help_button = ctk.CTkButton(top_frame, text=self.texts['help'], width=80, command=self.show_help)
         self.help_button.place(relx=0.98, y=10, anchor="ne")
 
-        # --- 언어별 텍스트 ---
-        texts = {
-            "korean": {"formulation": "처방 관리", "document": "문서"},
-            "english": {"formulation": "Formulation Mgt.", "document": "Documents"}
-        }
-        current_texts = texts[self.language]
-
         # '처방 관리'와 '문서' 탭을 추가합니다.
-        self.tab_view.add(current_texts["formulation"])
-        self.tab_view.add(current_texts["document"])
+        self.tab_view.add(self.texts["formulation_mgt"])
+        self.tab_view.add(self.texts["document_sub"])
 
         # 탭 설정
-        self.setup_formulation_tab(self.tab_view.tab(current_texts["formulation"]))
-        self.setup_document_sub_tabs(self.tab_view.tab(current_texts["document"]))
+        self.setup_formulation_tab(self.tab_view.tab(self.texts["formulation_mgt"]))
+        self.setup_document_sub_tabs(self.tab_view.tab(self.texts["document_sub"]))
         
         self.load_formulations()
 
@@ -280,20 +272,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
         doc_sub_tab_view = ctk.CTkTabview(tab_frame, border_width=1, border_color=("gray80", "gray30"))
         doc_sub_tab_view.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
-        # --- 언어별 텍스트 ---
-        texts = {
-            "korean": {"property_spec": "물성치/SPEC", "report": "기능성 보고/참고 자료"},
-            "english": {"property_spec": "Property/SPEC", "report": "Functional Report/Reference"}
-        }
-        current_texts = texts[self.language]
-
         # 요청된 하위 탭들 추가
-        doc_sub_tab_view.add(current_texts["property_spec"])
-        doc_sub_tab_view.add(current_texts["report"])
+        doc_sub_tab_view.add(self.texts["property_spec"])
+        doc_sub_tab_view.add(self.texts["report"])
 
         # 각 탭의 UI 설정
-        self.setup_lab_journal_tab(doc_sub_tab_view.tab(current_texts["property_spec"]))
-        self.setup_functional_report_tab(doc_sub_tab_view.tab(current_texts["report"]))
+        self.setup_lab_journal_tab(doc_sub_tab_view.tab(self.texts["property_spec"]))
+        self.setup_functional_report_tab(doc_sub_tab_view.tab(self.texts["report"]))
+
 
     def show_help(self):
         """서류 관리 도움말을 표시합니다."""
@@ -337,7 +323,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             "korean": {"list": "처방 목록", "quote": "견적", "ingredient": "전성분"},
             "english": {"list": "Formulation List", "quote": "Quotation", "ingredient": "Ingredient List"}
         }
-        current_texts = texts[self.language]
+        current_texts = texts[self.app.language]
 
         self.formulation_sub_tab_view.add(current_texts["list"])
         self.formulation_sub_tab_view.add(current_texts["quote"])
@@ -409,11 +395,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.reset_selection_button = ctk.CTkButton(file_view_header, text=self.texts['reset_selection'], width=100, command=self.reset_selection_and_tabs)
         self.reset_selection_button.pack(side="left", padx=(0, 10))
 
-        self.edit_sample_button = ctk.CTkButton(file_view_header, text=self.texts['edit_sample_count'], width=100, command=self.edit_sample_sent_count)
-        self.edit_sample_button.pack(side="right", padx=(5, 0))
+        # 관리자일 경우에만 샘플 관련 버튼 표시
+        if self.current_user.is_admin:
+            self.edit_sample_button = ctk.CTkButton(file_view_header, text=self.texts['edit_sample_count'], width=100, command=self.edit_sample_sent_count)
+            self.edit_sample_button.pack(side="right", padx=(5, 0))
 
-        self.send_sample_button = ctk.CTkButton(file_view_header, text=self.texts['send_sample'], width=100, command=self.increment_sample_sent_count)
-        self.send_sample_button.pack(side="right")
+            self.send_sample_button = ctk.CTkButton(file_view_header, text=self.texts['send_sample'], width=100, command=self.increment_sample_sent_count)
+            self.send_sample_button.pack(side="right")
 
         formulation_cols_def = self.texts['formulation_tree_columns']
         # 'id'는 Treeview의 내부 식별자(iid)로 사용되므로 columns 리스트에서는 제외합니다.
@@ -450,30 +438,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         # --- 하단 버튼 ---
         bottom_button_frame = ctk.CTkFrame(parent_tab, fg_color="transparent")
-        bottom_button_frame.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="e")
-
-        self.new_button = ctk.CTkButton(bottom_button_frame, text=self.texts['new'], width=100, command=lambda: self.open_formulation_popup(edit_mode=False))
-        self.new_button.pack(side="left", padx=5)
-        self.edit_button = ctk.CTkButton(bottom_button_frame, text=self.texts['edit'], width=100, command=lambda: self.open_formulation_popup(edit_mode=True))
-        self.edit_button.pack(side="left", padx=5)
-        self.delete_button = ctk.CTkButton(bottom_button_frame, text=self.texts['delete'], width=100, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation)
-        self.delete_button.pack(side="left", padx=(5, 20)) # 오른쪽에 여백 추가
-        # 관리자 전용: 모든 처방 내보내기 버튼
-        self.export_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 내보내기", width=140, command=self.export_all_formulations)
-        self.export_all_button.pack(side="left", padx=(5, 20))
-        # 관리자 전용: 전체 이력 내보내기 버튼
-        self.export_logs_button = ctk.CTkButton(bottom_button_frame, text="이력 내보내기", width=120, command=self.export_change_logs)
-        self.export_logs_button.pack(side="left", padx=(5, 20))
-        # 관리자 전용: 모든 처방 가져오기 버튼 (레이블 변경: 전체 가져오기)
-        self.import_all_button = ctk.CTkButton(bottom_button_frame, text="전체 가져오기", width=120, command=self.import_all_formulations)
-        self.import_all_button.pack(side="left", padx=(5, 20))
-
-        if not self.current_user.is_admin:
-            self.delete_button.configure(state="disabled")
-            self.export_all_button.configure(state="disabled")
-            self.import_all_button.configure(state="disabled")
-            self.export_logs_button.configure(state="disabled")
+        bottom_button_frame.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="ew")
         
+        # 관리자 전용 버튼들 (왼쪽 정렬)
+        if self.current_user.is_admin:
+            self.export_logs_button = ctk.CTkButton(bottom_button_frame, text="이력 내보내기", width=120, command=self.export_change_logs)
+            self.export_logs_button.pack(side="left", padx=(0, 5))
+        
+        # --- 오른쪽 정렬 버튼들 ---
+        # pack을 right로 하면 역순으로 추가해야 원하는 순서대로 보입니다.
+        if self.current_user.is_admin:
+            self.import_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 가져오기", width=140, command=self.import_all_formulations)
+            self.import_all_button.pack(side="right", padx=5)
+            self.export_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 내보내기", width=140, command=self.export_all_formulations)
+            self.export_all_button.pack(side="right", padx=5)
+        self.delete_button = ctk.CTkButton(bottom_button_frame, text=self.texts['delete'], width=100, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation)
+        self.delete_button.pack(side="right", padx=5) # 오른쪽에 여백 추가
+        self.edit_button = ctk.CTkButton(bottom_button_frame, text=self.texts['edit'], width=100, command=lambda: self.open_formulation_popup(edit_mode=True))
+        self.edit_button.pack(side="right", padx=5)
+        self.new_button = ctk.CTkButton(bottom_button_frame, text=self.texts['new'], width=100, command=lambda: self.open_formulation_popup(edit_mode=False))
+        self.new_button.pack(side="right", padx=5)
+
         self.show_folder_view() # 초기 화면은 폴더 뷰
 
     def setup_quotation_tab(self, tab_frame):
@@ -896,11 +881,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.edit_button.configure(state="disabled")
             self.compare_button.configure(state="disabled")
             self.folder_history_button.configure(state="disabled")
-            self.edit_sample_button.configure(state="disabled")
-            self.send_sample_button.configure(state="disabled")
             self.reset_selection_button.configure(state="disabled")
-            if self.current_user.is_admin:
-                self.delete_button.configure(state="disabled")
+            self.delete_button.configure(state="disabled")
+            # 관리자 전용 버튼이므로 일반 사용자는 비활성화
+            if hasattr(self, 'edit_sample_button'): self.edit_sample_button.configure(state="disabled")
+            if hasattr(self, 'send_sample_button'): self.send_sample_button.configure(state="disabled")
+
         else: # files view
             selection_count = len(self.formulation_tree.selection())
             
@@ -910,13 +896,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
             # 1개 선택 시: 수정, 샘플 관련 버튼 활성화
             is_single_selected = selection_count == 1
             self.edit_button.configure(state="normal" if is_single_selected else "disabled")
-            self.send_sample_button.configure(state="normal" if is_single_selected else "disabled")
-            self.edit_sample_button.configure(state="normal" if is_single_selected else "disabled")
+            if hasattr(self, 'send_sample_button'): self.send_sample_button.configure(state="normal" if is_single_selected else "disabled")
+            if hasattr(self, 'edit_sample_button'): self.edit_sample_button.configure(state="normal" if is_single_selected else "disabled")
             
             # 2개 선택 시: 비교 버튼 활성화
             self.compare_button.configure(state="normal" if selection_count == 2 else "disabled")
             
             # 1개 이상 선택 시: 삭제, 선택 초기화 버튼 활성화
+            # 관리자만 삭제 버튼을 활성화할 수 있습니다.
             if self.current_user.is_admin:
                 self.delete_button.configure(state="normal" if selection_count > 0 else "disabled")
             self.reset_selection_button.configure(state="normal" if selection_count > 0 else "disabled")
@@ -1086,12 +1073,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
         summed_list_tab.grid_rowconfigure(2, weight=0)  # 합계 프레임
 
         summed_cols = self.texts['summed_ingredient_tree_columns']
-        self.summed_ingredient_tree = ttk.Treeview(summed_list_tab, columns=list(summed_cols.keys()), show="headings")
-        self.summed_ingredient_tree.heading("name_ko", text=summed_cols['name_ko']); self.summed_ingredient_tree.column("name_ko", width=200)
-        self.summed_ingredient_tree.heading("name_en", text=summed_cols['name_en']); self.summed_ingredient_tree.column("name_en", width=200)
-        self.summed_ingredient_tree.heading("cas_no", text=summed_cols['cas_no']); self.summed_ingredient_tree.column("cas_no", width=120)
-        self.summed_ingredient_tree.heading("function", text=summed_cols['function']); self.summed_ingredient_tree.column("function", width=150)
-        self.summed_ingredient_tree.heading("total_ratio", text=summed_cols['total_ratio']); self.summed_ingredient_tree.column("total_ratio", width=120, anchor="e")
+        self.summed_ingredient_tree = ttk.Treeview(summed_list_tab, columns=list(summed_cols.keys()), show="headings") # noqa
+        self.summed_ingredient_tree.heading("phase", text=summed_cols['phase']); self.summed_ingredient_tree.column("phase", width=80, anchor="center")
+        self.summed_ingredient_tree.heading("name_en", text=summed_cols['name_en']); self.summed_ingredient_tree.column("name_en", width=200, stretch=True) # noqa
+        self.summed_ingredient_tree.heading("name_ko", text=summed_cols['name_ko']); self.summed_ingredient_tree.column("name_ko", width=200, stretch=True) # noqa
+        self.summed_ingredient_tree.heading("total_ratio", text=summed_cols['total_ratio']); self.summed_ingredient_tree.column("total_ratio", width=120, anchor="e") # noqa
+        self.summed_ingredient_tree.heading("cas_no", text=summed_cols['cas_no']); self.summed_ingredient_tree.column("cas_no", width=120) # noqa
+        self.summed_ingredient_tree.heading("function", text=summed_cols['function']); self.summed_ingredient_tree.column("function", width=150) # noqa
         self.summed_ingredient_tree.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=(10,0), pady=(0,5))
 
         # 전성분 합계 스크롤바
@@ -1254,34 +1242,43 @@ class DocumentManagementFrame(ctk.CTkFrame):
                             key = (ing.name_ko or "", ing.name_en or "")
                             if key not in summed_ingredients:
                                 summed_ingredients[key] = {
-                                    'total_ratio': 0, 'cas_no': ing.cas_no or "", 'function': ing.function or ""
+                                    'total_ratio': 0,
+                                    'cas_no': ing.cas_no or "",
+                                    'function': ing.function or "",
+                                    'phases': set()  # 수정: phases를 집합으로 수집
                                 }
+                            # 합산 및 phases 누적 (중복 제거 위해 set 사용)
+                           
                             summed_ingredients[key]['total_ratio'] += actual_ratio
+                            summed_ingredients[key]['phases'].add(item.phase or 'N/A')
 
             # 함량이 높은 순으로 정렬
             sorted_ingredients = sorted(summed_ingredients.items(), key=lambda x: x[1]['total_ratio'], reverse=True)
 
             # 데이터 수집
-            for (name_ko, name_en), data in sorted_ingredients:
-                total_ratio = data['total_ratio']
-                cas_no = data['cas_no']
-                function = data['function']
-                total_summed_ratio += data['total_ratio']
-                tree_data_to_process.append([name_ko, name_en, cas_no, function, total_ratio])
+            for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
+                total_ratio = data['total_ratio'] # noqa
+                cas_no = data.get('cas_no', '')
+                function = data.get('function', '')
+                total_summed_ratio += data.get('total_ratio', 0)
+                # [수정] '구분' 열에 행 번호를 표시하도록 변경
+                tree_data_to_process.append([
+                    i, name_en, name_ko, data.get('total_ratio', 0), cas_no, function
+                ])
 
             # 최대 소수점 자릿수 계산
             max_dp_total_ratio = 0
-            for row in tree_data_to_process:
-                ratio_val = row[4]
+            for row in tree_data_to_process: # [구분, 영문, 국문, 함량, CAS, 기능]
+                # [수정] 함량 인덱스가 3에서 3으로 동일 (순서 변경 없음)
+                ratio_val = row[3]
                 if isinstance(ratio_val, Decimal):
                     max_dp_total_ratio = max(max_dp_total_ratio, -ratio_val.as_tuple().exponent)
 
             # 포맷팅하여 Treeview에 삽입
             for row_data in tree_data_to_process:
-                # Decimal 값을 포맷팅된 문자열로 변환
-                row_data[4] = f"{row_data[4]:.{max_dp_total_ratio}f}"
+                row_data[3] = f"{row_data[3]:.{max_dp_total_ratio}f}"
                 self.summed_ingredient_tree.insert("", "end", values=tuple(row_data))
-            
+
             # 합계 업데이트
             self.summed_total_ratio_label.configure(text=f"{total_summed_ratio:.{max_dp_total_ratio}f}")
         finally:
@@ -1409,7 +1406,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
                         key = (ing.name_ko or "", ing.name_en or "")
                         if key not in summed_ingredients:
                             summed_ingredients[key] = {
-                                'total_ratio': 0, 'cas_no': ing.cas_no or "", 'function': ing.function or "",
+                                'total_ratio': 0,
+                                'cas_no': ing.cas_no or "", 'function': ing.function or "",
                                 'hs_code': ing.hs_code or "", 'nmpa_reg_num': ing.nmpa_reg_num or "", 'remark': ing.remark or ""
                             }
                         summed_ingredients[key]['total_ratio'] += actual_ratio
@@ -1723,8 +1721,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
                         'rm_ratio': actual_wt,
                         'ing_ratio': Decimal('100'),
                         'actual_wt': actual_wt,
-                        'cas_no': "",
-                        'function': "",
+                        'cas_no': "-",
+                        'function': "-",
                         'hs_code': "",
                         'origin': material.origin if material else "",
                         'material_name_en': material.name_en if material else "",
@@ -1746,8 +1744,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
                                 'rm_ratio': item_ratio_dec,
                                 'ing_ratio': ing_comp_ratio_dec,
                                 'actual_wt': actual_wt,
-                                'cas_no': ing.cas_no,
-                                'function': ing.function,
+                                'cas_no': ing.cas_no or "-",
+                                'function': ing.function or "-",
                                 'hs_code': ing.hs_code or "",
                                 'origin': material.origin if material else "",
                                 'material_name_en': material.name_en if material else "",
@@ -1763,8 +1761,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
                                 'rm_ratio': "",
                                 'ing_ratio': ing_comp_ratio_dec,
                                 'actual_wt': actual_wt,
-                                'cas_no': ing.cas_no,
-                                'function': ing.function,
+                                'cas_no': ing.cas_no or "-",
+                                'function': ing.function or "-",
                                 'hs_code': ing.hs_code or "",
                                 'origin': material.origin if material else "",
                                 'material_name_en': material.name_en if material else "",
@@ -1787,11 +1785,6 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     max_dp_actual = max(max_dp_actual, -row['actual_wt'].as_tuple().exponent)
 
             # 포맷팅하여 최종 raw_rows 생성
-            for row in raw_rows_decimal:
-                row['rm_ratio'] = f"{row['rm_ratio']:.{max_dp_rm}f}" if isinstance(row['rm_ratio'], Decimal) else ""
-                row['ing_ratio'] = f"{row['ing_ratio']:.{max_dp_ing}f}" if isinstance(row['ing_ratio'], Decimal) else ""
-                row['actual_wt'] = f"{row['actual_wt']:.{max_dp_actual}f}" if isinstance(row['actual_wt'], Decimal) else ""
-                raw_rows.append(row)
 
             # raw_rows는 이제 포맷팅된 문자열을 가진 딕셔너리 리스트입니다.
             # 이후 로직은 이 raw_rows를 사용합니다.
@@ -1830,20 +1823,75 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             # Build final data rows in order of visible_cols
             final_data = []
-            for row in raw_rows:
+            for row in raw_rows_decimal:
                 final_data.append([row.get(col, "") for col in visible_cols])
 
             if final_data:
-                sheets_data["원료별 목록"] = {"type": "table", "content": {"headers": visible_headers, "data": final_data}}
+                sheets_data["원료별 목록"] = {
+                    "type": "table", 
+                    "content": {
+                        "headers": visible_headers, 
+                        "data": final_data,
+                        "number_formats": {
+                            "RM 함량(%)": f'0.{"0"*max_dp_rm}' if max_dp_rm > 0 else '0',
+                            "성분 함량(%)": f'0.{"0"*max_dp_ing}' if max_dp_ing > 0 else '0',
+                            "Actual Wt (%)": f'0.{"0"*max_dp_actual}' if max_dp_actual > 0 else '0'
+                        }
+                    }}
             else:
                 # 빈 데이터일 때에도 headers를 채워 넣어 엑셀 시트 구조 유지
                 sheets_data["원료별 목록"] = {"type": "table", "content": {"headers": visible_headers, "data": []}}
         finally:
             session.close()
+        
+        # [수정] 엑셀 내보내기 시 '전성분 합계' 데이터 생성 로직을 UI와 동일하게 수정
+        # 기존 extract_tree_data는 Treeview의 현재 보이는 값을 가져오므로,
+        # '구분' 열이 Phase 목록으로 잘못 표시될 수 있습니다.
+        # 따라서 UI에 표시하는 로직과 동일하게 데이터를 직접 생성합니다.
+        summed_ingredients_for_excel = {}
+        session = db_manager.get_session()
+        try:
+            formulation_items = session.query(FormulationItem).filter_by(formulation_id=self._selected_formulation_id).all()
+            for item in formulation_items:
+                if not item.material_code or item.material_code == "---" or item.ratio is None: continue
+                material = session.query(Material).filter_by(code=item.material_code).first()
+                if material and material.ingredients:
+                    item_ratio_dec = to_decimal(item.ratio)
+                    for ing in material.ingredients:
+                        ing_comp_ratio_dec = to_decimal(ing.composition_ratio)
+                        actual_ratio = item_ratio_dec * (ing_comp_ratio_dec / Decimal('100'))
+                        # [수정] 키 생성 시 빈 값을 '-'로 처리
+                        key = (ing.name_ko or "", ing.name_en or "", ing.cas_no or "-", ing.function or "-")
+                        summed_ingredients_for_excel[key] = summed_ingredients_for_excel.get(key, Decimal('0')) + actual_ratio
+        finally:
+            session.close()
 
-        tree_data_to_process = []
+        if summed_ingredients_for_excel:
+            sorted_ingredients = sorted(summed_ingredients_for_excel.items(), key=lambda x: x[1], reverse=True)
+            
+            max_dp_total_ratio = 0
+            for (name_ko, name_en, cas_no, function), total_ratio in sorted_ingredients:
+                if isinstance(total_ratio, Decimal):
+                    max_dp_total_ratio = max(max_dp_total_ratio, -total_ratio.as_tuple().exponent)
+
+            summed_headers = [self.summed_ingredient_tree.heading(col)["text"] for col in self.summed_ingredient_tree["columns"]]
+            summed_data = []
+            for i, ((name_ko, name_en, cas_no, function), total_ratio) in enumerate(sorted_ingredients, 1):
+                # [수정] 엑셀 데이터 생성 시에도 빈 값을 '-'로 처리 (안전장치)
+                summed_data.append([i, name_en, name_ko, total_ratio, cas_no or "-", function or "-"])
+
+            sheets_data["전성분 합계"] = {
+                "type": "table", 
+                "content": {
+                    "headers": summed_headers, 
+                    "data": summed_data,
+                    "number_formats": {
+                        "총 함량(%)": f'0.{"0"*max_dp_total_ratio}' if max_dp_total_ratio > 0 else '0'
+                    }
+                }}
+
         # 2. 전성분 합계 데이터 추출
-        extract_tree_data(self.summed_ingredient_tree, "전성분 합계")
+        # extract_tree_data(self.summed_ingredient_tree, "전성분 합계") # [삭제] 위에서 직접 생성하는 로직으로 대체
 
         # 3. 단일 전성분 데이터 추출 (국문/영문 분리)
         summed_ingredients = {}
@@ -1861,7 +1909,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
                         key = (ing.name_ko or "", ing.name_en or "")
                         if key not in summed_ingredients:
                             summed_ingredients[key] = {
-                                'total_ratio': 0, 'cas_no': ing.cas_no or "", 'function': ing.function or "",
+                                'total_ratio': 0,
+                                'cas_no': ing.cas_no or "", 'function': ing.function or "",
                                 'hs_code': ing.hs_code or "", 'nmpa_reg_num': ing.nmpa_reg_num or "", 'remark': ing.remark or ""
                             }
                         summed_ingredients[key]['total_ratio'] += actual_ratio
@@ -1873,26 +1922,41 @@ class DocumentManagementFrame(ctk.CTkFrame):
             
             # 최대 소수점 자릿수 계산
             max_dp_total_ratio = 0
-            for (name_ko, name_en), data in sorted_ingredients:
-                ratio_val = data['total_ratio']
+            # [수정] 단일 전성분 목록에 대한 최대 소수점 자릿수 계산 로직 추가
+            for _, data in sorted_ingredients:
+                ratio_val = data.get('total_ratio')
                 if isinstance(ratio_val, Decimal):
                     max_dp_total_ratio = max(max_dp_total_ratio, -ratio_val.as_tuple().exponent)
 
             # 국문 시트 데이터
-            ko_headers = ["NO", "성분명", "C.I NO", "% (W/W)", "CAS. NO", "FUNCTION"]
+            ko_headers = ["NO", "성분명", "% (W/W)", "CAS. NO", "FUNCTION"]
             ko_data = []
-            for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
-                formatted_ratio = f"{data['total_ratio']:.{max_dp_total_ratio}f}"
-                ko_data.append([i, name_ko, "", formatted_ratio, data['cas_no'], data['function']])
-            sheets_data[self.texts['single_ingredients_korean']] = {"type": "table", "content": {"headers": ko_headers, "data": ko_data}}
+            for i, ((name_ko, _), data) in enumerate(sorted_ingredients, 1):
+                ko_data.append([i, name_ko, data['total_ratio'], data.get('cas_no') or "-", data.get('function') or "-"])
+            sheets_data[self.texts['single_ingredients_korean']] = {
+                "type": "table", 
+                "content": {
+                    "headers": ko_headers, 
+                    "data": ko_data,
+                    "number_formats": {
+                        "% (W/W)": f'0.{"0"*max_dp_total_ratio}' if max_dp_total_ratio > 0 else '0'
+                    }
+                }}
 
             # 영문 시트 데이터
-            en_headers = ["NO", "INGREDIENT", "C.I NO", "% (W/W)", "CAS. NO", "FUNCTION"]
+            en_headers = ["NO", "INGREDIENT", "% (W/W)", "CAS. NO", "FUNCTION"]
             en_data = []
-            for i, ((name_ko, name_en), data) in enumerate(sorted_ingredients, 1):
-                formatted_ratio = f"{data['total_ratio']:.{max_dp_total_ratio}f}"
-                en_data.append([i, name_en, "", formatted_ratio, data['cas_no'], data['function']])
-            sheets_data[self.texts['single_ingredients_english']] = {"type": "table", "content": {"headers": en_headers, "data": en_data}}
+            for i, ((_, name_en), data) in enumerate(sorted_ingredients, 1):
+                en_data.append([i, name_en, data['total_ratio'], data.get('cas_no') or "-", data.get('function') or "-"])
+            sheets_data[self.texts['single_ingredients_english']] = {
+                "type": "table", 
+                "content": {
+                    "headers": en_headers, 
+                    "data": en_data,
+                    "number_formats": {
+                        "% (W/W)": f'0.{"0"*max_dp_total_ratio}' if max_dp_total_ratio > 0 else '0'
+                    }
+                }}
 
 
         # 4. 디자인용 전성분 데이터 추출
@@ -2077,10 +2141,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
         right_button_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
         right_button_frame.grid(row=0, column=7, sticky="e")
         ctk.CTkButton(right_button_frame, text=self.texts['export_data'], command=self.export_lab_journal_data).pack(side="left", padx=5)
-        self.journal_import_button = ctk.CTkButton(right_button_frame, text=self.texts['import_data'], command=self.import_lab_journal_data)
-        self.journal_import_button.pack(side="left", padx=5)
-        if not self.current_user.is_admin:
-            self.journal_import_button.configure(state="disabled")
+        if self.current_user.is_admin:
+            self.journal_import_button = ctk.CTkButton(right_button_frame, text=self.texts['import_data'], command=self.import_lab_journal_data)
+            self.journal_import_button.pack(side="left", padx=5)
 
         # --- 실험일지 Treeview ---
         journal_cols = self.texts['journal_tree_columns']
@@ -2707,7 +2770,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                                 order = None
                         phase = irow.get('구분') or irow.get('phase') or None
                         mat_code = irow.get('원료코드') or irow.get('원료 코드') or irow.get('원료코드') or irow.get('코드') or None
-                        mat_name = irow.get('원료명') or irow.get('원료 명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명')
+                        mat_name = irow.get('원료명') or irow.get('원료 명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명') or irow.get('원료명')
                         mat_name = mat_name or irow.get('원료명') or irow.get('material_name') or irow.get('name') or None
                         ratio = try_convert_to_float(irow.get('함량(%)') or irow.get('함량') or irow.get('%') or irow.get('ratio') or 0) or 0
                         amount = try_convert_to_float(irow.get('중량') or irow.get('실험량(g)') or irow.get('amount') or 0) or 0
@@ -2804,10 +2867,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
             sheets = {}
 
             # Helper: split change_log into blocks and extract first line timestamp if present
-            def summarize_log(log_text):
+            def summarize_log(log_text, entity_type=""):
                 if not log_text:
                     return ("", "", "")
                 blocks = [b.strip() for b in str(log_text).split('\n\n') if b.strip()]
+                # 원료, 거래처의 경우 '신규 생성' 로그는 제외
+                if entity_type in ["원료", "거래처"]:
+                    blocks = [b for b in blocks if "신규 생성" not in b]
+
                 full = "\n\n".join(blocks)
                 summary = blocks[0] if blocks else ""
                 # try to parse leading [YYYY-MM-DD HH:MM] pattern
@@ -2825,28 +2892,28 @@ class DocumentManagementFrame(ctk.CTkFrame):
             form_rows = []
             forms = session.query(Formulation).order_by(Formulation.created_at).all()
             for f in forms:
-                changed_at, summary_text, full = summarize_log(f.change_log)
+                changed_at, summary_text, full = summarize_log(f.change_log, "처방")
                 identifier = f.lab_no or f.experiment_name
                 form_rows.append(("처방", f.id, identifier, changed_at, f.manager_name or "", summary_text, full))
-            sheets['처방'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': form_rows}
+            sheets['처방'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': form_rows, 'style': True}
 
             # Materials
             mat_rows = []
             mats = session.query(Material).order_by(Material.id).all()
             for m in mats:
-                changed_at, summary_text, full = summarize_log(m.change_log)
+                changed_at, summary_text, full = summarize_log(m.change_log, "원료")
                 identifier = m.code or m.name
                 mat_rows.append(("원료", m.id, identifier, changed_at, "", summary_text, full))
-            sheets['원료'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': mat_rows}
+            sheets['원료'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': mat_rows, 'style': True}
 
             # Clients
             client_rows = []
             clients = session.query(Client).order_by(Client.id).all()
             for c in clients:
-                changed_at, summary_text, full = summarize_log(c.change_log)
+                changed_at, summary_text, full = summarize_log(c.change_log, "거래처")
                 identifier = c.name
                 client_rows.append(("거래처", c.id, identifier, changed_at, c.manager_name or "", summary_text, full))
-            sheets['거래처'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': client_rows}
+            sheets['거래처'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': client_rows, 'style': True}
 
             # Users
             user_rows = []
@@ -2855,7 +2922,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 changed_at, summary_text, full = summarize_log(u.change_log)
                 identifier = u.username
                 user_rows.append(("사용자", u.id, identifier, changed_at, u.username or "", summary_text, full))
-            sheets['사용자'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': user_rows}
+            sheets['사용자'] = {'headers': ["엔티티", "ID", "식별자", "변경일", "사용자", "요약", "전체 이력"], 'data': user_rows, 'style': True}
 
             # 호출하여 엑셀로 저장
             excel_handler.export_multisheet_data_to_excel(sheets, default_filename="이력_내보내기.xlsx")

@@ -57,7 +57,7 @@ class Client(Base):
     created_at = Column(DateTime, default=datetime.utcnow)  # 생성일시
     
     # 관계 설정
-    materials = relationship("Material", back_populates="client")
+    materials_as_supplier = relationship("Material", back_populates="supplier", foreign_keys="Material.supplier_id")
 
 class Material(Base):
     """원료 데이터 모델"""
@@ -70,8 +70,8 @@ class Material(Base):
     unit_price = Column(Float, default=0.0)
     package_unit = Column(String(50))
     
-    client_id = Column(Integer, ForeignKey('clients.id'))
-    client = relationship("Client")
+    supplier_id = Column(Integer, ForeignKey('clients.id'))
+    supplier = relationship("Client", back_populates="materials_as_supplier", foreign_keys=[supplier_id])
     
     manufacturer = Column(String(100))
     hs_code = Column(String(50))
@@ -80,6 +80,9 @@ class Material(Base):
     is_active = Column(Boolean, default=True)
 
     change_log = Column(Text, nullable=True) # 변경 이력
+    # 수정일과 생성일 추가
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Ingredient와의 관계 설정
     ingredients = relationship("Ingredient", back_populates="material", cascade="all, delete-orphan")
