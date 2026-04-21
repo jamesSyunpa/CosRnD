@@ -104,8 +104,7 @@ class Client(Base):
     name = Column(String(100), nullable=False)  # 거래처명
     business_number = Column(String(20))        # 사업자번호
     client_type = Column(String(50))            # 거래처 유형 (예: '원료', 'OEM/ODM', '부자재')
-    # 거래처 구분코드: 고객별 내부 식별용(예: 단축 코드, 분류 코드)
-    classification_code = Column(String(50))
+    unique_code = Column(String(50))            # 거래처 고유코드 (코드 발급에 사용)
     
     # --- 상세 정보 ---
     ceo_name = Column(String(50))               # 대표자명
@@ -148,33 +147,9 @@ class Material(Base):
     # 수정일과 생성일 추가
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    # Ingredient와의 관계 (Material이 여러 Ingredient를 가질 수 있음)
-    ingredients = relationship("Ingredient", back_populates="material", cascade="all, delete-orphan")
-
-
-class ProductCodeAssignment(Base):
-    """거래처별로 할당된 코드 정보
-    - client_id: 할당 대상 거래처
-    - rule_id: 참조되는 코드 규칙 (선택적)
-    - production_formulation_id: 적용된 생산처방 (적용 시 연결)
-    - product_name: 할당 시 연관된 제품명(예: 고객사에 등록된 제품명)
-    - code_value: 수동으로 지정한 코드 값(비어있으면 규칙에 의해 자동 발급)
-    """
-    __tablename__ = 'product_code_assignments'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    client_id = Column(Integer, ForeignKey('clients.id'), nullable=True)
-    rule_id = Column(Integer, ForeignKey('product_code_rules.id'), nullable=True)
-    production_formulation_id = Column(Integer, ForeignKey('production_formulations.id'), nullable=True)
-    product_name = Column(String(255))
-    code_value = Column(String(255))
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    # 관계
-    client = relationship('Client')
-    rule = relationship('ProductCodeRule')
-    production_formulation = relationship('ProductionFormulation')
     
+    # Ingredient와의 관계 설정
+    ingredients = relationship("Ingredient", back_populates="material", cascade="all, delete-orphan")
 
 class Ingredient(Base):
     """전성분 정보 모델 (하나의 원료에 여러개 포함)"""
@@ -530,3 +505,18 @@ class ProductCodeRule(Base):
     # 포맷 예시: [{"key":"TEMP","label":"온도","type":"select","options":["RT","HEAT"],"token_map":{"RT":"R","HEAT":"H"}}]
     attribute_schema = Column(Text, default='[]')
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+# ----------------------------------------------------------------------------
+# 제품 코드/명 마스터 (코드 관리)
+# ----------------------------------------------------------------------------
+
+class ProductCatalog(Base):
+    __tablename__ = 'product_catalog'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(50), nullable=False, unique=True)  # 제품 코드 (최소 4자리)
+    name = Column(String(255), nullable=False)  # 제품명
+    code_type = Column(String(50), nullable=False)  # 'SEMI' 또는 'FINISHED'
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -596,7 +596,7 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("정보", "내보낼 거래처 데이터가 없습니다.")
             return
 
-        headers = ["거래처 유형", "거래처코드(사업자번호)", "거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부(Y/N)"]
+        headers = ["거래처 유형", "거래처코드(사업자번호)", "거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부(Y/N)", "고유코드"]
         data_rows = [
             (
                 client.client_type or "기타",
@@ -609,7 +609,8 @@ class DataManagementFrame(ctk.CTkFrame):
                 client.email,
                 getattr(client, 'zip_code', ''),
                 client.address,
-                "Y" if client.is_active else "N"
+                "Y" if client.is_active else "N",
+                getattr(client, 'unique_code', '') or ""
             ) for client in clients
         ]
         excel_handler.export_data_to_excel(headers, data_rows, "거래처_데이터.xlsx")
@@ -648,6 +649,7 @@ class DataManagementFrame(ctk.CTkFrame):
                         'zip_code': getattr(client, 'zip_code', '') or '',
                         'address': client.address or '',
                         'is_active': bool(client.is_active),
+                        'unique_code': getattr(client, 'unique_code', '') or '',
                     }
 
                 # 값 업데이트
@@ -662,6 +664,10 @@ class DataManagementFrame(ctk.CTkFrame):
                 client.address = get_val(row, "주소", "address")
                 is_active_val = get_val(row, "사용여부(Y/N)", "is_active(Y/N)") or "Y"
                 client.is_active = str(is_active_val).upper() == "Y"
+                # 고유코드
+                unique_code_val = get_val(row, "고유코드", "unique_code")
+                if unique_code_val is not None:
+                    client.unique_code = str(unique_code_val).strip() or None
 
                 # 변경 이력 기록: (엑셀 가져오기) 표시로 일괄 업로드 집계 가능하게
                 try:
@@ -699,6 +705,7 @@ class DataManagementFrame(ctk.CTkFrame):
                         add_change("우편번호", prev['zip_code'], getattr(client, 'zip_code', '') or '')
                         add_change("주소", prev['address'], client.address or '')
                         add_change("사용여부", 'Y' if prev['is_active'] else 'N', 'Y' if client.is_active else 'N')
+                        add_change("고유코드", prev['unique_code'], getattr(client, 'unique_code', '') or '')
 
                     if lines:
                         body = "- " + "\n- ".join(lines)
@@ -1101,8 +1108,15 @@ class DataManagementFrame(ctk.CTkFrame):
         # 기존 목록 초기화
         self.client_tree.delete(*self.client_tree.get_children())
         
-        # 로딩 표시
-        loading_id = self.client_tree.insert("", "end", values=("로딩 중...", "", "", "", "", "", "", "", "", "", "", ""))
+        # 로딩 표시: 현재 컬럼 수에 맞춰 플레이스홀더 생성
+        try:
+            col_count = len(self.client_tree["columns"])
+        except Exception:
+            col_count = 12
+        placeholder = [""] * col_count
+        if col_count > 0:
+            placeholder[0] = "로딩 중..."
+        loading_id = self.client_tree.insert("", "end", values=tuple(placeholder))
         
         import threading
         threading.Thread(target=self._fetch_clients_thread, args=(search_term, loading_id), daemon=True).start()
@@ -1125,6 +1139,7 @@ class DataManagementFrame(ctk.CTkFrame):
                         str(i + 1),
                         client.client_type or "", 
                         client.business_number or "",
+                        getattr(client, 'unique_code', '') or "",
                         client.name or "",
                         getattr(client, 'ceo_name', '') or "",
                         client.manager_name or "", 
@@ -1141,7 +1156,8 @@ class DataManagementFrame(ctk.CTkFrame):
             
         except Exception as e:
             print(f"[오류] 거래처 로딩 실패: {e}")
-            self.after(0, lambda: messagebox.showerror("로딩 오류", f"거래처 목록을 불러오지 못했습니다.\n{e}"))
+            err_msg = f"거래처 목록을 불러오지 못했습니다.\n{e}"
+            self.after(0, lambda msg=err_msg: messagebox.showerror("로딩 오류", msg))
 
     def _update_client_tree(self, loading_id, display_data):
         try:
@@ -1172,6 +1188,8 @@ class DataManagementFrame(ctk.CTkFrame):
 
             self.client_type_combobox.set(client.client_type or "기타")
             set_entry_value("code", client.business_number)
+            if "unique" in self.client_entries:
+                set_entry_value("unique", getattr(client, 'unique_code', ""))
             set_entry_value("name", client.name)
             set_entry_value("ceo", getattr(client, 'ceo_name', ""))
             set_entry_value("manager", client.manager_name)
@@ -1180,11 +1198,6 @@ class DataManagementFrame(ctk.CTkFrame):
             set_entry_value("email", client.email)
             set_entry_value("zip", getattr(client, 'zip_code', ""))
             set_entry_value("address", client.address)
-            # classification_code 노출 (추가 필드)
-            try:
-                set_entry_value("classification_code", getattr(client, 'classification_code', '') or "")
-            except Exception:
-                pass
 
             self.is_active_var.set("on" if client.is_active else "off")
             self._selected_client_id = client.id 
@@ -1231,6 +1244,7 @@ class DataManagementFrame(ctk.CTkFrame):
             new_values = {
                 "거래처 유형": self.client_type_combobox.get(),
                 "거래처코드": code,
+                "고유코드": self.client_entries.get("unique").get() if self.client_entries.get("unique") else "",
                 "거래처명": name,
                 "대표자명": self.client_entries["ceo"].get(),
                 "담당자명": self.client_entries["manager"].get(),
@@ -1239,7 +1253,6 @@ class DataManagementFrame(ctk.CTkFrame):
                 "이메일": self.client_entries["email"].get(),
                 "우편번호": self.client_entries["zip"].get(),
                 "주소": self.client_entries["address"].get(),
-                "구분코드": self.client_entries.get("classification_code").get() if self.client_entries.get("classification_code") is not None else "",
                 "사용 여부": self.is_active_var.get() == "on"
             }
 
@@ -1256,6 +1269,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 add_nonempty("거래처 유형", new_values["거래처 유형"])
                 add_nonempty("거래처코드", new_values["거래처코드"])
                 add_nonempty("거래처명", new_values["거래처명"])
+                add_nonempty("고유코드", new_values["고유코드"])
                 add_nonempty("담당자명", new_values["담당자명"])
                 add_nonempty("연락처", new_values["연락처"])
                 add_nonempty("이메일", new_values["이메일"])
@@ -1269,14 +1283,15 @@ class DataManagementFrame(ctk.CTkFrame):
                 log_change("거래처 유형", client.client_type or "", new_values["거래처 유형"])
                 log_change("거래처코드", client.business_number or "", new_values["거래처코드"])
                 log_change("거래처명", client.name or "", new_values["거래처명"])
+                log_change("고유코드", getattr(client, 'unique_code', "") or "", new_values["고유코드"])
                 log_change("담당자명", client.manager_name or "", new_values["담당자명"])
                 log_change("연락처", client.phone or "", new_values["연락처"])
                 log_change("이메일", client.email or "", new_values["이메일"])
-                log_change("구분코드", client.classification_code or "", new_values.get("구분코드", ""))
                 log_change("사용 여부", client.is_active, new_values["사용 여부"])
 
             client.client_type = new_values["거래처 유형"]
             client.business_number = code
+            client.unique_code = new_values["고유코드"]
             client.name = name
             client.ceo_name = new_values["대표자명"]
             client.manager_name = new_values["담당자명"]
@@ -1286,11 +1301,6 @@ class DataManagementFrame(ctk.CTkFrame):
             client.zip_code = new_values["우편번호"]
             client.address = new_values["주소"]
             client.is_active = new_values["사용 여부"]
-            # 분류 코드 저장
-            try:
-                client.classification_code = new_values.get("구분코드")
-            except Exception:
-                pass
             
             if log_entries:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

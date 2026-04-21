@@ -156,7 +156,7 @@ from tkinter import ttk
 from collections import deque
 import tkinter.font as tkfont
 import re
-from PIL import Image  # type: ignore
+from PIL import Image
 
 # ==================== 단일 인스턴스 실행 체크 ====================
 def check_single_instance():
@@ -968,6 +968,24 @@ class App(ctk.CTk):
                     print("=== 재시작 DB 동기화 완료 ===")
                 
                 db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)
+                try:
+                    self.refresh_data_in_all_frames()
+                    print("=== 초기 UI 데이터 새로고침 완료 ===")
+                except Exception as ui_err:
+                    print(f"[경고] 초기 UI 새로고침 실패: {ui_err}")
+                
+                try:
+                    current_path = db_manager.get_current_db_path()
+                    config_path = db_manager.get_config_shared_db_file()
+                    local_path = db_manager.get_local_db_path()
+                    desired = config_path if config_path else local_path
+                    if desired and current_path and os.path.normpath(desired) != os.path.normpath(current_path):
+                        print(f"[DB경로검증] 현재 경로와 설정 경로가 다름 -> 재적용: {current_path} -> {desired}")
+                        db_manager.setup_database(application_path, CONFIG_FILE_PATH, None)
+                        self.refresh_data_in_all_frames()
+                        print("[DB경로검증] 재적용 완료 및 UI 새로고침")
+                except Exception as verify_err:
+                    print(f"[경고] DB 경로 검증/재적용 실패: {verify_err}")
                 print("=== 데이터베이스 초기화 완료 ===\n")
                 return True
             except Exception as e:
@@ -2102,7 +2120,25 @@ class App(ctk.CTk):
                 # 실제 DB 파일 동기화 수행
                 if os.path.exists(sync_source):
                     import shutil
+                    # 대상 경로 결정: 공유 경로가 설정되어 있으면 공유 파일, 아니면 로컬 파일
+                    config = configparser.ConfigParser(interpolation=None)
+                    try:
+                        config.read(CONFIG_FILE_PATH, encoding='utf-8')
+                        shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+                    except Exception:
+                        shared_db_path = None
+                    
+                    def resolve_shared_file(path):
+                        if not path:
+                            return None
+                        path = path.strip().strip('"').strip("'")
+                        if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
+                            return path
+                        return os.path.join(path, 'cosmetic.db')
+                    
+                    shared_db_file = resolve_shared_file(shared_db_path)
                     local_db_path = os.path.join(application_path, db_manager.get_db_relative_path(), "cosmetic.db")
+                    dest_path = shared_db_file if shared_db_file else local_db_path
                     
                     # 기존 DB 연결 완전히 해제
                     try:
@@ -2115,9 +2151,19 @@ class App(ctk.CTk):
                     import time
                     time.sleep(1)
                     
-                    # 파일 복사
-                    shutil.copy2(sync_source, local_db_path)
-                    print(f"[재시작-DB동기화] DB 파일 복사 완료: {local_db_path}")
+                    # 최신성 비교 후 파일 복사 (소스가 더 최신일 때만)
+                    try:
+                        src_mtime = os.path.getmtime(sync_source)
+                        dst_mtime = os.path.getmtime(dest_path) if os.path.exists(dest_path) else 0
+                    except Exception:
+                        src_mtime = 0
+                        dst_mtime = 0
+                    
+                    if (not os.path.exists(dest_path)) or (src_mtime > dst_mtime):
+                        shutil.copy2(sync_source, dest_path)
+                        print(f"[재시작-DB동기화] DB 파일 교체 완료: {dest_path}")
+                    else:
+                        print(f"[재시작-DB동기화] 대상이 더 최신이어서 교체 생략: {dest_path}")
                     
                     # 동기화 완료 플래그 설정
                     os.environ['DB_SYNC_COMPLETED'] = 'True'

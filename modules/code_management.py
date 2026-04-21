@@ -2,8 +2,7 @@ import customtkinter as ctk
 from tkinter import ttk, messagebox
 import tkinter as tk
 from database.db_manager import db_manager
-from database.models import ProductCodeRule
-from database.models import ProductCodeAssignment, Client
+from database.models import ProductCodeRule, ProductCatalog, Client
 from datetime import datetime
 import traceback
 import json
@@ -18,9 +17,11 @@ class CodeManagementFrame(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
         
         self._selected_rule_id = None
+        self._selected_catalog_id = None
         
         self.setup_ui()
         self.load_rules()
+        self.load_catalog()
         
     def setup_ui(self):
         # Layout: Left (Form), Right (List)
@@ -116,12 +117,6 @@ class CodeManagementFrame(ctk.CTkFrame):
         self.preview_label = ctk.CTkLabel(form_frame, text="", font=ctk.CTkFont(size=16, weight="bold"), text_color="#1F6AA5")
         self.preview_label.grid(row=row, column=1, sticky="w", padx=10, pady=5)
         row += 1
-
-        # Assigned clients for selected rule (display only)
-        ctk.CTkLabel(form_frame, text="할당된 거래처").grid(row=row, column=0, sticky="w", padx=10, pady=5)
-        self.assigned_clients_label = ctk.CTkLabel(form_frame, text="(선택된 규칙의 거래처가 표시됩니다)")
-        self.assigned_clients_label.grid(row=row, column=1, sticky="w", padx=10, pady=5)
-        row += 1
         
         ctk.CTkButton(form_frame, text="미리보기 갱신", command=self.update_preview, width=100, fg_color="gray").grid(row=row, column=1, sticky="e", padx=10, pady=5)
         row += 1
@@ -179,24 +174,53 @@ class CodeManagementFrame(ctk.CTkFrame):
         
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
 
-        # --- Assigned Codes (아래) ---
-        ctk.CTkLabel(list_frame, text="할당된 코드 목록", font=ctk.CTkFont(size=12, weight="bold")).grid(row=2, column=0, sticky="w", padx=10, pady=(10,0))
-        self.assign_tree = ttk.Treeview(list_frame, columns=("id","client","rule","product","code","created"), show="headings")
-        self.assign_tree.heading("id", text="ID"); self.assign_tree.column("id", width=40, anchor="center")
-        self.assign_tree.heading("client", text="거래처"); self.assign_tree.column("client", width=140)
-        self.assign_tree.heading("rule", text="규칙"); self.assign_tree.column("rule", width=140)
-        self.assign_tree.heading("product", text="제품명"); self.assign_tree.column("product", width=160)
-        self.assign_tree.heading("code", text="코드"); self.assign_tree.column("code", width=160)
-        self.assign_tree.heading("created", text="등록일"); self.assign_tree.column("created", width=140)
-        self.assign_tree.grid(row=3, column=0, sticky="nsew", padx=10, pady=6)
+        # Divider
+        ctk.CTkFrame(list_frame, height=2, fg_color="gray").grid(row=2, column=0, sticky="ew", padx=10, pady=(12, 6))
 
-        assign_btns = ctk.CTkFrame(list_frame, fg_color="transparent")
-        assign_btns.grid(row=4, column=0, sticky="e", pady=(4,0), padx=10)
-        ctk.CTkButton(assign_btns, text="할당 추가", command=self.open_assignment_dialog, width=110).pack(side="left", padx=6)
-        ctk.CTkButton(assign_btns, text="할당 삭제", command=self.delete_assignment, width=110, fg_color="#D32F2F").pack(side="left", padx=6)
+        # --- Product Catalog (코드/제품명) ---
+        ctk.CTkLabel(list_frame, text="제품 코드/명 관리", font=ctk.CTkFont(size=14, weight="bold")).grid(row=3, column=0, sticky="w", padx=10, pady=6)
 
-        # load assignments
-        self.load_assignments()
+        # Catalog form
+        catalog_form = ctk.CTkFrame(list_frame)
+        catalog_form.grid(row=4, column=0, sticky="ew", padx=10)
+        catalog_form.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(catalog_form, text="코드").grid(row=0, column=0, sticky="w", padx=6, pady=4)
+        self.catalog_code_entry = ctk.CTkEntry(catalog_form)
+        self.catalog_code_entry.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+
+        ctk.CTkLabel(catalog_form, text="제품명").grid(row=1, column=0, sticky="w", padx=6, pady=4)
+        self.catalog_name_entry = ctk.CTkEntry(catalog_form)
+        self.catalog_name_entry.grid(row=1, column=1, sticky="ew", padx=6, pady=4)
+
+        ctk.CTkLabel(catalog_form, text="구분").grid(row=2, column=0, sticky="w", padx=6, pady=4)
+        self.catalog_type_var = tk.StringVar(value="반제품")
+        self.catalog_type_combo = ctk.CTkOptionMenu(catalog_form, variable=self.catalog_type_var, values=["반제품", "완제품"])
+        self.catalog_type_combo.grid(row=2, column=1, sticky="w", padx=6, pady=4)
+
+        ctk.CTkLabel(catalog_form, text="* 코드는 최소 4자리", font=("Arial", 9), text_color="gray").grid(row=3, column=1, sticky="w", padx=6)
+
+        btns = ctk.CTkFrame(catalog_form, fg_color="transparent")
+        btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=8)
+        ctk.CTkButton(btns, text="저장", command=self.save_catalog_entry).pack(side="left", padx=4)
+        ctk.CTkButton(btns, text="초기화", command=self.clear_catalog_form).pack(side="left", padx=4)
+        ctk.CTkButton(btns, text="삭제", command=self.delete_catalog_entry, fg_color="#D32F2F", hover_color="#B71C1C").pack(side="left", padx=4)
+
+        # Catalog list
+        self.catalog_tree = ttk.Treeview(list_frame, columns=("id","code","name","type","active"), show="headings")
+        self.catalog_tree.heading("id", text="ID")
+        self.catalog_tree.heading("code", text="코드")
+        self.catalog_tree.heading("name", text="제품명")
+        self.catalog_tree.heading("type", text="구분")
+        self.catalog_tree.heading("active", text="사용")
+        self.catalog_tree.column("id", width=40, anchor="center")
+        self.catalog_tree.column("code", width=120, anchor="center")
+        self.catalog_tree.column("name", width=180)
+        self.catalog_tree.column("type", width=80, anchor="center")
+        self.catalog_tree.column("active", width=60, anchor="center")
+        self.catalog_tree.grid(row=5, column=0, sticky="nsew", padx=10, pady=(4, 10))
+        list_frame.grid_rowconfigure(5, weight=1)
+        self.catalog_tree.bind("<<TreeviewSelect>>", self.on_select_catalog)
 
     def generate_preview_str(self, prefix, year_fmt, sep, seq_len, current_seq, suffix):
         try:
@@ -361,32 +385,46 @@ class CodeManagementFrame(ctk.CTkFrame):
             header.grid(row=0, column=0, columnspan=2, sticky='ew', padx=8, pady=6)
             header.grid_columnconfigure(1, weight=1)
 
-            ctk.CTkLabel(header, text='생산일자 (YYYYMMDD)').grid(row=0, column=0, sticky='w', padx=6, pady=4)
+            ctk.CTkLabel(header, text='거래처(사업자)').grid(row=0, column=0, sticky='w', padx=6, pady=4)
+            client_var = tk.StringVar(value='')
+            try:
+                clients = session.query(Client).filter((Client.is_active == True) | (Client.is_active == None)).order_by(Client.name.asc()).all()
+                client_display = [f"{c.name} ({c.business_number or '-'})" for c in clients]
+            except Exception:
+                clients = []; client_display = []
+            client_opt = ctk.CTkOptionMenu(header, variable=client_var, values=client_display or [''])
+            client_opt.grid(row=0, column=1, sticky='w', padx=6, pady=4)
+            client_code_map = {}
+            for c in clients:
+                key = f"{c.name} ({c.business_number or '-'})"
+                client_code_map[key] = (c.unique_code or '').strip()
+
+            ctk.CTkLabel(header, text='생산일자 (YYYYMMDD)').grid(row=1, column=0, sticky='w', padx=6, pady=4)
             date_var = tk.StringVar(value=datetime.now().strftime('%Y%m%d'))
             date_ent = ctk.CTkEntry(header, textvariable=date_var)
-            date_ent.grid(row=0, column=1, sticky='ew', padx=6, pady=4)
-            ctk.CTkButton(header, text='오늘', width=60, command=lambda: date_var.set(datetime.now().strftime('%Y%m%d'))).grid(row=0, column=2, padx=6)
+            date_ent.grid(row=1, column=1, sticky='ew', padx=6, pady=4)
+            ctk.CTkButton(header, text='오늘', width=60, command=lambda: date_var.set(datetime.now().strftime('%Y%m%d'))).grid(row=1, column=2, padx=6)
 
-            ctk.CTkLabel(header, text='가마/탱크').grid(row=1, column=0, sticky='w', padx=6, pady=4)
+            ctk.CTkLabel(header, text='가마/탱크').grid(row=2, column=0, sticky='w', padx=6, pady=4)
             kiln_var = tk.StringVar(value='K01')
             kiln_ent = ctk.CTkEntry(header, textvariable=kiln_var)
-            kiln_ent.grid(row=1, column=1, sticky='ew', padx=6, pady=4)
+            kiln_ent.grid(row=2, column=1, sticky='ew', padx=6, pady=4)
 
-            ctk.CTkLabel(header, text='온도').grid(row=2, column=0, sticky='w', padx=6, pady=4)
+            ctk.CTkLabel(header, text='온도').grid(row=3, column=0, sticky='w', padx=6, pady=4)
             temp_var = tk.StringVar(value='RT')
             temp_ent = ctk.CTkEntry(header, textvariable=temp_var)
-            temp_ent.grid(row=2, column=1, sticky='ew', padx=6, pady=4)
+            temp_ent.grid(row=3, column=1, sticky='ew', padx=6, pady=4)
 
-            ctk.CTkLabel(header, text='공정').grid(row=3, column=0, sticky='w', padx=6, pady=4)
+            ctk.CTkLabel(header, text='공정').grid(row=4, column=0, sticky='w', padx=6, pady=4)
             process_var = tk.StringVar(value='MIX')
             process_ent = ctk.CTkEntry(header, textvariable=process_var)
-            process_ent.grid(row=3, column=1, sticky='ew', padx=6, pady=4)
+            process_ent.grid(row=4, column=1, sticky='ew', padx=6, pady=4)
 
             next_seq_default = int(rule.current_sequence or 0) + 1
-            ctk.CTkLabel(header, text='배치번호 (숫자)').grid(row=4, column=0, sticky='w', padx=6, pady=4)
+            ctk.CTkLabel(header, text='배치번호 (숫자)').grid(row=5, column=0, sticky='w', padx=6, pady=4)
             batch_var = tk.StringVar(value=str(next_seq_default))
             batch_ent = ctk.CTkEntry(header, textvariable=batch_var)
-            batch_ent.grid(row=4, column=1, sticky='ew', padx=6, pady=4)
+            batch_ent.grid(row=5, column=1, sticky='ew', padx=6, pady=4)
 
             # Attribute controls (below header)
             controls = {}
@@ -441,6 +479,9 @@ class CodeManagementFrame(ctk.CTkFrame):
                     batch_no_val = int(rule.current_sequence or 0) + 1
 
                 # build code depending on type
+                client_display_sel = client_var.get().strip()
+                client_token = client_code_map.get(client_display_sel, '') or ''
+                merged_prefix = (rule.prefix or '') + (client_token or '')
                 if rule.code_type == 'SEMI':
                     code = self.generate_semi_code(
                         date=date_val,
@@ -448,14 +489,14 @@ class CodeManagementFrame(ctk.CTkFrame):
                         temp=temp_val,
                         process=process_val,
                         batch_no=batch_no_val,
-                        prefix=rule.prefix,
+                        prefix=merged_prefix,
                         separator=rule.separator,
                         seq_length=rule.sequence_length,
                         suffix=rule.suffix
                     )
                 else:
                     code = self.build_code_with_attributes(
-                        rule.prefix, rule.year_format, rule.separator,
+                        merged_prefix, rule.year_format, rule.separator,
                         rule.sequence_length, rule.current_sequence, rule.suffix, attributes
                     )
 
@@ -667,11 +708,6 @@ class CodeManagementFrame(ctk.CTkFrame):
                     self.render_attribute_widgets()
                 except Exception:
                     pass
-                # Load assigned clients for this rule
-                try:
-                    self.load_rule_assignments(rule.id)
-                except Exception:
-                    pass
             except Exception as e:
                 messagebox.showerror('오류', f'저장 실패: {e}')
 
@@ -714,17 +750,6 @@ class CodeManagementFrame(ctk.CTkFrame):
                 ))
         finally:
             session.close()
-
-        # ensure assignments refreshed when rules loaded (outside DB session)
-        try:
-            self.load_assignments()
-        except Exception:
-            pass
-        try:
-            # clear assigned clients display initially
-            self.assigned_clients_label.configure(text='')
-        except Exception:
-            pass
 
     def on_select(self, event):
         sel = self.tree.selection()
@@ -805,7 +830,10 @@ class CodeManagementFrame(ctk.CTkFrame):
                 rule.prefix = data['prefix']
                 rule.year_format = year_fmt
                 rule.separator = data['separator']
-                rule.sequence_length = int(data['sequence_length'] or 3)
+                seq_len = int(data['sequence_length'] or 3)
+                if seq_len < 4:
+                    seq_len = 4
+                rule.sequence_length = seq_len
                 rule.current_sequence = int(data['current_sequence'] or 0)
                 rule.suffix = data['suffix']
                 # save attribute schema text
@@ -831,6 +859,114 @@ class CodeManagementFrame(ctk.CTkFrame):
                 session.close()
         except Exception as e:
             messagebox.showerror("오류", f"입력값 오류: {e}")
+
+    # ------------------------------
+    # Catalog (제품 코드/명) methods
+    # ------------------------------
+    def load_catalog(self):
+        try:
+            for item in self.catalog_tree.get_children():
+                self.catalog_tree.delete(item)
+        except Exception:
+            pass
+        session = db_manager.get_session()
+        try:
+            rows = session.query(ProductCatalog).order_by(ProductCatalog.code.asc()).all()
+            type_map = {"SEMI":"반제품","FINISHED":"완제품"}
+            for r in rows:
+                self.catalog_tree.insert("", "end", values=(r.id, r.code, r.name, type_map.get(r.code_type, r.code_type), "Y" if r.is_active else "N"))
+        finally:
+            session.close()
+
+    def clear_catalog_form(self):
+        self._selected_catalog_id = None
+        try:
+            self.catalog_code_entry.delete(0, "end")
+            self.catalog_name_entry.delete(0, "end")
+            self.catalog_type_var.set("반제품")
+        except Exception:
+            pass
+
+    def on_select_catalog(self, event):
+        sel = self.catalog_tree.selection()
+        if not sel:
+            return
+        item = self.catalog_tree.item(sel[0])["values"]
+        catalog_id = item[0]
+        session = db_manager.get_session()
+        try:
+            row = session.query(ProductCatalog).get(catalog_id)
+            if row:
+                self._selected_catalog_id = row.id
+                self.catalog_code_entry.delete(0, "end"); self.catalog_code_entry.insert(0, row.code or "")
+                self.catalog_name_entry.delete(0, "end"); self.catalog_name_entry.insert(0, row.name or "")
+                type_map = {"SEMI":"반제품","FINISHED":"완제품"}
+                self.catalog_type_var.set(type_map.get(row.code_type, row.code_type))
+        finally:
+            session.close()
+
+    def save_catalog_entry(self):
+        code = self.catalog_code_entry.get().strip()
+        name = self.catalog_name_entry.get().strip()
+        type_reverse = {"반제품":"SEMI","완제품":"FINISHED"}
+        code_type = type_reverse.get(self.catalog_type_var.get(), "SEMI")
+
+        if not code or not name:
+            messagebox.showwarning("입력 오류", "코드와 제품명을 입력하세요.")
+            return
+        if len(code) < 4:
+            messagebox.showwarning("입력 오류", "코드는 최소 4자리여야 합니다.")
+            return
+
+        session = db_manager.get_session()
+        try:
+            if self._selected_catalog_id:
+                row = session.query(ProductCatalog).get(self._selected_catalog_id)
+                if not row:
+                    self._selected_catalog_id = None
+                else:
+                    # code uniqueness check when changing code
+                    if row.code != code:
+                        exist = session.query(ProductCatalog).filter_by(code=code).first()
+                        if exist:
+                            messagebox.showwarning("중복", "이미 존재하는 코드입니다.")
+                            return
+                    row.code = code
+                    row.name = name
+                    row.code_type = code_type
+            else:
+                exist = session.query(ProductCatalog).filter_by(code=code).first()
+                if exist:
+                    messagebox.showwarning("중복", "이미 존재하는 코드입니다.")
+                    return
+                row = ProductCatalog(code=code, name=name, code_type=code_type, is_active=True)
+                session.add(row)
+            session.commit()
+            messagebox.showinfo("성공", "저장되었습니다.")
+            self.clear_catalog_form()
+            self.load_catalog()
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror("오류", f"저장 실패: {e}")
+        finally:
+            session.close()
+
+    def delete_catalog_entry(self):
+        if not self._selected_catalog_id:
+            return
+        if not messagebox.askyesno("삭제", "정말 삭제하시겠습니까?"):
+            return
+        session = db_manager.get_session()
+        try:
+            row = session.query(ProductCatalog).get(self._selected_catalog_id)
+            if row:
+                session.delete(row)
+                session.commit()
+                messagebox.showinfo("성공", "삭제되었습니다.")
+                self.clear_catalog_form()
+                self.load_catalog()
+        finally:
+            session.close()
 
     def delete_rule(self):
         if not self._selected_rule_id: return
@@ -860,173 +996,6 @@ class CodeManagementFrame(ctk.CTkFrame):
             self.clear_attribute_widgets()
         except Exception:
             pass
-        try:
-            self.load_assignments()
-        except Exception:
-            pass
-        try:
-            self.assigned_clients_label.configure(text='')
-        except Exception:
-            pass
-
-    # --- Assignment management ---
-    def load_assignments(self):
-        try:
-            for item in self.assign_tree.get_children():
-                self.assign_tree.delete(item)
-        except Exception:
-            pass
-
-        session = db_manager.get_session()
-        try:
-            rows = session.query(ProductCodeAssignment).order_by(ProductCodeAssignment.created_at.desc()).all()
-            for a in rows:
-                client_name = a.client.name if a.client else ''
-                rule_name = a.rule.rule_name if a.rule else ''
-                created = a.created_at.strftime('%Y-%m-%d %H:%M') if a.created_at else ''
-                self.assign_tree.insert('', 'end', values=(a.id, client_name, rule_name, a.product_name or '', a.code_value or '', created))
-        finally:
-            session.close()
-
-    def load_rule_assignments(self, rule_id: int):
-        """Load and display client names assigned to a specific rule."""
-        try:
-            if not rule_id:
-                try:
-                    self.assigned_clients_label.configure(text='')
-                except Exception:
-                    pass
-                return
-            session = db_manager.get_session()
-            try:
-                rows = session.query(ProductCodeAssignment).filter_by(rule_id=rule_id).order_by(ProductCodeAssignment.created_at.desc()).all()
-                clients = []
-                for r in rows:
-                    c = r.client
-                    if not c:
-                        continue
-                    cc = getattr(c, 'classification_code', None)
-                    if cc:
-                        clients.append(f"{c.name} ({cc})")
-                    else:
-                        clients.append(c.name)
-                text = ', '.join(clients) if clients else '(할당된 거래처 없음)'
-                try:
-                    self.assigned_clients_label.configure(text=text)
-                except Exception:
-                    pass
-            finally:
-                session.close()
-        except Exception:
-            pass
-
-    def open_assignment_dialog(self):
-        dlg = ctk.CTkToplevel(self)
-        dlg.title('할당 추가')
-        dlg.geometry('560x260')
-        frm = ctk.CTkFrame(dlg); frm.pack(fill='both', expand=True, padx=12, pady=12)
-        frm.grid_columnconfigure(1, weight=1)
-        # ensure there is space for a small metadata label in column 2
-        try:
-            frm.grid_columnconfigure(2, weight=0, minsize=140)
-        except Exception:
-            pass
-
-        import tkinter as tk
-        ctk.CTkLabel(frm, text='거래처').grid(row=0, column=0, sticky='w', padx=6, pady=6)
-        clients = []
-        session = db_manager.get_session()
-        try:
-            clients = session.query(Client).order_by(Client.name).all()
-        finally:
-            session.close()
-        # maps for lookup
-        client_map = { (c.name or ''): c.id for c in clients }
-        client_obj_map = { (c.name or ''): c for c in clients }
-        client_names = list(client_map.keys())
-        client_var = tk.StringVar(value=client_names[0] if client_names else '')
-        ctk.CTkOptionMenu(frm, variable=client_var, values=client_names).grid(row=0, column=1, sticky='ew', padx=6, pady=6)
-        # classification_code display
-        classification_label = ctk.CTkLabel(frm, text='구분코드: -')
-        classification_label.grid(row=0, column=2, sticky='w', padx=6, pady=6)
-        def _update_class_label(*_):
-            sel = client_var.get()
-            cobj = client_obj_map.get(sel)
-            if cobj and getattr(cobj, 'classification_code', None):
-                classification_label.configure(text=f"구분코드: {getattr(cobj, 'classification_code')}")
-            else:
-                classification_label.configure(text='구분코드: -')
-        try:
-            client_var.trace('w', lambda *a: _update_class_label())
-        except Exception:
-            try:
-                client_var.trace_add('write', lambda *a: _update_class_label())
-            except Exception:
-                pass
-        _update_class_label()
-
-        ctk.CTkLabel(frm, text='규칙').grid(row=1, column=0, sticky='w', padx=6, pady=6)
-        session = db_manager.get_session()
-        try:
-            rules = session.query(ProductCodeRule).order_by(ProductCodeRule.rule_name).all()
-        finally:
-            session.close()
-        rule_map = { (r.rule_name or ''): r.id for r in rules }
-        rule_names = list(rule_map.keys())
-        # If a rule is currently selected in the main form, default to it
-        default_rule_name = ''
-        try:
-            if self._selected_rule_id:
-                sel_rule = next((r for r in rules if r.id == self._selected_rule_id), None)
-                if sel_rule:
-                    default_rule_name = sel_rule.rule_name or ''
-        except Exception:
-            default_rule_name = ''
-        rule_var = tk.StringVar(value=default_rule_name or (rule_names[0] if rule_names else ''))
-        ctk.CTkOptionMenu(frm, variable=rule_var, values=rule_names).grid(row=1, column=1, sticky='ew', padx=6, pady=6)
-
-        ctk.CTkLabel(frm, text='제품명').grid(row=2, column=0, sticky='w', padx=6, pady=6)
-        prod_ent = ctk.CTkEntry(frm); prod_ent.grid(row=2, column=1, sticky='ew', padx=6, pady=6)
-
-        ctk.CTkLabel(frm, text='코드값 (수동)').grid(row=3, column=0, sticky='w', padx=6, pady=6)
-        code_ent = ctk.CTkEntry(frm); code_ent.grid(row=3, column=1, sticky='ew', padx=6, pady=6)
-
-        def do_save():
-            cname = client_var.get()
-            rname = rule_var.get()
-            if not cname or not rname:
-                messagebox.showwarning('입력 오류', '거래처와 규칙을 선택하세요.'); return
-            cid = client_map.get(cname)
-            rid = rule_map.get(rname)
-            session = db_manager.get_session()
-            try:
-                a = ProductCodeAssignment(client_id=cid, rule_id=rid, product_name=prod_ent.get().strip() or None, code_value=code_ent.get().strip() or None)
-                session.add(a); session.commit()
-                messagebox.showinfo('완료', '할당이 추가되었습니다.')
-                dlg.destroy(); self.load_assignments()
-            except Exception as e:
-                session.rollback(); messagebox.showerror('오류', f'저장 실패: {e}')
-            finally:
-                session.close()
-
-        ctk.CTkButton(frm, text='저장', command=do_save, fg_color='#1F6AA5').grid(row=4, column=0, columnspan=2, pady=12)
-
-    def delete_assignment(self):
-        sel = self.assign_tree.selection()
-        if not sel:
-            return
-        vals = self.assign_tree.item(sel[0])['values']
-        aid = vals[0]
-        if not messagebox.askyesno('삭제', '정말 삭제하시겠습니까?'): return
-        session = db_manager.get_session()
-        try:
-            a = session.query(ProductCodeAssignment).get(aid)
-            if a:
-                session.delete(a); session.commit()
-                messagebox.showinfo('완료', '삭제되었습니다.')
-                self.load_assignments()
-        finally:
-            session.close()
 
     def clear_attribute_widgets(self):
         for w in getattr(self, 'attribute_rows', []):
