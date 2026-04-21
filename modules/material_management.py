@@ -426,6 +426,9 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 
                 # 처리된 재료들을 저장할 딕셔너리
                 processed_materials = {}
+                # 변경 이력 작성을 위한 이전 스냅샷 및 액션 기록
+                prev_snapshots = {}
+                actions_by_code = {}
                 materials_count = 0
                 ingredients_count = 0
                 new_clients_count = 0
@@ -446,8 +449,63 @@ class MaterialManagementFrame(ctk.CTkFrame):
                         if not material:
                             material = Material(code=code)
                             session.add(material)
+                            actions_by_code[code] = "신규 생성"
+                            # 신규의 이전 스냅샷은 빈 값
+                            prev_snapshots[code] = {
+                                "code": code,
+                                "name": "",
+                                "name_en": "",
+                                "unit_price": 0.0,
+                                "package_unit": "",
+                                "supplier_id": None,
+                                "supplier_name": "",
+                                "manufacturer": "",
+                                "hs_code": "",
+                                "origin": "",
+                                "nmpa_reg_num": "",
+                                "reg_date": "",
+                                "is_active": True,
+                                "ingredients": [],
+                            }
                             print(f"새 재료 생성: {code}")
                         else:
+                            actions_by_code[code] = "정보 수정"
+                            # 기존값 스냅샷 (필드 + 기존 전성분)
+                            try:
+                                prev_snapshots[code] = {
+                                    "code": material.code or "",
+                                    "name": material.name or "",
+                                    "name_en": material.name_en or "",
+                                    "unit_price": material.unit_price if material.unit_price is not None else 0.0,
+                                    "package_unit": material.package_unit or "",
+                                    "supplier_id": material.supplier_id,
+                                    "supplier_name": (material.supplier.name if material.supplier else ""),
+                                    "manufacturer": material.manufacturer or "",
+                                    "hs_code": material.hs_code or "",
+                                    "origin": material.origin or "",
+                                    "nmpa_reg_num": material.nmpa_reg_num or "",
+                                    "reg_date": material.reg_date or "",
+                                    "is_active": bool(material.is_active),
+                                    "ingredients": [
+                                        {
+                                            "name_ko": ing.name_ko or "",
+                                            "name_en": ing.name_en or "",
+                                            "cas_no": ing.cas_no or "",
+                                            "composition_ratio": ing.composition_ratio or 0.0,
+                                            "function": ing.function or "",
+                                            "ewg_grade": ing.ewg_grade or "",
+                                            "ewg_data": ing.ewg_data or "",
+                                            "remark": ing.remark or "",
+                                        }
+                                        for ing in (material.ingredients or [])
+                                    ],
+                                }
+                            except Exception:
+                                # 스냅샷 실패는 치명적이지 않음
+                                prev_snapshots[code] = {
+                                    "code": material.code or "",
+                                    "ingredients": [],
+                                }
                             print(f"기존 재료 업데이트: {code}")
 
                         # 재료 기본 정보 설정
@@ -609,6 +667,144 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     except Exception as e:
                         print(f"원료 '{material_code}' 전성분 추가 중 오류: {e}")
                         continue
+
+                # --- 변경 이력 기록 (가져오기 전용) ---
+                try:
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    user_name = getattr(self.current_user, 'username', 'unknown')
+
+                    def key_of(ing):
+                        return (
+                            (ing.get('name_ko') or '').strip().lower(),
+                            (ing.get('name_en') or '').strip().lower(),
+                            (ing.get('cas_no') or '').strip().lower(),
+                        )
+
+                    for code, material in processed_materials.items():
+                        action = actions_by_code.get(code, "정보 수정")
+                        prev = prev_snapshots.get(code, {"ingredients": []})
+
+                        # 현재 스냅샷 구성
+                        curr_supplier_name = ""
+                        try:
+                            if material.supplier_id and hasattr(self, 'supplier_id_map'):
+                                curr_supplier_name = self.supplier_id_map.get(material.supplier_id, "")
+                            elif material.supplier:
+                                curr_supplier_name = material.supplier.name or ""
+                        except Exception:
+                            pass
+
+                        curr = {
+                            "code": material.code or "",
+                            "name": material.name or "",
+                            "name_en": material.name_en or "",
+                            "unit_price": material.unit_price if material.unit_price is not None else 0.0,
+                            "package_unit": material.package_unit or "",
+                            "supplier_id": material.supplier_id,
+                            "supplier_name": curr_supplier_name,
+                            "manufacturer": material.manufacturer or "",
+                            "hs_code": material.hs_code or "",
+                            "origin": material.origin or "",
+                            "nmpa_reg_num": material.nmpa_reg_num or "",
+                            "reg_date": material.reg_date or "",
+                            "is_active": bool(material.is_active),
+                            "ingredients": [
+                                {
+                                    "name_ko": ing.name_ko or "",
+                                    "name_en": ing.name_en or "",
+                                    "cas_no": ing.cas_no or "",
+                                    "composition_ratio": ing.composition_ratio or 0.0,
+                                    "function": ing.function or "",
+                                    "ewg_grade": ing.ewg_grade or "",
+                                    "ewg_data": ing.ewg_data or "",
+                                    "remark": ing.remark or "",
+                                }
+                                for ing in (material.ingredients or [])
+                            ],
+                        }
+
+                        log_entries = []
+                        log_header = f"[{timestamp}] by {user_name} - {action} (엑셀 가져오기)"
+
+                        def add_change(label, old, new):
+                            if (old or "") != (new or ""):
+                                log_entries.append(f"{label}: '{old}' -> '{new}'")
+
+                        if action == "신규 생성":
+                            # 신규 생성: 화이트리스트 필드만 기록 (빈칸/기본값 제외)
+                            def add_nonempty(label, value, *, skip_zero=False):
+                                try:
+                                    if value is None:
+                                        return
+                                    if isinstance(value, str):
+                                        if not value.strip():
+                                            return
+                                    if skip_zero and (isinstance(value, (int, float)) and float(value) == 0.0):
+                                        return
+                                    log_entries.append(f"{label}: '{value}'")
+                                except Exception:
+                                    pass
+
+                            # 화이트리스트: 코드, 원료명, 단가, 포장단위, 공급처
+                            add_nonempty("코드", curr['code'])
+                            add_nonempty("원료명", curr['name'])
+                            add_nonempty("단가", curr['unit_price'], skip_zero=True)
+                            add_nonempty("포장단위", curr['package_unit'])
+                            supplier_disp = curr['supplier_name'] or curr['supplier_id']
+                            add_nonempty("공급처", supplier_disp)
+
+                            # 전성분 초기 등록: 의미 있는 항목만 (이름 비어있고 0%는 제외)
+                            if curr['ingredients']:
+                                filtered_lines = []
+                                for ing in curr['ingredients']:
+                                    name_label = ing.get('name_ko') or ing.get('name_en') or ing.get('cas_no')
+                                    comp = ing.get('composition_ratio', 0) or 0.0
+                                    if (not name_label) and float(comp) == 0.0:
+                                        continue
+                                    label = name_label or '(이름 없음)'
+                                    filtered_lines.append(f"- {label} | 조성비 {comp}")
+                                if filtered_lines:
+                                    log_entries.append("전성분 초기 등록:")
+                                    log_entries.extend(filtered_lines)
+                        else:
+                            # 필드 변경 비교: 화이트리스트만 기록
+                            add_change("원료명", prev.get('name'), curr.get('name'))
+                            add_change("단가", prev.get('unit_price'), curr.get('unit_price'))
+                            add_change("포장단위", prev.get('package_unit'), curr.get('package_unit'))
+                            add_change("공급처", prev.get('supplier_name') or prev.get('supplier_id'), curr.get('supplier_name') or curr.get('supplier_id'))
+
+                            prev_map = {key_of(ing): ing for ing in (prev.get('ingredients') or [])}
+                            curr_map = {key_of(ing): ing for ing in (curr.get('ingredients') or [])}
+
+                            # 추가 (의미 있는 항목만 기록)
+                            for k, v in curr_map.items():
+                                if k not in prev_map:
+                                    name_label = v.get('name_ko') or v.get('name_en') or v.get('cas_no')
+                                    comp = v.get('composition_ratio', 0) or 0.0
+                                    if (not name_label) and float(comp) == 0.0:
+                                        continue
+                                    label = name_label or '(이름 없음)'
+                                    log_entries.append(f"전성분 추가: {label} | 조성비 {comp}")
+                            # 삭제
+                            for k, v in prev_map.items():
+                                if k not in curr_map:
+                                    label = v['name_ko'] or v['name_en'] or v['cas_no'] or '(이름 없음)'
+                                    log_entries.append(f"전성분 삭제: {label}")
+                            # 변경(조성비) - 의미 있는 항목만 기록
+                            for k in set(prev_map.keys()) & set(curr_map.keys()):
+                                pv = prev_map[k]; cv = curr_map[k]
+                                if (pv.get('composition_ratio') or 0.0) != (cv.get('composition_ratio') or 0.0):
+                                    name_label = cv.get('name_ko') or cv.get('name_en') or cv.get('cas_no')
+                                    if not name_label and float(cv.get('composition_ratio') or 0.0) == 0.0 and float(pv.get('composition_ratio') or 0.0) == 0.0:
+                                        continue
+                                    label = name_label or '(이름 없음)'
+                                    log_entries.append(f"전성분 변경: {label} | 조성비 {pv.get('composition_ratio', 0)} -> {cv.get('composition_ratio', 0)}")
+
+                        if log_entries:
+                            log_body = "- " + "\n- ".join([str(e) for e in log_entries])
+                            material.change_log = (material.change_log + "\n\n" if material.change_log else "") + f"{log_header}\n{log_body}"
+                except Exception as _log_err:
+                    print(f"[경고] 가져오기 변경 이력 기록 실패: {_log_err}")
 
                 # 데이터베이스 커밋
                 session.commit()
@@ -1156,12 +1352,46 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
             session = db_manager.get_session()
             try:
+                # --- 변경 이력 작성을 위해 '이전 상태' 스냅샷 준비 ---
+                prev_snapshot = None
+                action = "신규 생성"
+
                 if self._selected_material_id:
                     # 기존 원료 수정
                     material = session.query(Material).get(self._selected_material_id)
                     if not material:
                         messagebox.showerror("오류", "수정할 원료를 찾을 수 없습니다.")
                         return
+                    # 이전 상태 스냅샷
+                    prev_snapshot = {
+                        "code": material.code or "",
+                        "name": material.name or "",
+                        "name_en": material.name_en or "",
+                        "unit_price": material.unit_price if material.unit_price is not None else 0.0,
+                        "package_unit": material.package_unit or "",
+                        "supplier_id": material.supplier_id,
+                        "supplier_name": (material.supplier.name if material.supplier else ""),
+                        "manufacturer": material.manufacturer or "",
+                        "hs_code": material.hs_code or "",
+                        "origin": material.origin or "",
+                        "nmpa_reg_num": material.nmpa_reg_num or "",
+                        "reg_date": material.reg_date or "",
+                        "is_active": bool(material.is_active),
+                        "ingredients": [
+                            {
+                                "name_ko": ing.name_ko or "",
+                                "name_en": ing.name_en or "",
+                                "cas_no": ing.cas_no or "",
+                                "composition_ratio": ing.composition_ratio or 0.0,
+                                "function": ing.function or "",
+                                "ewg_grade": ing.ewg_grade or "",
+                                "ewg_data": ing.ewg_data or "",
+                                "remark": ing.remark or "",
+                            }
+                            for ing in (material.ingredients or [])
+                        ],
+                    }
+                    action = "정보 수정"
                 else:
                     # 새 원료 생성
                     # 코드 중복 검사
@@ -1202,6 +1432,141 @@ class MaterialManagementFrame(ctk.CTkFrame):
                         remark=ing_data.get("remark", "")
                     )
                     material.ingredients.append(ingredient)
+                
+                # --- 변경 이력 기록 ---
+                try:
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    user_name = getattr(self.current_user, 'username', 'unknown')
+                    log_header = f"[{timestamp}] by {user_name} - {action}"
+
+                    log_entries = []
+
+                    # 현재 값 스냅샷 (로깅 용)
+                    curr_supplier_name = ""
+                    if material.supplier_id:
+                        try:
+                            # 가능하면 이름으로 표기
+                            if hasattr(self, 'supplier_id_map'):
+                                curr_supplier_name = self.supplier_id_map.get(material.supplier_id, "")
+                        except Exception:
+                            pass
+
+                    curr_snapshot = {
+                        "code": material.code or "",
+                        "name": material.name or "",
+                        "name_en": material.name_en or "",
+                        "unit_price": material.unit_price if material.unit_price is not None else 0.0,
+                        "package_unit": material.package_unit or "",
+                        "supplier_id": material.supplier_id,
+                        "supplier_name": curr_supplier_name,
+                        "manufacturer": material.manufacturer or "",
+                        "hs_code": material.hs_code or "",
+                        "origin": material.origin or "",
+                        "nmpa_reg_num": material.nmpa_reg_num or "",
+                        "reg_date": material.reg_date or "",
+                        "is_active": bool(material.is_active),
+                        "ingredients": [
+                            {
+                                "name_ko": ing.name_ko or "",
+                                "name_en": ing.name_en or "",
+                                "cas_no": ing.cas_no or "",
+                                "composition_ratio": ing.composition_ratio or 0.0,
+                                "function": ing.function or "",
+                                "ewg_grade": ing.ewg_grade or "",
+                                "ewg_data": ing.ewg_data or "",
+                                "remark": ing.remark or "",
+                            }
+                            for ing in (material.ingredients or [])
+                        ],
+                    }
+
+                    def add_change(label, old, new):
+                        if (old or "") != (new or ""):
+                            log_entries.append(f"{label}: '{old}' -> '{new}'")
+
+                    if action == "신규 생성":
+                        # 신규 생성 시 화이트리스트 필드만 기록 (빈칸/기본값 제외)
+                        def add_nonempty(label, value, *, skip_zero=False):
+                            try:
+                                if value is None:
+                                    return
+                                if isinstance(value, str):
+                                    if not value.strip():
+                                        return
+                                if skip_zero and (isinstance(value, (int, float)) and float(value) == 0.0):
+                                    return
+                                log_entries.append(f"{label}: '{value}'")
+                            except Exception:
+                                pass
+
+                        # 화이트리스트: 코드, 원료명, 단가, 포장단위, 공급처
+                        add_nonempty("코드", curr_snapshot['code'])
+                        add_nonempty("원료명", curr_snapshot['name'])
+                        add_nonempty("단가", curr_snapshot['unit_price'], skip_zero=True)
+                        add_nonempty("포장단위", curr_snapshot['package_unit'])
+                        supplier_disp = curr_snapshot['supplier_name'] or curr_snapshot['supplier_id']
+                        add_nonempty("공급처", supplier_disp)
+
+                        # 전성분 초기 목록: 의미 있는 항목만 기록 (이름이 비어있고 조성비 0은 제외)
+                        ing_lines = []
+                        for ing in curr_snapshot['ingredients']:
+                            name_label = ing['name_ko'] or ing['name_en'] or ing['cas_no']
+                            comp = ing.get('composition_ratio', 0) or 0.0
+                            if (not name_label) and float(comp) == 0.0:
+                                continue
+                            label = name_label or '(이름 없음)'
+                            ing_lines.append(f"- {label} | 조성비 {comp}")
+                        if ing_lines:
+                            log_entries.append("전성분 초기 등록:")
+                            log_entries.extend(ing_lines)
+                    else:
+                        # 필드 변경 비교: 화이트리스트만 기록
+                        add_change("원료명", prev_snapshot['name'], curr_snapshot['name'])
+                        add_change("단가", prev_snapshot['unit_price'], curr_snapshot['unit_price'])
+                        add_change("포장단위", prev_snapshot['package_unit'], curr_snapshot['package_unit'])
+                        add_change("공급처", prev_snapshot.get('supplier_name') or prev_snapshot.get('supplier_id'), curr_snapshot.get('supplier_name') or curr_snapshot.get('supplier_id'))
+
+                        # 전성분 변경 비교 (키: (ko,en,cas))
+                        def key_of(ing):
+                            return (
+                                (ing.get('name_ko') or '').strip().lower(),
+                                (ing.get('name_en') or '').strip().lower(),
+                                (ing.get('cas_no') or '').strip().lower(),
+                            )
+                        prev_map = {key_of(ing): ing for ing in (prev_snapshot.get('ingredients') or [])}
+                        curr_map = {key_of(ing): ing for ing in (curr_snapshot.get('ingredients') or [])}
+
+                        # 추가 (의미 있는 항목만)
+                        for k, v in curr_map.items():
+                            if k not in prev_map:
+                                name_label = v.get('name_ko') or v.get('name_en') or v.get('cas_no')
+                                comp = v.get('composition_ratio', 0) or 0.0
+                                if (not name_label) and float(comp) == 0.0:
+                                    continue
+                                label = name_label or '(이름 없음)'
+                                log_entries.append(f"전성분 추가: {label} | 조성비 {comp}")
+                        # 삭제
+                        for k, v in prev_map.items():
+                            if k not in curr_map:
+                                label = v['name_ko'] or v['name_en'] or v['cas_no'] or '(이름 없음)'
+                                log_entries.append(f"전성분 삭제: {label}")
+                        # 변경(주요: 조성비) - 의미 있는 항목만
+                        for k in set(prev_map.keys()) & set(curr_map.keys()):
+                            prev_v = prev_map[k]
+                            curr_v = curr_map[k]
+                            if (prev_v.get('composition_ratio') or 0.0) != (curr_v.get('composition_ratio') or 0.0):
+                                name_label = curr_v.get('name_ko') or curr_v.get('name_en') or curr_v.get('cas_no')
+                                if not name_label and float(curr_v.get('composition_ratio') or 0.0) == 0.0 and float(prev_v.get('composition_ratio') or 0.0) == 0.0:
+                                    continue
+                                label = name_label or '(이름 없음)'
+                                log_entries.append(f"전성분 변경: {label} | 조성비 {prev_v.get('composition_ratio', 0)} -> {curr_v.get('composition_ratio', 0)}")
+
+                    if log_entries:
+                        log_body = "- " + "\n- ".join([str(e) for e in log_entries])
+                        material.change_log = (material.change_log + "\n\n" if material.change_log else "") + f"{log_header}\n{log_body}"
+                except Exception as _log_err:
+                    # 로깅 실패는 저장을 막지 않되 콘솔에 표시
+                    print(f"[경고] 원료 변경 이력 기록 실패: {_log_err}")
 
                 session.commit()
                 messagebox.showinfo("성공", "원료가 성공적으로 저장되었습니다.")

@@ -10,6 +10,7 @@ from database.db_manager import db_manager, SCHEMA_VERSION
 from database.models import Base, Formulation, FormulationItem, Material, Client, User
 from sqlalchemy import create_engine, text, inspect
 from modules.ui_components import HelpPopup
+from utils import center_window_on_mouse_display
 from modules.translation import get_texts
 from modules import excel_handler
 
@@ -50,7 +51,10 @@ class DBPathOptionsDialog(ctk.CTkToplevel):
 
         cancel_button = ctk.CTkButton(button_frame, text="취소", command=self._on_cancel, fg_color="gray")
         cancel_button.pack(side="left", padx=10)
-
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
         self.wait_window()
 
     def _on_confirm(self):
@@ -229,7 +233,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
         # 경로 검증 버튼
         validate_button = ctk.CTkButton(
             validation_frame, 
-            text="� DB 경로 및 파일 검증", 
+            text="🔍 DB 경로 및 파일 검증", 
             command=self.validate_current_db_path,
             fg_color="#1565C0",
             hover_color="#1976D2"

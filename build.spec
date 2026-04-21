@@ -14,6 +14,27 @@ project_root = os.path.dirname(os.path.abspath(sys.argv[0]))
 # collect_data_files는 패키지 내부의 assets 등 필요한 리소스를 모두 반환합니다.
 datas = collect_data_files('customtkinter', include_py_files=False)
 
+# tkcalendar 패키지에서 필요한 리소스가 있는 경우 포함 (안전망)
+try:
+    datas += collect_data_files('tkcalendar', include_py_files=False)
+    print("[SPEC] tkcalendar 데이터 파일 포함 완료")
+except Exception as _e:
+    print(f"[SPEC] tkcalendar 데이터 파일 수집 스킵: {_e}")
+
+# Babel 지역화 데이터 포함 (tkcalendar가 Babel을 사용하므로 필수)
+try:
+    # 패키지 내부 경로 기준이므로 includes에 'babel/...'가 아니라 'locale-data/*'를 사용하거나
+    # subdir='locale-data'를 사용하는 것이 정확합니다.
+    datas += collect_data_files('babel', subdir='locale-data', include_py_files=False)
+    print("[SPEC] Babel locale-data 포함 완료 (subdir=locale-data)")
+except Exception as _e:
+    try:
+        # 일부 환경에서 subdir 인식이 다를 수 있어 includes 대안 경로도 시도
+        datas += collect_data_files('babel', includes=['locale-data/*'], include_py_files=False)
+        print("[SPEC] Babel locale-data 포함 완료 (includes=locale-data/*)")
+    except Exception as _e2:
+        print(f"[SPEC] Babel locale-data 수집 실패: {_e} | 대안도 실패: {_e2}")
+
 # customtkinter 테마 파일들을 강제로 포함
 import customtkinter
 ctk_path = os.path.dirname(customtkinter.__file__)
@@ -199,7 +220,10 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[os.path.join(project_root, 'hooks')],
     hooksconfig={},
-    runtime_hooks=[os.path.join(project_root, 'hooks', 'pyi_rth_sqlite.py')],
+    runtime_hooks=[
+        os.path.join(project_root, 'hooks', 'pyi_rth_sqlite.py'),
+        os.path.join(project_root, 'hooks', 'pyi_rth_gui_excepthook.py'),
+    ],
     excludes=[
         # 큰 과학 계산 라이브러리들 제외 (필요한 경우만 포함)
         'scipy', 'scipy.linalg', 'scipy.special', 'scipy.spatial',
@@ -239,7 +263,7 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,         # 실사용 버전에서는 콘솔 창 숨김
-    disable_windowed_traceback=False,
+    disable_windowed_traceback=True,   # PyInstaller 기본 오류 대화상자 비활성화 (커스텀 훅 사용)
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,

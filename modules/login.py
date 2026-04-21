@@ -9,6 +9,7 @@ if PROJECT_ROOT not in sys.path:
 
 from database.db_manager import db_manager
 from modules.signup import SignupWindow
+from utils import center_window_on_mouse_display
 from datetime import datetime
 import configparser
 import base64
@@ -36,7 +37,10 @@ class LoginWindow(ctk.CTkToplevel):
 
         self.setup_ui()
         self.load_last_user_info()
-        self.center_on_screen()
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            self.center_on_screen()
         
         # 창 닫기 버튼 처리 - 프로그램 종료
         self.protocol("WM_DELETE_WINDOW", self.on_closing)

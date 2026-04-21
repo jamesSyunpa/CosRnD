@@ -13,6 +13,7 @@ from modules.ui_components import CustomErrorDialog
 # document_management.py에서 클래스들을 가져옵니다.
 from modules.document_management import CustomDropdown, AddMaterialDialog
 from modules.ui_components import try_convert_to_float, HelpPopup
+from utils import center_window_on_mouse_display
 from modules.translation import get_texts
 from decimal import Decimal, InvalidOperation, getcontext
 
@@ -88,6 +89,105 @@ def compute_actual_wt(ingredient_pct, total_weight, rm_pct=None):
     actual_wt = tw * (actual_pct / Decimal('100'))
     return actual_pct, actual_wt
 
+# 안전한 DateEntry 래퍼: Babel locale-data 누락 시에도 크래시 없이 동작
+class SafeDateEntry:
+    """tkcalendar.DateEntry 사용 시 Babel locale-data 누락으로 인한 크래시를 방지하는 안전 래퍼.
+
+    - 정상 환경: 내부적으로 tkcalendar.DateEntry 위젯을 생성하여 그대로 위임합니다.
+    - 폴백 환경: CTkEntry로 대체하고 get_date/set_date 등의 최소 인터페이스를 제공합니다.
+    """
+    def __init__(self, master, **kwargs):
+        self._is_fallback = False
+        self._master = master
+        # tkcalendar가 존재하더라도 Babel locale-data가 누락되면 생성 시점에 예외가 발생합니다.
+        try:
+            self._widget = DateEntry(master, **kwargs)
+        except Exception:
+            # 폴백: 일반 입력 상자 사용, 기본값은 오늘 날짜(YYYY-MM-DD)
+            self._is_fallback = True
+            width = kwargs.get('width', 120)
+            self._widget = ctk.CTkEntry(master, width=width)
+            try:
+                self._widget.insert(0, datetime.now().strftime('%Y-%m-%d'))
+            except Exception:
+                pass
+
+    # --- Tk geometry/event delegation ---
+    def grid(self, *args, **kwargs):
+        return self._widget.grid(*args, **kwargs)
+
+    def pack(self, *args, **kwargs):
+        return self._widget.pack(*args, **kwargs)
+
+    def place(self, *args, **kwargs):
+        return self._widget.place(*args, **kwargs)
+
+    def bind(self, *args, **kwargs):
+        # DateEntry 이벤트 바인딩을 최대한 그대로 위임
+        if hasattr(self._widget, 'bind'):
+            # DateEntry 전용 가상 이벤트를 폴백 위젯에서 근접 동작으로 매핑
+            if self._is_fallback and args and isinstance(args[0], str) and args[0] == "<<DateEntrySelected>>":
+                callback = args[1] if len(args) > 1 else kwargs.get('func')
+                res1 = self._widget.bind('<FocusOut>', callback)
+                res2 = self._widget.bind('<Return>', callback)
+                return (res1, res2)
+            return self._widget.bind(*args, **kwargs)
+        return None
+
+    def configure(self, *args, **kwargs):
+        if hasattr(self._widget, 'configure'):
+            return self._widget.configure(*args, **kwargs)
+        return None
+
+    # --- API compatibility ---
+    def set_date(self, value):
+        if self._is_fallback:
+            try:
+                # datetime 또는 문자열 모두 허용
+                if hasattr(value, 'strftime'):
+                    s = value.strftime('%Y-%m-%d')
+                else:
+                    s = str(value)
+                self._widget.delete(0, 'end')
+                self._widget.insert(0, s)
+            except Exception:
+                pass
+            return None
+        # 정상 DateEntry라면 원래 메서드 사용
+        try:
+            return self._widget.set_date(value)
+        except Exception:
+            return None
+
+    def get_date(self):
+        if self._is_fallback:
+            try:
+                s = self._widget.get()
+                # 형식이 다를 수 있으니 유연하게 처리
+                for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%y-%m-%d', '%y/%m/%d'):
+                    try:
+                        return datetime.strptime(s, fmt)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            # 파싱 실패 시 오늘로 대체
+            return datetime.now()
+        try:
+            return self._widget.get_date()
+        except Exception:
+            return datetime.now()
+
+    def get(self):
+        try:
+            return self._widget.get()
+        except Exception:
+            return ''
+
+    # 기타 속성/메서드는 내부 위젯에 위임
+    def __getattr__(self, name):
+        return getattr(self._widget, name)
+
 # --- 적용 예시 지시 ---
 # 아래와 같은 기존 코드 조각들을 찾아 치환하세요.
 # 기존 예시 (문제 원인):
@@ -147,11 +247,29 @@ class FormulationEditPopup(ctk.CTkToplevel):
             
         # 주기적 데이터 새로고침 시작 (5분마다)
         self.start_refresh_timer()
+        # 창 중앙 배치
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
 
     def setup_ui(self):
         """팝업 창의 UI를 구성합니다."""
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        
+        # 안전한 Entry 텍스트 입력 헬퍼 (index, text 두 인자 강제)
+        # - None -> "" 처리
+        # - 예외 발생 시 무시하고 기본값 유지
+        def _safe_insert(entry_widget, value, index=0):
+            try:
+                text = "" if value is None else str(value)
+                entry_widget.insert(index, text)
+            except Exception as _e:
+                # 디버깅을 돕기 위한 콘솔 로그만 남기고 동작은 계속
+                print(f"Entry.safe_insert 오류: {entry_widget} -> {value} ({_e})")
+        # 인스턴스 메서드로 노출
+        self.safe_insert = _safe_insert
 
         # 1. 메인 컨테이너 (상세정보 폼과 처방내용을 담음)
         main_container = ctk.CTkFrame(self, fg_color="transparent")
@@ -240,14 +358,16 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.exp_name_entry.grid(row=0, column=1, columnspan=3, padx=10, pady=5, sticky="ew")
         
         ctk.CTkLabel(experiment_info_frame, text=self.texts['experiment_date']).grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.exp_date_entry = DateEntry(experiment_info_frame, date_pattern='yyyy-mm-dd', width=15)
+        # tkcalendar의 Babel locale-data 누락 시에도 안전하게 동작하도록 래퍼 사용
+        self.exp_date_entry = SafeDateEntry(experiment_info_frame, date_pattern='yyyy-mm-dd', width=15)
         self.exp_date_entry.grid(row=1, column=1, padx=10, pady=5, sticky="w")
         self.exp_date_entry.bind("<<DateEntrySelected>>", self.update_lab_no)
 
         ctk.CTkLabel(experiment_info_frame, text=self.texts['manager_name']).grid(row=1, column=2, padx=10, pady=5, sticky="w")
         self.exp_manager_entry = ctk.CTkEntry(experiment_info_frame)
         self.exp_manager_entry.grid(row=1, column=3, padx=10, pady=5, sticky="ew")
-        self.exp_manager_entry.insert(0, self.current_user.real_name or self.current_user.username) # 기본값으로 현재 사용자 설정
+        # 기본값으로 현재 사용자 설정 (안전 래퍼 사용)
+        self.safe_insert(self.exp_manager_entry, self.current_user.real_name or self.current_user.username)
 
         ctk.CTkLabel(experiment_info_frame, text=self.texts['manager_code']).grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.exp_code_entry = ctk.CTkEntry(experiment_info_frame)
@@ -424,7 +544,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 사용자 활동 감지를 위한 이벤트 바인딩
         self.bind_activity_events()
 
-    def bind_activity_events(self):
+def bind_activity_events(self):
         """사용자 활동 감지를 위한 이벤트를 바인딩합니다"""
         try:
             # 마우스 및 키보드 활동 감지
@@ -446,7 +566,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         except Exception as e:
             print(f"이벤트 바인딩 중 오류: {e}")
 
-    def update_lab_no(self, event=None):
+def update_lab_no(self, event=None):
         """고유번호, 실험일, 차수가 모두 있을 때만 LAB NO.를 자동으로 생성합니다."""
         unique_code = self.exp_code_entry.get().strip().upper()
         revision = self.revision_entry.get().strip().upper()
@@ -471,7 +591,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.lab_no_entry.insert(0, lab_no)
         self.lab_no_entry.configure(state="disabled")
 
-    def clear_form(self):
+def clear_form(self):
         """상세 정보 폼의 모든 입력 필드를 초기화합니다."""
         self.formulation_id = None
 
@@ -491,12 +611,12 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.exp_name_entry.delete(0, "end")
         self.exp_date_entry.set_date(datetime.now())
         self.exp_manager_entry.delete(0, "end")
-        self.exp_manager_entry.insert(0, self.current_user.real_name or self.current_user.username)
+        self.safe_insert(self.exp_manager_entry, self.current_user.real_name or self.current_user.username)
         self.exp_code_entry.delete(0, "end")
         self.revision_entry.delete(0, "end")
         # 현재 사용자의 담당번호 자동 입력 (속성이 없을 수 있으므로 안전하게 접근)
         manager_code = getattr(self.current_user, 'manager_code', "")
-        self.exp_code_entry.insert(0, manager_code)
+        self.safe_insert(self.exp_code_entry, manager_code)
 
         # 본 실험 결과 정보
         self.exp_ph_initial_entry.delete(0, "end")
@@ -525,7 +645,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
         self.update_lab_no() # 폼 초기화 후 LAB NO. 업데이트
 
-    def load_formulation_details(self, formulation_id):
+def load_formulation_details(self, formulation_id):
         """특정 처방의 상세 정보를 불러와 폼에 채웁니다."""
         if self.data_loading:
             print("이미 데이터 로딩 중입니다.")
@@ -639,7 +759,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             # UI 업데이트 강제
             self.update_idletasks()
             
-    def clear_form_fields(self):
+def clear_form_fields(self):
         """폼의 모든 필드를 클리어합니다 (clear_form과 달리 기본값 설정 안함)"""
         # 타겟 정보 클리어
         self.target_sample_name_entry.delete(0, "end")
@@ -667,7 +787,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 총 실험량 클리어
         self.main_total_amount_entry.delete(0, "end")
             
-    def get_manager_code_from_form(self, form, session):
+def get_manager_code_from_form(self, form, session):
         """폼에서 담당번호를 추출합니다"""
         if form.manager_code:
             return form.manager_code
@@ -695,7 +815,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     return self.current_user.manager_code
         return None
     
-    def get_manager_display_name(self, manager_value):
+def get_manager_display_name(self, manager_value):
         """담당자 필드의 값을 표시용 이름으로 변환합니다"""
         if not manager_value or not manager_value.strip():
             return self.current_user.real_name or self.current_user.username or ""
@@ -722,7 +842,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 이미 이름인 경우 그대로 반환
         return manager_value
         
-    def load_change_log(self, form):
+def load_change_log(self, form):
         """변경 이력을 로드합니다"""
         self.change_log_textbox.configure(state="normal")
         self.change_log_textbox.delete("1.0", "end")
@@ -732,7 +852,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.change_log_textbox.insert("1.0", "저장된 변경 이력이 없습니다.")
         self.change_log_textbox.configure(state="disabled")
         
-    def load_client_info(self, client):
+def load_client_info(self, client):
         """거래처 정보를 로드합니다"""
         try:
             # 거래처 타입 설정
@@ -750,7 +870,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             import traceback
             traceback.print_exc()
             
-    def load_formulation_items(self, form):
+def load_formulation_items(self, form):
         """처방 아이템들을 로드합니다"""
         # 기존 아이템들 삭제
         for item in self.formulation_item_tree.get_children():
@@ -812,7 +932,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 요약 정보 업데이트
         self.update_formulation_summary()
         
-    def set_lab_no(self, form):
+def set_lab_no(self, form):
         """LAB NO.를 설정합니다"""
         if form.lab_no:
             try:
@@ -830,7 +950,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             
 
 
-    def save_formulation(self):
+def save_formulation(self):
         """폼 데이터를 DB에 저장 (신규/수정)"""
         # 저장 직전에 LAB NO.를 다시 한번 업데이트하여 최신 상태를 보장합니다.
         self.update_lab_no()
@@ -852,6 +972,23 @@ class FormulationEditPopup(ctk.CTkToplevel):
                 current_lab_no_input = self.lab_no_entry.get().strip().upper()
                 stored_lab_no = (form.lab_no or "").strip().upper()
                 if form and stored_lab_no != current_lab_no_input:
+                    # 이전 메타 스냅샷 저장 (변경 이력에 '변경된 항목만' 기록하기 위함)
+                    try:
+                        prev_meta = {
+                            'manager_name': form.manager_name or "",
+                            'experiment_date': form.experiment_date or "",
+                            'experiment_ph_initial': form.experiment_ph_initial or "",
+                            'experiment_ph_next_day': form.experiment_ph_next_day or "",
+                            'experiment_viscosity_initial': form.experiment_viscosity_initial or "",
+                            'experiment_viscosity_next_day': form.experiment_viscosity_next_day or "",
+                            'experiment_machine': form.experiment_machine or "",
+                            'sample_sent_count': int(form.sample_sent_count or 0),
+                            'sample_delivery_date': form.sample_delivery_date.strftime('%Y-%m-%d') if getattr(form, 'sample_delivery_date', None) else "",
+                            'oem_odm_client_name': (form.oem_odm_client.name if getattr(form, 'oem_odm_client', None) else ""),
+                            'target_client_id': form.target_client_id or "",
+                        }
+                    except Exception:
+                        prev_meta = None
                     is_new_revision = True
                     old_form_items = {item.material_code: item.ratio for item in form.items}
                     self.formulation_id = None # ID를 None으로 만들어 신규 저장 모드로 전환
@@ -878,6 +1015,53 @@ class FormulationEditPopup(ctk.CTkToplevel):
                             continue
                 
                 log_entries = []
+                # 1) 메타 필드 변경 비교 (폴더 이력과 동일 철학: 변경된 항목만 기록)
+                try:
+                    # 현재 메타 스냅샷을 UI에서 수집
+                    def _date_to_str(d):
+                        try:
+                            return d.strftime('%Y-%m-%d')
+                        except Exception:
+                            return str(d) if d else ""
+
+                    current_client_name = self.formulation_client_name_combo.get()
+                    if current_client_name in [self.texts['select_client'], self.texts['no_clients_found']]:
+                        current_client_name = ""
+
+                    curr_meta = {
+                        'manager_name': (self.exp_manager_entry.get() or "").strip(),
+                        'experiment_date': _date_to_str(self.exp_date_entry.get_date()),
+                        'experiment_ph_initial': (self.exp_ph_initial_entry.get() or "").strip(),
+                        'experiment_ph_next_day': (self.exp_ph_next_day_entry.get() or "").strip(),
+                        'experiment_viscosity_initial': (self.exp_viscosity_initial_entry.get() or "").strip(),
+                        'experiment_viscosity_next_day': (self.exp_viscosity_next_day_entry.get() or "").strip(),
+                        'experiment_machine': (self.exp_machine_entry.get() or "").strip(),
+                        'sample_sent_count': int(self.sample_sent_count or 0),
+                        'sample_delivery_date': "",  # 입력 위젯 부재로 현재는 공란 유지
+                        'oem_odm_client_name': current_client_name,
+                        'target_client_id': (self.target_client_entry.get() or "").strip(),
+                    }
+
+                    def _add_change(label, old, new):
+                        old_s = "" if old is None else str(old)
+                        new_s = "" if new is None else str(new)
+                        if old_s != new_s:
+                            log_entries.append(f"- {label}: {old_s or '-'} → {new_s or '-'}")
+
+                    if 'prev_meta' in locals() and prev_meta is not None:
+                        _add_change('담당자', prev_meta.get('manager_name'), curr_meta.get('manager_name'))
+                        _add_change('실험일', prev_meta.get('experiment_date'), curr_meta.get('experiment_date'))
+                        _add_change('pH(초기)', prev_meta.get('experiment_ph_initial'), curr_meta.get('experiment_ph_initial'))
+                        _add_change('pH(익일)', prev_meta.get('experiment_ph_next_day'), curr_meta.get('experiment_ph_next_day'))
+                        _add_change('점도(초기)', prev_meta.get('experiment_viscosity_initial'), curr_meta.get('experiment_viscosity_initial'))
+                        _add_change('점도(익일)', prev_meta.get('experiment_viscosity_next_day'), curr_meta.get('experiment_viscosity_next_day'))
+                        _add_change('Pin', prev_meta.get('experiment_machine'), curr_meta.get('experiment_machine'))
+                        _add_change('샘플발송 횟수', prev_meta.get('sample_sent_count'), curr_meta.get('sample_sent_count'))
+                        _add_change('샘플발송일', prev_meta.get('sample_delivery_date'), curr_meta.get('sample_delivery_date'))
+                        _add_change('OEM/ODM 거래처', prev_meta.get('oem_odm_client_name'), curr_meta.get('oem_odm_client_name'))
+                        _add_change('타겟 거래처', prev_meta.get('target_client_id'), curr_meta.get('target_client_id'))
+                except Exception:
+                    pass
                 all_codes = sorted(list(set(old_form_items.keys()) | set(new_form_items.keys())))
                 for code in all_codes:
                     old_ratio = old_form_items.get(code)
@@ -992,11 +1176,11 @@ class FormulationEditPopup(ctk.CTkToplevel):
         finally:
             session.close()
 
-    def open_add_material_dialog(self):
+def open_add_material_dialog(self):
         """원료 추가 팝업창을 엽니다."""
         AddMaterialDialog(self, self.add_material_to_formulation, self.add_line_break_to_formulation)
 
-    def add_material_to_formulation(self, material_id):
+def add_material_to_formulation(self, material_id):
         """선택된 원료를 처방 내용 Treeview에 추가합니다."""
         session = db_manager.get_session()
         try:
@@ -1016,7 +1200,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         finally:
             session.close()
 
-    def add_line_break_to_formulation(self):
+def add_line_break_to_formulation(self):
         """처방 내용에 빈 줄(구분선)을 추가합니다."""
         # 태그 추가
         tag = 'oddrow' if len(self.formulation_item_tree.get_children()) % 2 == 0 else 'evenrow'
@@ -1025,7 +1209,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 안내 메시지 숨기기 (아이템이 추가되었으므로)
         self.empty_message_label.grid_remove()
 
-    def delete_selected_item(self):
+def delete_selected_item(self):
         """처방 내용 Treeview에서 선택된 항목을 삭제합니다."""
         selected_item = self.formulation_item_tree.selection()
         if not selected_item:
@@ -1038,7 +1222,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         if not self.formulation_item_tree.get_children():
             self.empty_message_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
-    def edit_item_ratio(self, event):
+def edit_item_ratio(self, event):
         """Treeview의 '함량' 셀을 더블클릭하여 수정합니다."""
         if self.edit_entry: self.edit_entry.destroy()
         region = self.formulation_item_tree.identify("region", event.x, event.y)
@@ -1047,11 +1231,11 @@ class FormulationEditPopup(ctk.CTkToplevel):
         selected_item = self.formulation_item_tree.focus()
         self.start_ratio_editing(selected_item, "#4")
 
-    def edit_selected_item_ratio(self, event=None):
+def edit_selected_item_ratio(self, event=None):
         selected_item = self.formulation_item_tree.focus()
         if selected_item: self.start_ratio_editing(selected_item, "#4")
 
-    def start_ratio_editing(self, selected_item, column_id):
+def start_ratio_editing(self, selected_item, column_id):
         if not selected_item: return
         item_values = self.formulation_item_tree.item(selected_item, "values")
         if item_values and item_values[1] == "---": return
@@ -1067,7 +1251,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.edit_entry.bind("<Return>", lambda e: self.on_edit_entry_commit(selected_item))
         self.edit_entry.bind("<FocusOut>", lambda e: self.on_edit_entry_commit(selected_item))
     
-    def on_edit_entry_commit(self, item_id):
+def on_edit_entry_commit(self, item_id):
         if not self.edit_entry: return
         try:
             # Decimal로 안전하게 변환
@@ -1084,7 +1268,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.edit_entry = None
             self.update_formulation_summary()
 
-    def set_ratio_to_100(self):
+def set_ratio_to_100(self):
         selected_item_id = self.formulation_item_tree.focus()
         if not selected_item_id:
             messagebox.showwarning(self.texts['selection_error'], self.texts['select_material_for_to100'], parent=self)
@@ -1113,7 +1297,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.formulation_item_tree.item(selected_item_id, values=tuple(current_values))
         self.update_formulation_summary()
 
-    def move_item_up(self, event=None):
+def move_item_up(self, event=None):
         selected_item = self.formulation_item_tree.focus()
         if not selected_item: return
         prev_item = self.formulation_item_tree.prev(selected_item)
@@ -1124,7 +1308,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.update_phase_numbers()
         return 'break'
 
-    def move_item_down(self, event=None):
+def move_item_down(self, event=None):
         selected_item = self.formulation_item_tree.focus()
         if not selected_item: return
         next_item = self.formulation_item_tree.next(selected_item)
@@ -1137,7 +1321,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.formulation_item_tree.move(selected_item, "", "end")
             self.update_phase_numbers()
 
-    def calculate_single_amount(self, ratio) -> str:
+def calculate_single_amount(self, ratio) -> str:
         try:
             total_amount = to_decimal(self.main_total_amount_entry.get())
             ratio_dec = to_decimal(ratio)
@@ -1146,7 +1330,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         except Exception:
             return "0"
 
-    def calculate_item_amounts(self, event=None):
+def calculate_item_amounts(self, event=None):
         try:
             total_amount = to_decimal(self.main_total_amount_entry.get())
         except (InvalidOperation, ValueError, TypeError):
@@ -1163,7 +1347,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     continue
         self.update_formulation_summary()
 
-    def update_phase_numbers(self):
+def update_phase_numbers(self):
         i = 1
         for item_id in self.formulation_item_tree.get_children():
             current_values = list(self.formulation_item_tree.item(item_id, "values"))
@@ -1175,7 +1359,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.formulation_item_tree.item(item_id, values=tuple(current_values))
         self.update_formulation_summary()
 
-    def update_formulation_summary(self):
+def update_formulation_summary(self):
         total_ratio = Decimal('0')
         total_amount = Decimal('0')
         for item_id in self.formulation_item_tree.get_children():
@@ -1189,7 +1373,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.total_ratio_label.configure(text=f"{decimal_to_str_full(total_ratio)} %")
         self.total_amount_label.configure(text=f"{decimal_to_str_full(total_amount)} g")
 
-    def sort_items_by_phase(self):
+def sort_items_by_phase(self):
         """처방 내용 아이템들을 구분(phase) 순서로 정렬합니다."""
         # 현재 Treeview의 모든 아이템 정보를 수집
         items_data = []
@@ -1222,7 +1406,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # phase 번호 업데이트
         self.update_phase_numbers()
 
-    def toggle_target_info(self):
+def toggle_target_info(self):
         if self.target_info_var.get():
             self.target_fields_frame.pack(fill="x", expand=True, padx=10, pady=5)
         else:
@@ -1230,7 +1414,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
     # update_target_client_combo 메서드는 더 이상 필요 없으므로 삭제합니다.
 
-    def update_formulation_client_combo(self, selected_type: str):
+def update_formulation_client_combo(self, selected_type: str):
         self.formulation_client_name_combo.set(self.texts['select_client'])
         if selected_type == self.texts['select_type']:
             self.formulation_client_name_combo.configure(values=[self.texts['select_client']])
@@ -1244,7 +1428,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.formulation_client_name_combo.configure(values=values)
         finally: session.close()
 
-    def on_client_select(self, selected_name: str):
+def on_client_select(self, selected_name: str):
         if selected_name in [self.texts['select_client'], self.texts['no_clients_found']]:
             self.client_details_label.configure(text="")
             return
@@ -1261,7 +1445,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         except Exception as e: print(f"거래처 상세 정보 로드 중 오류: {e}")
         finally: session.close()
 
-    def export_formulation_to_excel(self): # noqa
+def export_formulation_to_excel(self): # noqa
         # 내보내기 직전에 LAB NO.를 다시 한번 업데이트하여 최신 상태를 보장합니다.
         self.update_lab_no()
 
@@ -1329,7 +1513,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
         excel_handler.export_formulation_template(formulation_data, default_filename)
 
-    def _apply_imported_data_to_ui(self, formulation_data):
+def _apply_imported_data_to_ui(self, formulation_data):
         try:
             # '가져오기'는 항상 '신규' 처방으로 처리합니다.
             # 기존에 수정 중이던 ID가 있더라도 이를 무시하고 None으로 설정하여
@@ -1448,18 +1632,18 @@ class FormulationEditPopup(ctk.CTkToplevel):
         except Exception as e:
             CustomErrorDialog(self, title="가져오기 오류", error_message=f"데이터를 적용하는 중 오류가 발생했습니다:\n\n{e}") # noqa
 
-    def import_formulation_from_excel(self):
+def import_formulation_from_excel(self):
         if not messagebox.askyesno(self.texts['import_confirm'], self.texts['import_formulation_confirm_msg'], parent=self):
             return
         formulation_data = excel_handler.import_formulation_template()
         if formulation_data:
             self._apply_imported_data_to_ui(formulation_data)
 
-    def start_refresh_timer(self):
+def start_refresh_timer(self):
         """데이터 새로고침 타이머를 시작합니다 (5분마다)"""
         self.refresh_timer = self.after(300000, self.refresh_data_periodically)  # 5분 = 300,000ms
         
-    def refresh_data_periodically(self):
+def refresh_data_periodically(self):
         """주기적으로 데이터를 새로고침합니다"""
         try:
             # 데이터 로딩 중이거나 편집 중인 경우 새로고침 건너뛰기
@@ -1484,7 +1668,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             # 오류가 발생해도 타이머는 계속 실행
             self.start_refresh_timer()
     
-    def refresh_formulation_data(self):
+def refresh_formulation_data(self):
         """처방 데이터를 새로고침합니다"""
         try:
             # 현재 편집 중인 경우에는 새로고침하지 않음
@@ -1524,7 +1708,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             import traceback
             traceback.print_exc()
     
-    def load_essential_data_only(self, form):
+def load_essential_data_only(self, form):
         """필수 데이터만 로드합니다 (사용자 입력 필드는 건드리지 않음)"""
         try:
             # 변경 이력만 업데이트 (사용자가 직접 수정하지 않는 필드)
@@ -1544,7 +1728,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         except Exception as e:
             print(f"필수 데이터 로드 중 오류: {e}")
     
-    def get_current_form_values(self):
+def get_current_form_values(self):
         """현재 폼의 입력값들을 저장합니다"""
         try:
             return {
@@ -1574,7 +1758,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             print(f"현재 폼 값 저장 중 오류: {e}")
             return {}
     
-    def restore_user_inputs(self, values):
+def restore_user_inputs(self, values):
         """사용자 입력값들을 복원합니다"""
         try:
             if not values:
@@ -1634,15 +1818,68 @@ class FormulationEditPopup(ctk.CTkToplevel):
         except Exception as e:
             print(f"사용자 입력값 복원 중 오류: {e}")
     
-    def on_user_activity(self, event=None):
+def on_user_activity(self, event=None):
         """사용자 활동 시간을 업데이트합니다"""
         self.last_activity_time = time.time()
         # print(f"사용자 활동 감지: {datetime.fromtimestamp(self.last_activity_time).strftime('%H:%M:%S')}")
         
-    def destroy(self):
+def destroy(self):
         """창 종료 시 타이머 정리"""
         if self.refresh_timer:
             self.after_cancel(self.refresh_timer)
             self.refresh_timer = None
         print("처방 편집 창이 종료되었습니다.")
-        super().destroy()
+        # 주의: 이 메서드는 동적으로 클래스에 바인딩되므로 super() 사용이 불가합니다.
+        # 직접 부모 클래스 메서드를 호출합니다.
+        try:
+            ctk.CTkToplevel.destroy(self)
+        except Exception:
+            # 최후의 수단으로 Tk widget의 destroy 시도
+            try:
+                self.__class__.__mro__[1].destroy(self)
+            except Exception:
+                pass
+
+# --- 메서드 바인딩 (위에서 클래스 범위가 끊어진 함수들을 클래스 메서드로 연결) ---
+FormulationEditPopup.bind_activity_events = bind_activity_events
+FormulationEditPopup.update_lab_no = update_lab_no
+FormulationEditPopup.clear_form = clear_form
+FormulationEditPopup.load_formulation_details = load_formulation_details
+FormulationEditPopup.clear_form_fields = clear_form_fields
+FormulationEditPopup.get_manager_code_from_form = get_manager_code_from_form
+FormulationEditPopup.get_manager_display_name = get_manager_display_name
+FormulationEditPopup.load_change_log = load_change_log
+FormulationEditPopup.load_client_info = load_client_info
+FormulationEditPopup.load_formulation_items = load_formulation_items
+FormulationEditPopup.set_lab_no = set_lab_no
+FormulationEditPopup.save_formulation = save_formulation
+FormulationEditPopup.open_add_material_dialog = open_add_material_dialog
+FormulationEditPopup.add_material_to_formulation = add_material_to_formulation
+FormulationEditPopup.add_line_break_to_formulation = add_line_break_to_formulation
+FormulationEditPopup.delete_selected_item = delete_selected_item
+FormulationEditPopup.edit_item_ratio = edit_item_ratio
+FormulationEditPopup.edit_selected_item_ratio = edit_selected_item_ratio
+FormulationEditPopup.start_ratio_editing = start_ratio_editing
+FormulationEditPopup.on_edit_entry_commit = on_edit_entry_commit
+FormulationEditPopup.set_ratio_to_100 = set_ratio_to_100
+FormulationEditPopup.move_item_up = move_item_up
+FormulationEditPopup.move_item_down = move_item_down
+FormulationEditPopup.calculate_single_amount = calculate_single_amount
+FormulationEditPopup.calculate_item_amounts = calculate_item_amounts
+FormulationEditPopup.update_phase_numbers = update_phase_numbers
+FormulationEditPopup.update_formulation_summary = update_formulation_summary
+FormulationEditPopup.sort_items_by_phase = sort_items_by_phase
+FormulationEditPopup.toggle_target_info = toggle_target_info
+FormulationEditPopup.update_formulation_client_combo = update_formulation_client_combo
+FormulationEditPopup.on_client_select = on_client_select
+FormulationEditPopup.export_formulation_to_excel = export_formulation_to_excel
+FormulationEditPopup._apply_imported_data_to_ui = _apply_imported_data_to_ui
+FormulationEditPopup.import_formulation_from_excel = import_formulation_from_excel
+FormulationEditPopup.start_refresh_timer = start_refresh_timer
+FormulationEditPopup.refresh_data_periodically = refresh_data_periodically
+FormulationEditPopup.refresh_formulation_data = refresh_formulation_data
+FormulationEditPopup.load_essential_data_only = load_essential_data_only
+FormulationEditPopup.get_current_form_values = get_current_form_values
+FormulationEditPopup.restore_user_inputs = restore_user_inputs
+FormulationEditPopup.on_user_activity = on_user_activity
+FormulationEditPopup.destroy = destroy

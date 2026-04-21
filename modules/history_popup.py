@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import re
+from utils import center_window_on_mouse_display
 
 class HistoryPopup(ctk.CTkToplevel):
     """
@@ -23,6 +24,10 @@ class HistoryPopup(ctk.CTkToplevel):
         self.all_log_entries = []
         self.setup_ui()
         self.prepare_and_load_history()
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
 
     def setup_ui(self):
         """UI 기본 구조를 설정합니다."""

@@ -266,6 +266,19 @@ class DataManagementFrame(ctk.CTkFrame):
         role_info.grid(row=current_row, column=1, padx=10, sticky="w")
         current_row += 1
         
+        # 마스터 권한 불변 안내 라벨 (필요 시 표시)
+        self.master_guard_label = ctk.CTkLabel(
+            user_form_frame,
+            text="마스터 계정의 권한은 변경할 수 없습니다.",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#D32F2F",
+            justify="left"
+        )
+        self.master_guard_label.grid(row=current_row, column=1, padx=10, sticky="w")
+        # 기본은 숨김
+        self.master_guard_label.grid_remove()
+        current_row += 1
+        
         # 관리자 체크박스는 숨기고 권한 콤보박스로만 관리
         self.is_admin_var = ctk.StringVar(value="off")
         # is_admin_check는 표시하지 않음 (권한이 자동으로 결정됨)
@@ -402,6 +415,8 @@ class DataManagementFrame(ctk.CTkFrame):
         client_list_header_frame.grid_columnconfigure(1, weight=1) # 가변 공간
 
         ctk.CTkLabel(client_list_header_frame, text=self.texts['client_list'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
+        # 거래처 전체 이력 조회 버튼 추가
+        ctk.CTkButton(client_list_header_frame, text=self.texts['view_all_history'], command=self.show_all_client_history).grid(row=0, column=1, padx=(20, 0), sticky="w")
         
         # --- 우측 컨트롤 (검색, 초기화, 엑셀 버튼) ---
         right_header_frame = ctk.CTkFrame(client_list_header_frame, fg_color="transparent")
@@ -507,6 +522,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 if not username or not password: continue
 
                 user = session.query(User).filter_by(username=username).first()
+                is_existing = bool(user)
                 if not user:
                     user = User(username=username)
                     session.add(user)
@@ -519,7 +535,11 @@ class DataManagementFrame(ctk.CTkFrame):
                 user.zip_code = get_val(row, "우편번호", "zip_code")
                 user.address = get_val(row, "주소", "address")
                 is_admin_val = get_val(row, "관리자여부(True/False)", "is_admin(True/False)")
-                user.is_admin = str(is_admin_val).upper() == "TRUE"
+                # 기존 마스터 계정(admin 또는 MSAD)은 관리자여부 변경 금지
+                if is_existing and ((user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD')):
+                    user.is_admin = True
+                else:
+                    user.is_admin = str(is_admin_val).upper() == "TRUE"
 
             session.commit()
             messagebox.showinfo("성공", f"{len(data)}개의 사용자 정보가 처리되었습니다.")
@@ -699,6 +719,31 @@ class DataManagementFrame(ctk.CTkFrame):
             self._selected_user_id = user.id
             self.user_history_button.configure(state="normal")
 
+            # 마스터 계정 선택 시 권한/삭제 비활성화 및 안내 표시
+            is_master_target = (user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD')
+            if is_master_target:
+                try:
+                    self.user_role_combo.configure(state="disabled")
+                except Exception:
+                    pass
+                if hasattr(self, 'master_guard_label'):
+                    self.master_guard_label.grid()
+                # 삭제 버튼 비활성화
+                try:
+                    self.user_delete_button.configure(state="disabled")
+                except Exception:
+                    pass
+            else:
+                # 마스터가 아닌 경우 안내 숨김 및 상태 복구 (현재 사용자가 관리 권한 보유 시)
+                if hasattr(self, 'master_guard_label'):
+                    self.master_guard_label.grid_remove()
+                if self.current_user.is_master_admin():
+                    try:
+                        self.user_role_combo.configure(state="normal")
+                        self.user_delete_button.configure(state="normal")
+                    except Exception:
+                        pass
+
     def save_user(self):
         username = self.user_entries["username"].get()
         password = self.user_entries["password"].get()
@@ -710,7 +755,8 @@ class DataManagementFrame(ctk.CTkFrame):
         log_action = ""
         session = db_manager.get_session()
         try:
-            if hasattr(self, '_selected_user_id') and self._selected_user_id:
+            is_edit = hasattr(self, '_selected_user_id') and self._selected_user_id
+            if is_edit:
                 user = session.query(User).filter_by(id=self._selected_user_id).first()
                 if not user:
                     raise Exception("선택된 사용자를 찾을 수 없습니다.")
@@ -731,6 +777,12 @@ class DataManagementFrame(ctk.CTkFrame):
             role_display = self.user_role_combo.get()
             role_code = self.role_options.get(role_display, "RD")
             
+            # 편집 대상이 마스터 계정이면 권한 변경 금지
+            if is_edit:
+                is_master_target = (user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD')
+                if is_master_target:
+                    role_code = 'MSAD'
+            
             # 신규 사용자에 대한 MSAD 권한 제한 검증
             if not (hasattr(self, '_selected_user_id') and self._selected_user_id):  # 신규 사용자인 경우
                 if role_code == "MSAD" and self.has_admin:  # 이미 관리자가 있는데 MSAD 권한을 시도하는 경우
@@ -740,8 +792,8 @@ class DataManagementFrame(ctk.CTkFrame):
                         "다른 권한을 선택해주세요.")
                     return
             
-            # is_admin은 권한 코드에 따라 자동 설정
-            is_admin_value = (role_code == "MSAD")
+            # is_admin은 권한 코드에 따라 자동 설정 (정책: RQD도 관리자 취급)
+            is_admin_value = (role_code in ("MSAD", "RQD"))
             self.is_admin_var.set("on" if is_admin_value else "off")
             
             new_values = {
@@ -770,12 +822,20 @@ class DataManagementFrame(ctk.CTkFrame):
 
             if not user.id: # 신규 생성
                 log_action = "신규 생성"
+                # 화이트리스트 필드만 기록 + 빈값은 생략
+                def add_nonempty(label, value):
+                    if value is None:
+                        return
+                    if isinstance(value, str) and not value.strip():
+                        return
+                    log_entries.append(f"{label}: '{value}'")
+
                 log_entries.append(f"사용자 ID: '{username}'")
-                for field, value in new_values.items():
-                    if field == "role":
-                        log_entries.append(f"권한: '{value}'")
-                    else:
-                        log_entries.append(f"{self.get_user_label_by_key(field)}: '{value}'")
+                add_nonempty("실명", new_values.get("real_name"))
+                add_nonempty("담당번호", new_values.get("manager_code"))
+                add_nonempty("직책", new_values.get("position"))
+                add_nonempty("연락처", new_values.get("contact"))
+                add_nonempty("권한", new_values.get("role"))
                 if password:
                     log_entries.append("초기 비밀번호 설정됨")
             else: # 수정
@@ -783,13 +843,11 @@ class DataManagementFrame(ctk.CTkFrame):
                 def log_change(field_name, old_val, new_val):
                     if old_val != new_val:
                         log_entries.append(f"{self.get_user_label_by_key(field_name)}: '{old_val}' -> '{new_val}'")
-                
+                # 화이트리스트 변경만 기록 (실명, 담당번호, 직책, 연락처, 권한, 관리자 권한)
                 log_change("real_name", user.real_name or "", new_values["real_name"])
                 log_change("manager_code", user.manager_code or "", new_values["manager_code"])
                 log_change("position", user.position or "", new_values["position"])
                 log_change("contact", user.contact or "", new_values["contact"])
-                log_change("zip_code", user.zip_code or "", new_values["zip_code"])
-                log_change("address", user.address or "", new_values["address"])
                 log_change("관리자 권한", user.is_admin, new_values["관리자 권한"])
                 
                 # 권한 변경 로깅
@@ -812,8 +870,13 @@ class DataManagementFrame(ctk.CTkFrame):
             user.contact = new_values["contact"]
             user.zip_code = new_values["zip_code"]
             user.address = new_values["address"]
-            user.is_admin = new_values["관리자 권한"]
-            user.role = new_values["role"]  # 권한 저장
+            # 마스터 계정은 권한/관리자값 불변 유지
+            if is_edit and ((user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD')):
+                user.is_admin = True
+                user.role = 'MSAD'
+            else:
+                user.is_admin = new_values["관리자 권한"]
+                user.role = new_values["role"]  # 권한 저장
             
             if log_entries:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -853,6 +916,10 @@ class DataManagementFrame(ctk.CTkFrame):
         session = db_manager.get_session()
         try:
             user_to_delete = session.query(User).filter_by(id=self._selected_user_id).first()
+            # 마스터 권한 사용자는 삭제 금지 (admin 또는 MSAD)
+            if user_to_delete and ((user_to_delete.username == 'admin') or (getattr(user_to_delete, 'role', '') == 'MSAD')):
+                messagebox.showerror("삭제 불가", "마스터 관리자(MSAD)는 삭제할 수 없습니다.")
+                return
             if user_to_delete:
                 session.delete(user_to_delete)
                 session.commit()
@@ -877,6 +944,15 @@ class DataManagementFrame(ctk.CTkFrame):
         self.is_admin_var.set("off")
         self.user_role_combo.set("RD - 연구원")  # 권한 초기화
         self.user_history_button.configure(state="disabled")
+        # 폼 초기화 시 마스터 안내 숨김 및 상태 복구
+        if hasattr(self, 'master_guard_label'):
+            self.master_guard_label.grid_remove()
+        if self.current_user.is_master_admin():
+            try:
+                self.user_role_combo.configure(state="normal")
+                self.user_delete_button.configure(state="normal")
+            except Exception:
+                pass
         if self.user_tree.selection():
             self.user_tree.selection_remove(self.user_tree.selection()[0])
 
@@ -995,24 +1071,33 @@ class DataManagementFrame(ctk.CTkFrame):
 
             if not client.id: # 신규 생성
                 log_action = "신규 생성"
-                for field, value in new_values.items():
-                    log_entries.append(f"{field}: '{value}'")
+                # 화이트리스트 + 비어있지 않은 값만 기록
+                def add_nonempty(label, value):
+                    if value is None:
+                        return
+                    if isinstance(value, str) and not value.strip():
+                        return
+                    log_entries.append(f"{label}: '{value}'")
+
+                add_nonempty("거래처 유형", new_values["거래처 유형"])
+                add_nonempty("거래처코드", new_values["거래처코드"])
+                add_nonempty("거래처명", new_values["거래처명"])
+                add_nonempty("담당자명", new_values["담당자명"])
+                add_nonempty("연락처", new_values["연락처"])
+                add_nonempty("이메일", new_values["이메일"])
+                # 사용 여부는 기본값(on)이 많아 노이즈가 될 수 있어 신규 생성 시에는 생략
             else: # 수정
                 log_action = "정보 수정"
                 def log_change(field_name, old_val, new_val):
                     if old_val != new_val:
                         log_entries.append(f"{field_name}: '{old_val}' -> '{new_val}'")
-                
+                # 화이트리스트 필드만 변경 기록
                 log_change("거래처 유형", client.client_type or "", new_values["거래처 유형"])
                 log_change("거래처코드", client.business_number or "", new_values["거래처코드"])
                 log_change("거래처명", client.name or "", new_values["거래처명"])
-                log_change("대표자명", client.ceo_name or "", new_values["대표자명"])
                 log_change("담당자명", client.manager_name or "", new_values["담당자명"])
                 log_change("연락처", client.phone or "", new_values["연락처"])
-                log_change("팩스", client.fax or "", new_values["팩스"])
                 log_change("이메일", client.email or "", new_values["이메일"])
-                log_change("우편번호", client.zip_code or "", new_values["우편번호"])
-                log_change("주소", client.address or "", new_values["주소"])
                 log_change("사용 여부", client.is_active, new_values["사용 여부"])
 
             client.client_type = new_values["거래처 유형"]

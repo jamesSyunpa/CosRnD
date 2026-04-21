@@ -4,6 +4,7 @@ from tkinter import messagebox
 import bcrypt
 from database.db_manager import db_manager
 from database.models import User
+from utils import center_window_on_mouse_display
 
 class SignupWindow(ctk.CTkToplevel):
     def __init__(self, master=None, is_initial_setup=False, on_success=None):
@@ -23,6 +24,10 @@ class SignupWindow(ctk.CTkToplevel):
         self.grab_set()
 
         self.setup_ui()
+        try:
+            center_window_on_mouse_display(self)
+        except Exception:
+            pass
 
 
     def setup_ui(self):
@@ -91,29 +96,15 @@ class SignupWindow(ctk.CTkToplevel):
                 state="disabled"
             )
         else:
-            # 일반 가입 시에는 관리자 존재 여부에 따라 권한 결정
-            if self.has_admin:
-                # 이미 관리자가 있으면 MSAD 제외
-                self.role_options = {
-                    "QC - 품질관리원": "QC",
-                    "RD - 연구원": "RD",
-                    "RQ - 연구/품질 통합관리자": "RQ",
-                    "RQD - 연구/품질/데이터 관리자": "RQD"
-                }
-            else:
-                # 관리자가 없으면 모든 권한 허용
-                self.role_options = {
-                    "QC - 품질관리원": "QC",
-                    "RD - 연구원": "RD",
-                    "RQ - 연구/품질 통합관리자": "RQ",
-                    "RQD - 연구/품질/데이터 관리자": "RQD",
-                    "MSAD - 모든 관리자": "MSAD"
-                }
-            
+            # 일반 가입은 무조건 일반(RD)로 생성, 권한 선택 비활성화
+            self.role_options = {
+                "RD - 연구원": "RD"
+            }
             default_role = "RD - 연구원"
             self.role_combo = ctk.CTkOptionMenu(
                 input_frame,
-                values=list(self.role_options.keys())
+                values=["RD - 연구원"],
+                state="disabled"
             )
         
         self.role_combo.set(default_role)
@@ -124,26 +115,10 @@ class SignupWindow(ctk.CTkToplevel):
         if self.is_initial_setup:
             role_info_text = "MSAD: 마스터 관리자 (모든 권한 + 데이터 백업 권한)"
         else:
-            if self.has_admin:
-                role_info_text = (
-                    "QC: 품질 서류 관리 (원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서)\n"
-                    "     + 거래처 관리 (검색/참고만)\n"
-                    "RD: 연구 서류 관리 (처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료)\n"
-                    "     + 성분/거래처 관리 (검색/참고만)\n"
-                    "RQ: 연구/품질 통합관리 (RD + QC 모든 기능)\n"
-                    "RQD: RQ 기능 + 모든 데이터 수정/삭제 권한\n"
-                    "\n※ 관리자 계정이 이미 존재하여 MSAD 권한은 선택할 수 없습니다."
-                )
-            else:
-                role_info_text = (
-                    "QC: 품질 서류 관리 (원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서)\n"
-                    "     + 거래처 관리 (검색/참고만)\n"
-                    "RD: 연구 서류 관리 (처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료)\n"
-                    "     + 성분/거래처 관리 (검색/참고만)\n"
-                    "RQ: 연구/품질 통합관리 (RD + QC 모든 기능)\n"
-                    "RQD: RQ 기능 + 모든 데이터 수정/삭제 권한\n"
-                    "MSAD: 마스터 관리자 (모든 기능 + 데이터 삭제 전 백업 권한)"
-                )
+            role_info_text = (
+                "신규 사용자는 기본적으로 'RD - 연구원' 권한으로 생성됩니다.\n"
+                "필요 시 관리자가 권한을 부여/변경합니다."
+            )
         role_info = ctk.CTkLabel(
             input_frame, 
             text=role_info_text,
@@ -175,6 +150,9 @@ class SignupWindow(ctk.CTkToplevel):
         # 권한 가져오기
         role_display = self.role_combo.get()
         role_code = self.role_options.get(role_display, "RD")
+        # 정책: 초기 설정이 아닌 경우 무조건 RD로 강제
+        if not self.is_initial_setup:
+            role_code = "RD"
 
         # 1. 필수 입력 값 확인
         if not username or not password or not password_confirm:
@@ -194,14 +172,12 @@ class SignupWindow(ctk.CTkToplevel):
                 messagebox.showwarning("입력 오류", "이미 사용 중인 ID입니다.", parent=self)
                 return
 
-            # 3-1. 일반 가입 시 MSAD 권한 제한 검증
-            if not self.is_initial_setup and role_code == "MSAD":
-                if db_manager.has_admin_users():
-                    messagebox.showerror("권한 오류", 
-                        "이미 관리자 계정이 존재합니다.\n"
-                        "보안상 추가 관리자 계정 생성은 제한됩니다.\n"
-                        "다른 권한을 선택해주세요.", parent=self)
-                    return
+            # 3-1. 일반 가입 시 MSAD/RQD 권한 제한 (정책상 무조건 RD 생성)
+            if not self.is_initial_setup and role_code in ("MSAD", "RQD"):
+                messagebox.showerror("권한 오류", 
+                    "일반 회원가입으로는 관리자 권한을 부여할 수 없습니다.\n"
+                    "관리자에게 요청하여 권한을 변경하세요.", parent=self)
+                return
 
             print("\n=== 사용자 등록 시작 ===")
             
@@ -217,7 +193,8 @@ class SignupWindow(ctk.CTkToplevel):
                 contact=contact,
                 zip_code=zip_code,
                 address=address,
-                is_admin=(role_code == 'MSAD'),  # MSAD만 is_admin=True
+                # 정책: RQD도 관리자(True) 처리
+                is_admin=(role_code in ('MSAD', 'RQD')),
                 role=role_code  # 권한 코드 저장
             )
             
