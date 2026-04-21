@@ -294,32 +294,40 @@ def export_production_formulation_revised_to_excel(
         ws['C3'].border = thin_border
         ws['D3'].border = thin_border
         ws['E3'].value = '생산코드'; ws['E3'].font = label_font; ws['E3'].fill = label_fill; ws['E3'].alignment = center; ws['E3'].border = thin_border
+        # 생산코드 값셀 F3를 G3까지 병합하여 빈칸 제거
+        ws.merge_cells('F3:G3')
         ws['F3'].value = details.get('생산코드', ''); ws['F3'].font = default_font; ws['F3'].alignment = left; ws['F3'].border = thin_border
-        ws['G3'].value = '제조자'; ws['G3'].font = label_font; ws['G3'].fill = label_fill; ws['G3'].alignment = center; ws['G3'].border = thin_border
-        ws['H3'].value = details.get('제조자', ''); ws['H3'].font = default_font; ws['H3'].alignment = left; ws['H3'].border = thin_border
+        ws['G3'].border = thin_border
+        # 제조자를 한 칸 오른쪽으로 이동: H3 라벨, I3 값
+        ws['H3'].value = '제조자'; ws['H3'].font = label_font; ws['H3'].fill = label_fill; ws['H3'].alignment = center; ws['H3'].border = thin_border
+        ws['I3'].value = details.get('제조자', ''); ws['I3'].font = default_font; ws['I3'].alignment = left; ws['I3'].border = thin_border
         # 라벨/값 셀 테두리 보강
         for c in ['A','B','C','D']:
             ws[f"{c}3"].border = thin_border
-        ws.row_dimensions[3].height = 24
+        ws.row_dimensions[3].height = 20
 
-        # Row 4: 지시일/적용일/생산량/수득량
+        # Row 4: 지시일/제조일/생산량/수득량
         ws['A4'].value = '지시일'; ws['A4'].font = label_font; ws['A4'].fill = label_fill; ws['A4'].alignment = center; ws['A4'].border = thin_border
         ws['B4'].value = details.get('지시일', details.get('출력일시','')); ws['B4'].font = default_font; ws['B4'].alignment = left; ws['B4'].border = thin_border
-        ws['C4'].value = '적용일'; ws['C4'].font = label_font; ws['C4'].fill = label_fill; ws['C4'].alignment = center; ws['C4'].border = thin_border
-        ws['D4'].value = details.get('적용일',''); ws['D4'].font = default_font; ws['D4'].alignment = left; ws['D4'].border = thin_border
+        ws['C4'].value = '제조일'; ws['C4'].font = label_font; ws['C4'].fill = label_fill; ws['C4'].alignment = center; ws['C4'].border = thin_border
+        ws['D4'].value = details.get('제조일',''); ws['D4'].font = default_font; ws['D4'].alignment = left; ws['D4'].border = thin_border
         ws['E4'].value = '생산량(kg)'; ws['E4'].font = label_font; ws['E4'].fill = label_fill; ws['E4'].alignment = center; ws['E4'].border = thin_border
+        # 생산량 값셀 F4를 G4까지 병합하여 빈칸 제거
+        ws.merge_cells('F4:G4')
         ws['F4'].value = details.get('생산량(kg)',''); ws['F4'].font = default_font; ws['F4'].alignment = right; ws['F4'].border = thin_border
-        ws['G4'].value = '수득량'; ws['G4'].font = label_font; ws['G4'].fill = label_fill; ws['G4'].alignment = center; ws['G4'].border = thin_border
-        ws['H4'].value = details.get('수득량',''); ws['H4'].font = default_font; ws['H4'].alignment = right; ws['H4'].border = thin_border
-        ws.row_dimensions[4].height = 24
+        ws['G4'].border = thin_border
+        # 수득량을 한 칸 오른쪽으로 이동: H4 라벨, I4 값
+        ws['H4'].value = '수득량'; ws['H4'].font = label_font; ws['H4'].fill = label_fill; ws['H4'].alignment = center; ws['H4'].border = thin_border
+        ws['I4'].value = details.get('수득량',''); ws['I4'].font = default_font; ws['I4'].alignment = right; ws['I4'].border = thin_border
+        ws.row_dimensions[4].height = 20
 
         # Row 5: 빈 줄(여백)
         ws.row_dimensions[5].height = 6
 
-        # 4) 테이블 헤더 (UI 기준 A..H)
-        headers = ["Ph", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "제조공정", "공정검사"]
+        # 4) 테이블 헤더 (UI 기준 A..I) - '계량량(kg)'을 생산량 옆에 추가
+        headers = ["Ph", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "계량량(kg)", "제조공정", "공정검사"]
         header_row = 6
-        ws.row_dimensions[header_row].height = 28
+        ws.row_dimensions[header_row].height = 22
         for c_idx, h in enumerate(headers, 1):
             hc = ws.cell(row=header_row, column=c_idx, value=h)
             hc.font = header_font_white
@@ -336,13 +344,20 @@ def export_production_formulation_revised_to_excel(
             s = str(v).strip() if v is not None else ''
             return s.replace('Ph.', '').replace('PH', '').strip() if s else ''
 
-        # 연속 구간으로 그룹화
-        groups = []  # list of (phase, start_idx, end_idx) on items index (0-based)
+        # 연속 구간으로 그룹화: 빈 Phase는 직전의 Phase에 속하도록 처리
+        groups = []  # list of (phase_label, start_idx, end_idx) on items index (0-based)
         if items:
+            def eff_phase(i: int, last_non_empty: str | None) -> tuple[str, str | None]:
+                raw = norm_phase(items[i].get('Ph', items[i].get('Ph.', '')))
+                if raw:
+                    return raw, raw
+                return (last_non_empty or ''), last_non_empty
+
             start = 0
-            cur_ph = norm_phase(items[0].get('Ph', items[0].get('Ph.', '')))
+            last_non_empty = None
+            cur_ph, last_non_empty = eff_phase(0, last_non_empty)
             for idx in range(1, len(items)):
-                ph = norm_phase(items[idx].get('Ph', items[idx].get('Ph.', '')))
+                ph, last_non_empty = eff_phase(idx, last_non_empty)
                 if ph != cur_ph:
                     groups.append((cur_ph, start, idx-1))
                     start = idx; cur_ph = ph
@@ -350,7 +365,7 @@ def export_production_formulation_revised_to_excel(
 
         for ph, s_idx, e_idx in groups:
             group_len = e_idx - s_idx + 1
-            # 그룹 내 최대 줄 수(공정/검사 텍스트)로 행 높이 가늠
+            # 그룹 내 최대 텍스트를 기준으로 폭 기반 줄바꿈 적용 후 줄 수 산정
             proc_texts = []
             insp_texts = []
             for i in range(s_idx, e_idx+1):
@@ -358,8 +373,59 @@ def export_production_formulation_revised_to_excel(
                 insp_texts.append(str(items[i].get('공정검사', '') or '').replace('"','').replace("'", ''))
             group_proc = max(proc_texts, key=len) if proc_texts else ''
             group_insp = max(insp_texts, key=len) if insp_texts else ''
-            max_lines = max(group_proc.count('\n')+1 if group_proc else 1, group_insp.count('\n')+1 if group_insp else 1)
-            per_row_height = max(24, int(18 * max_lines / group_len) + 2)
+
+            # 폭 기준 줄바꿈 (엑셀 컬럼폭 G=26, H=22 → 픽셀 근사치 7px/단위, 여백 12px 제외)
+            def _wrap_by_px(txt: str, px: int) -> str:
+                if not txt:
+                    return ''
+                try:
+                    font = ImageFont.truetype("malgun.ttf", 10)
+                except Exception:
+                    try:
+                        font = ImageFont.truetype("malgunbd.ttf", 10)
+                    except Exception:
+                        font = ImageFont.load_default()
+                tmp = Image.new('RGB', (px, 20), 'white')
+                d = ImageDraw.Draw(tmp)
+                lines = []
+                for para in str(txt).splitlines() or ['']:
+                    if not para:
+                        lines.append('')
+                        continue
+                    line = ''
+                    tokens = para.split(' ')
+                    if len(tokens) == 1:
+                        for ch in para:
+                            test = line + ch
+                            w = d.textbbox((0,0), test, font=font)[2]
+                            if w <= px or not line:
+                                line = test
+                            else:
+                                lines.append(line)
+                                line = ch
+                        if line:
+                            lines.append(line)
+                    else:
+                        for tok in tokens:
+                            test = (line + (' ' if line else '') + tok)
+                            w = d.textbbox((0,0), test, font=font)[2]
+                            if w <= px or not line:
+                                line = test
+                            else:
+                                lines.append(line)
+                                line = tok
+                        if line:
+                            lines.append(line)
+                return "\n".join(lines)
+
+            g_px = max(10, int(26 * 7) - 12)
+            h_px = max(10, int(22 * 7) - 12)
+            group_proc_wrapped = _wrap_by_px(group_proc, g_px)
+            group_insp_wrapped = _wrap_by_px(group_insp, h_px)
+            wrapped_lines = max(group_proc_wrapped.count('\n')+1 if group_proc_wrapped else 1,
+                                group_insp_wrapped.count('\n')+1 if group_insp_wrapped else 1)
+            # tighter rows: minimal height 16pt and ~14pt per visual line across the group
+            per_row_height = max(16, int(14 * wrapped_lines / group_len) + 2)
 
             # 각 아이템 행 작성
             for i in range(s_idx, e_idx+1):
@@ -373,11 +439,13 @@ def export_production_formulation_revised_to_excel(
                     except Exception:
                         qty_kg = item.get('생산량(kg)')
 
+                # 계량량(kg) 값은 수기/데이터 입력 값 사용
+                weigh_kg = item.get('계량량(kg)')
                 vals = [
                     norm_phase(item.get('Ph', item.get('Ph.', ''))),
                     item.get('구분'), item.get('코드'), item.get('원료명'),
-                    item.get('함량(%)'), qty_kg,
-                    '', ''  # 병합 예정(G,H)
+                    item.get('함량(%)'), qty_kg, weigh_kg,
+                    '', ''  # 병합 예정(H,I)
                 ]
 
                 ws.row_dimensions[current].height = per_row_height
@@ -389,7 +457,7 @@ def export_production_formulation_revised_to_excel(
                         cell.alignment = center
                     elif c_idx == 4:
                         cell.alignment = left
-                    elif c_idx in (5,6):
+                    elif c_idx in (5,6,7):
                         try:
                             fval = float(val)
                             cell.value = fval
@@ -405,34 +473,34 @@ def export_production_formulation_revised_to_excel(
                         cell.alignment = left_top
                 current += 1
 
-            # A열, G열, H열을 그룹 단위로 병합 후 값/정렬 적용
+            # A열, H열, I열을 그룹 단위로 병합 후 값/정렬 적용 (제조공정/공정검사 위치 이동)
             start_row = header_row + 1 + s_idx if groups and groups[0][1] == 0 else (current - group_len)
             # start_row 계산 보정: current는 그룹 끝 다음 행이므로...
             start_row = current - group_len
             end_row = current - 1
             if group_len >= 1:
-                # A열 병합 및 표시
+                # A열(Ph) 병합: 다음 파스 전까지 항상 병합, 텍스트는 있을 때만 표시
                 if start_row < end_row:
                     ws.merge_cells(start_row=start_row, start_column=1, end_row=end_row, end_column=1)
                 a_cell = ws.cell(row=start_row, column=1, value=(ph or ''))
                 a_cell.alignment = center; a_cell.border = thin_border; a_cell.font = header_font
 
-                # G열 병합 및 텍스트
-                if start_row < end_row:
-                    ws.merge_cells(start_row=start_row, start_column=7, end_row=end_row, end_column=7)
-                g_cell = ws.cell(row=start_row, column=7, value=group_proc)
-                g_cell.alignment = left_top; g_cell.border = thin_border; g_cell.font = default_font
-
-                # H열 병합 및 텍스트
+                # H열 병합 및 텍스트 (제조공정)
                 if start_row < end_row:
                     ws.merge_cells(start_row=start_row, start_column=8, end_row=end_row, end_column=8)
-                h_cell = ws.cell(row=start_row, column=8, value=group_insp)
+                g_cell = ws.cell(row=start_row, column=8, value=group_proc_wrapped)
+                g_cell.alignment = left_top; g_cell.border = thin_border; g_cell.font = default_font
+
+                # I열 병합 및 텍스트 (공정검사)
+                if start_row < end_row:
+                    ws.merge_cells(start_row=start_row, start_column=9, end_row=end_row, end_column=9)
+                h_cell = ws.cell(row=start_row, column=9, value=group_insp_wrapped)
                 h_cell.alignment = left_top; h_cell.border = thin_border; h_cell.font = default_font
 
         # 6) 합계 행 (병합 없이 표시)
         sum_row = current
-        ws.row_dimensions[sum_row].height = 28
-        for col in range(1, 9):
+        ws.row_dimensions[sum_row].height = 22
+        for col in range(1, 10):
             c = ws.cell(row=sum_row, column=col)
             c.fill = table_header_fill
             c.border = medium_border
@@ -443,12 +511,12 @@ def export_production_formulation_revised_to_excel(
         sr.alignment = right
 
         # 7) 필터/고정
-        ws.auto_filter.ref = f"A{header_row}:H{sum_row}"
+        ws.auto_filter.ref = f"A{header_row}:I{sum_row}"
         ws.freeze_panes = f"A{header_row+1}"
 
         # 8) 컬럼 폭 고정
         fixed_widths = {
-            'A': 8, 'B': 10, 'C': 15, 'D': 45, 'E': 12, 'F': 12, 'G': 26, 'H': 22
+            'A': 8, 'B': 10, 'C': 15, 'D': 45, 'E': 12, 'F': 12, 'G': 12, 'H': 26, 'I': 22
         }
         for col, w in fixed_widths.items():
             ws.column_dimensions[col].width = w
@@ -477,7 +545,7 @@ def export_production_formulation_revised_to_excel(
                 pass
             # 인쇄 영역 지정
             try:
-                ws.print_area = f"A1:H{sum_row}"
+                ws.print_area = f"A1:I{sum_row}"
             except Exception:
                 pass
         except Exception:
@@ -627,11 +695,25 @@ def export_production_formulation_original_to_excel(
 
         # 기본정보
         details = production_data.get('details', {})
-        left_pairs = [("제품명", details.get("제품명","")), ("LAB NO.", details.get("LAB NO.","")), ("거래처", details.get("거래처","")), ("적용일", details.get("적용일","")), ("승인자", details.get("승인자",""))]
-        right_pairs = [("생산코드", details.get("생산코드","")), ("차수", details.get("차수","")), ("생산량(kg)", details.get("생산량(kg)","")), ("상태", details.get("상태","")), ("출력일시", details.get("출력일시",""))]
+        # '제조일'이 없을 경우 구버전 키인 '적용일'을 폴백으로 사용
+        manufacture_date = details.get("제조일", details.get("적용일", ""))
+        left_pairs = [
+            ("제품명", details.get("제품명", "")),
+            ("LAB NO.", details.get("LAB NO.", "")),
+            ("거래처", details.get("거래처", "")),
+            ("제조일", manufacture_date),
+            ("승인자", details.get("승인자", "")),
+        ]
+        right_pairs = [
+            ("생산코드", details.get("생산코드", "")),
+            ("차수", details.get("차수", "")),
+            ("생산량(kg)", details.get("생산량(kg)", "")),
+            ("상태", details.get("상태", "")),
+            ("출력일시", details.get("출력일시", "")),
+        ]
         r = 4
         for i in range(max(len(left_pairs), len(right_pairs))):
-            ws.row_dimensions[r].height = 28
+            ws.row_dimensions[r].height = 20
             if i < len(left_pairs):
                 label, value = left_pairs[i]
                 lc = ws.cell(row=r, column=1, value=label)
@@ -655,7 +737,7 @@ def export_production_formulation_original_to_excel(
 
         # 비고
         if details.get('비고'):
-            ws.row_dimensions[r].height = 45
+            ws.row_dimensions[r].height = 24
             nl = ws.cell(row=r, column=1, value="비고\nNote")
             nl.font = label_font; nl.fill = label_fill; nl.alignment = center; nl.border = thin_border
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=8)
@@ -669,7 +751,7 @@ def export_production_formulation_original_to_excel(
         # 테이블 헤더
         headers = ["Ph.", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "계량량(kg)", "제조공정", "공정검사"]
         header_row = r
-        ws.row_dimensions[header_row].height = 32
+        ws.row_dimensions[header_row].height = 22
         for idx, h in enumerate(headers, 1):
             hc = ws.cell(row=header_row, column=idx, value=h)
             hc.font = header_font_white; hc.fill = table_header_fill; hc.alignment = center; hc.border = medium_border
@@ -728,7 +810,7 @@ def export_production_formulation_original_to_excel(
                         cleaned = str(val).replace('"','').replace("'", '')
                         cell.value = cleaned
                     cell.alignment = left_top
-            ws.row_dimensions[current].height = 26
+            ws.row_dimensions[current].height = 16
             current += 1
 
         if current_phase is not None and phase_start_row is not None:
@@ -736,7 +818,7 @@ def export_production_formulation_original_to_excel(
 
         for phase_val, start_row, end_row, max_lines in phase_merge_info:
             num_rows = end_row - start_row + 1
-            total_h = max(24, max_lines * 18 + 6)
+            total_h = max(16, max_lines * 14 + 2)
             row_h = total_h / num_rows
             for rr in range(start_row, end_row + 1): ws.row_dimensions[rr].height = row_h
             if start_row < end_row:
@@ -751,7 +833,7 @@ def export_production_formulation_original_to_excel(
 
         # 합계 행
         sum_row = current
-        ws.row_dimensions[sum_row].height = 32
+        ws.row_dimensions[sum_row].height = 22
         ws.merge_cells(start_row=sum_row, start_column=1, end_row=sum_row, end_column=4)
         sl = ws.cell(row=sum_row, column=1, value="합계 (Total)")
         sl.font = header_font_white; sl.fill = table_header_fill; sl.alignment = center; sl.border = medium_border
