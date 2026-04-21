@@ -78,197 +78,194 @@ class DBManager:
         db_dir = os.path.join(self.application_path, self.get_db_relative_path())
         return os.path.join(db_dir, "cosmetic.db")
 
-    def cleanup_db_files(self):
-        """WAL, SHM, 백업 파일들을 정리합니다."""
-        if not self.db_path:
-            return
-            
-        print("\n=== DB 관련 파일 정리 시작 ===")
-        for ext in ['-wal', '-shm', '.tmp', '.bak']:
-            file_path = f"{self.db_path}{ext}"
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                    print(f"  * 파일 정리됨: {os.path.basename(file_path)}")
-                except Exception as e:
-                    print(f"  * [경고] 파일 정리 실패: {os.path.basename(file_path)} ({e})")
-        print("=== DB 파일 정리 완료 ===\n")
-
     def setup_database(self, application_path: str, config_path: str, on_initial_setup=None):
         """데이터베이스를 설정하고 초기화합니다."""
         print(f"\n{'='*50}\n[DB 설정 시작]")
         
-        # 경로 설정
+        if self.engine:
+            print("  * 기존 DB 엔진 정리")
+            self.dispose_engine()
+
+        print("\n=== DB 초기화 단계 시작 ===")
         self.application_path = application_path
         self.config_path = config_path
-        
-        # 설정 파일 읽기
-        config = configparser.ConfigParser()
-        config.read(config_path, encoding='utf-8')
-        
-        # 1. 기본 경로 설정
-        local_db_path = os.path.join(application_path, self.get_db_relative_path(), "cosmetic.db")
-        os.makedirs(os.path.dirname(local_db_path), exist_ok=True)
-        shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
-        # Normalize shared_db_path: config stores only the folder. If a full file
-        # path was stored, handle gracefully, but prefer folder paths.
-        def resolve_shared_file(path):
-            if not path:
-                return None
-            path = path.strip()
-            # if user or older code stored full file path, accept it
-            if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
-                return path
-            # otherwise treat stored value as a directory
-            return os.path.join(path, 'cosmetic.db')
-
-        shared_db_file = resolve_shared_file(shared_db_path)
-        print(f"[INFO] 로컬 DB 경로: {local_db_path}")
-        print(f"[INFO] 공유 DB (설정) 폴더/파일: {shared_db_path} -> {shared_db_file}")
-        
-        # 2. 공유 DB 경로 설정 (첫 실행시)
-        # If nothing is configured and there's no local DB, set the default to the
-        # local DB's directory (store folder only).
-        if not shared_db_path and not os.path.exists(local_db_path):
-            if not config.has_section('Paths'):
-                config.add_section('Paths')
+            # 1. 설정 파일 로드
+            config = configparser.ConfigParser()
+            config.read(config_path, encoding='utf-8')
+            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+            
+            # 2. DB 경로 설정
+            db_path = self.get_local_db_path()
+            print(f"  - DB 경로: {db_path}")
+            
+            # 3. data 디렉토리 생성
+            db_dir = os.path.dirname(db_path)
             try:
-                config.set('Paths', 'shared_db_path', os.path.dirname(local_db_path))
-                with open(config_path, 'w', encoding='utf-8') as configfile:
-                    config.write(configfile)
-                print(f"[INFO] 초기 DB 폴더 경로 설정: {os.path.dirname(local_db_path)}")
-                shared_db_path = os.path.dirname(local_db_path)
-                shared_db_file = local_db_path
+                if not os.path.exists(db_dir):
+                    print(f"  - 데이터 디렉토리 생성: {db_dir}")
+                    os.makedirs(db_dir)
+                else:
+                    print(f"  - 데이터 디렉토리 확인: {db_dir} (이미 존재)")
             except Exception as e:
-                print(f"[경고] 초기 DB 경로 저장 실패: {e}")
-        
-        # 3. 공유 DB 사용 시도
-        # Try using shared DB file if it exists (shared_db_file resolves folder->file)
-        if shared_db_file and os.path.exists(shared_db_file):
-            try:
-                print(f"[INFO] 공유 DB 파일 확인: {shared_db_file}")
-                self.db_path = shared_db_file
+                raise RuntimeError(f"데이터 디렉토리 생성 실패: {e}")
 
-                # 공유 DB 연결 테스트
-                test_engine = create_engine(
-                    f'sqlite:///{shared_db_file}',
-                    connect_args={'check_same_thread': False}
-                )
-                with test_engine.connect() as conn:
-                    # 스키마 버전 확인
-                    try:
-                        result = conn.execute(text("SELECT version FROM _schema_version")).scalar()
-                        if result == SCHEMA_VERSION:
-                            print(f"[INFO] 스키마 버전 일치: v{result}")
-                            self.engine = test_engine
-                            self.Session = sessionmaker(bind=self.engine)
-                            print(f"[INFO] 공유 DB 연결 성공")
-                            self._save_init_state(True)
-                            return
-                        else:
-                            print(f"[경고] 공유 DB 스키마 버전 불일치 (발견: v{result}, 필요: v{SCHEMA_VERSION})")
-                            test_engine.dispose()
-                    except Exception as schema_e:
-                        print(f"[경고] 스키마 버전 확인 실패: {schema_e}")
-                        test_engine.dispose()
-            except Exception as e:
-                print(f"[경고] 공유 DB 연결 실패: {e}")
-                if 'test_engine' in locals():
-                    test_engine.dispose()
-        
-        # 4. 로컬 DB 사용
-        print("\n=== 로컬 DB 설정 시작 ===")
+            # 4. DB 파일 강제 재생성
+            print("  * DB 파일 초기화 시작")
+            if not self._create_new_db_file(db_path):
+                raise RuntimeError("새 DB 파일 생성 실패")
+
+            # 5. 공유 DB에서 복사 시도
+            if shared_db_path and os.path.exists(shared_db_path) and is_new_db:
+                print(f"  - 공유 DB에서 복사 시도: {shared_db_path}")
+                try:
+                    shutil.copy(shared_db_path, db_path)
+                    is_new_db = False
+                    print("  - 공유 DB 복사 완료")
+                except Exception as e:
+                    print(f"  - 공유 DB 복사 실패: {e}")
+        except Exception as e:
+            print(f"[오류] DB 설정 준비 단계 실패: {e}")
+            raise
+
+        print("\n=== DB 파일 초기화 시작 ===")
+        # 기존 DB 파일 삭제 (강제 재생성)
         try:
-            # 1. 초기화
-            if self.engine:
-                print("  * 기존 DB 엔진 정리")
-                self.dispose_engine()
+            if os.path.exists(db_path):
+                os.remove(db_path)
+                print("  * 기존 DB 파일 삭제됨")
+        except Exception as e:
+            print(f"  * 기존 DB 파일 삭제 실패: {e}")
+
+        # 6. DB 엔진 설정
+        print("  - 새 DB 파일 생성 시작")
+        try:
+            # DB 파일 존재 여부 확인
+            if os.path.exists(db_path):
+                print(f"    * 기존 DB 파일 크기: {os.path.getsize(db_path)} bytes")
+                if os.path.getsize(db_path) == 0:
+                    print("    * 기존 파일이 빈 파일임. 삭제 후 재생성")
+                    os.remove(db_path)
             
-            self.db_path = local_db_path
-            print(f"  * DB 경로: {self.db_path}")
+            # DB 파일이 없으면 SQLite 초기화 명령으로 생성
+            if not os.path.exists(db_path):
+                print("    - 새 DB 파일 생성 시작")
+                import sqlite3
+                conn = sqlite3.connect(db_path)
+                conn.close()
+                print(f"    - SQLite로 새 DB 파일 생성됨: {db_path}")
+                if os.path.exists(db_path):
+                    print(f"    * 생성된 DB 파일 크기: {os.path.getsize(db_path)} bytes")
+                else:
+                    raise RuntimeError("DB 파일이 생성되지 않음")
+        except Exception as e:
+            print(f"    - [오류] DB 파일 생성 실패: {e}")
+            raise RuntimeError(f"DB 파일 생성 실패: {e}")
+
+        print("  - DB 파일 권한 확인")
+        try:
+            # 파일 권한 확인
+                if os.path.exists(db_path):
+                    print(f"    * 읽기 가능: {os.access(db_path, os.R_OK)}")
+                    print(f"    * 쓰기 가능: {os.access(db_path, os.W_OK)}")
+            except Exception as e:
+                print(f"    - [경고] 파일 권한 확인 실패: {e}")
+
+            print("  - DB 엔진 초기화 시작")
+            db_url = f'sqlite:///{db_path}'
+            print(f"    * SQLAlchemy URL: {db_url}")
             
-            # 2. DB 파일 처리
-            is_new_db = not os.path.exists(self.db_path)
-            self.cleanup_db_files()
-            
-            # 3. DB 파일 생성
-            if not self._create_new_db_file(self.db_path):
-                raise RuntimeError("DB 파일 생성 실패")
-            
-            # 4. DB 엔진 초기화
-            print("\n=== DB 엔진 초기화 ===")
             try:
+                print("    * Engine 생성 시작")
                 self.engine = create_engine(
-                    f'sqlite:///{self.db_path}',
-                    connect_args={'check_same_thread': False}
+                    db_url,
+                    connect_args={'check_same_thread': False},
+                    echo=True  # SQL 로깅 활성화
                 )
                 
+                print("    * PRAGMA 설정 시작")
                 @event.listens_for(self.engine, "connect")
                 def set_sqlite_pragma(dbapi_connection, connection_record):
-                    cursor = dbapi_connection.cursor()
-                    cursor.execute("PRAGMA foreign_keys=ON")
-                    cursor.execute("PRAGMA journal_mode=WAL")
-                    cursor.close()
-                
-                # 연결 테스트
+                    try:
+                        cursor = dbapi_connection.cursor()
+                        cursor.execute("PRAGMA foreign_keys=ON")
+                        cursor.execute("PRAGMA journal_mode=WAL")
+                        cursor.close()
+                        print("    * PRAGMA 설정 완료")
+                    except Exception as e:
+                        print(f"    * [경고] PRAGMA 설정 실패: {e}")
+
+                # 빠른 연결 테스트
                 with self.engine.connect() as conn:
                     conn.execute(text("SELECT sqlite_version()"))
-                print("  * 엔진 생성 및 연결 테스트 완료")
+                print("  - SQLAlchemy 엔진 생성 및 연결 테스트 완료")
                 
             except Exception as e:
+                print(f"  - [오류] DB 엔진 초기화 실패: {e}")
+                if self.engine:
+                    try:
+                        self.engine.dispose()
+                    except:
+                        pass
+                    self.engine = None
+                raise RuntimeError(f"DB 엔진 초기화 실패: {e}")
+
+            print("  - DB 스키마 생성 시작")
+            try:
+                print("    * 마이그레이션 체크 시작")
+                self._check_and_run_migrations()
+                print("    * 마이그레이션 체크 완료")
+                
+                print("    * 테이블 생성 시작")
+                Base.metadata.create_all(self.engine)
+                
+                # 테이블 생성 확인
+                inspector = inspect(self.engine)
+                tables = inspector.get_table_names()
+                print(f"    * 생성된 테이블 목록: {', '.join(tables)}")
+                print("  - DB 스키마 생성 완료")
+                
+            except Exception as e:
+                print(f"  - [오류] DB 스키마 생성 실패: {e}")
                 if self.engine:
                     self.engine.dispose()
                     self.engine = None
-                raise RuntimeError(f"DB 엔진 초기화 실패: {e}")
-            
-            # 5. 스키마 생성 및 검증
-            print("\n=== 스키마 초기화 ===")
+                raise RuntimeError(f"DB 스키마 생성 실패: {str(e)}\n상세 오류: {repr(e)}")
+
             try:
-                # 마이그레이션 실행
-                self._check_and_run_migrations()
-                print("  * 마이그레이션 완료")
-                
-                # 테이블 생성
-                Base.metadata.create_all(self.engine)
-                inspector = inspect(self.engine)
-                tables = inspector.get_table_names()
-                print(f"  * 테이블 생성 완료: {', '.join(tables)}")
-                
-                # 세션 팩토리 생성
+                print("  - DB 연결 테스트 시작")
+                with self.engine.connect() as connection:
+                    connection.execute(text("SELECT 1"))
+                print("  - DB 연결 테스트 성공")
+
+                print("  - 세션 팩토리 생성 시작")
                 self.Session = sessionmaker(bind=self.engine)
+                
+                print("  - 세션 테스트 시작")
                 with self.Session() as test_session:
                     test_session.execute(text("SELECT 1"))
-                print("  * 세션 팩토리 생성 및 테스트 완료")
-                
+                print("  - 세션 팩토리 생성 및 테스트 완료")
             except Exception as e:
+                print(f"  - [오류] DB 연결/세션 테스트 실패: {e}")
                 if self.engine:
                     self.engine.dispose()
                     self.engine = None
                 self.Session = None
-                raise RuntimeError(f"스키마 초기화 실패: {e}")
-            
-            # 6. 초기 설정
+                raise RuntimeError(f"DB 연결/세션 테스트 실패: {e}")
+
             if is_new_db and on_initial_setup:
-                print("\n=== 초기 설정 ===")
-                try:
-                    on_initial_setup()
-                    print("  * 초기 설정 완료")
-                except Exception as e:
-                    print(f"  * [경고] 초기 설정 실패 (무시): {e}")
-            
-            self._save_init_state(True)
-            print(f"\n[DB 설정 완료]\n{'='*50}\n")
+                print("  - 초기 설정 프로세스 시작")
+                on_initial_setup()
+                print("  - 초기 설정 완료")
+
+            print(f"[DB 설정 완료]\n{'='*50}\n")
             
         except Exception as e:
-            print(f"\n[치명적 오류] DB 설정 실패:")
-            print(f"  {str(e)}")
-            print(f"  {repr(e)}")
+            print(f"[치명적 오류] DB 설정 실패: {e}")
             if self.engine:
                 self.engine.dispose()
                 self.engine = None
-            self.Session = None
-            raise RuntimeError(f"DB 설정 실패: {e}")
+            raise RuntimeError(f"데이터베이스 설정 실패: {e}")
 
     def get_session(self):
         if not self.Session:
@@ -276,26 +273,11 @@ class DBManager:
         return self.Session()
 
     def dispose_engine(self):
-        """엔진을 정리하고 관련 파일들을 정리합니다."""
         if self.engine:
-            try:
-                # WAL 모드 비활성화
-                with self.engine.connect() as conn:
-                    conn.execute(text("PRAGMA journal_mode=DELETE"))
-                    
-                # 엔진 정리
-                self.engine.dispose()
-                self.engine = None
-                self.Session = None
-                
-                # 파일 정리
-                self.cleanup_db_files()
-                
-                print("데이터베이스 엔진 연결이 해제되었습니다.")
-            except Exception as e:
-                print(f"[경고] 엔진 정리 중 오류 발생: {e}")
-                self.engine = None
-                self.Session = None
+            self.engine.dispose()
+            self.engine = None
+            self.Session = None
+            print("데이터베이스 엔진 연결이 해제되었습니다.")
 
     def _run_migrations(self):
         print("데이터베이스 스키마 확인 및 업데이트 시작...")
@@ -335,109 +317,30 @@ class DBManager:
             except Exception as e:
                 print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
 
-    def _save_init_state(self, state=True):
-        """DB 초기화 상태를 config.ini에 저장"""
-        if not self.config_path:
-            return
-            
+    def create_default_admin(self):
+        session = self.get_session()
         try:
-            config = configparser.ConfigParser()
-            config.read(self.config_path, encoding='utf-8')
-            
-            if not config.has_section('Database'):
-                config.add_section('Database')
-            
-            config.set('Database', 'initialized', str(state))
-            
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                config.write(f)
-                
-            print(f"[DEBUG] DB 초기화 상태 저장: {state}")
-        except Exception as e:
-            print(f"[ERROR] 초기화 상태 저장 실패: {e}")
-
-    def _check_init_state(self):
-        """DB 초기화 상태 확인"""
-        if not self.config_path:
-            return False
-            
-        try:
-            config = configparser.ConfigParser()
-            config.read(self.config_path, encoding='utf-8')
-            return config.getboolean('Database', 'initialized', fallback=False)
-        except Exception as e:
-            print(f"[ERROR] 초기화 상태 확인 실패: {e}")
-            return False
+            admin_user = session.query(User).filter_by(username='admin').first()
+            if not admin_user:
+                hashed_password = bcrypt.hashpw('admin1234!'.encode('utf-8'), bcrypt.gensalt())
+                new_admin = User(username='admin', password=hashed_password.decode('utf-8'), is_admin=True)
+                session.add(new_admin)
+                session.commit()
+                print("기본 관리자 계정(admin)이 생성되었습니다.")
+        finally:
+            session.close()
 
     def has_users(self) -> bool:
-        if self._check_init_state():
-            print("[DEBUG] 이미 초기화된 DB")
-            return True
-            
         session = self.get_session()
         try:
-            count = session.query(User).count()
-            print(f"[DEBUG] 전체 사용자 수: {count}")
-            if count > 0:
-                self._save_init_state(True)
-            return count > 0
-        except Exception as e:
-            print(f"[ERROR] has_users 확인 중 오류: {e}")
-            return False
+            return session.query(User).count() > 0
         finally:
             session.close()
-
-    def create_default_admin(self):
-        print("\n=== 기본 관리자 계정 생성 시작 ===")
-        session = self.get_session()
-        try:
-            # 1. 기존 admin 계정 확인
-            admin_user = session.query(User).filter_by(username='admin').first()
-            print(f"  * 기존 admin 계정 존재 여부: {admin_user is not None}")
-            
-            if not admin_user:
-                # 2. 새 admin 계정 생성
-                try:
-                    hashed_password = bcrypt.hashpw('admin1234!'.encode('utf-8'), bcrypt.gensalt())
-                    new_admin = User(
-                        username='admin',
-                        password=hashed_password.decode('utf-8'),
-                        is_admin=True,
-                        position='시스템 관리자'
-                    )
-                    session.add(new_admin)
-                    session.commit()
-                    print("  * 기본 관리자 계정(admin) 생성 성공")
-                    
-                    # 3. 생성 확인
-                    created_admin = session.query(User).filter_by(username='admin').first()
-                    if created_admin:
-                        print(f"  * 생성된 계정 확인: {created_admin.username} (관리자: {created_admin.is_admin})")
-                    else:
-                        print("  * [경고] 계정이 생성되었으나 확인할 수 없음")
-                        
-                except Exception as e:
-                    print(f"  * [오류] 관리자 계정 생성 실패: {e}")
-                    session.rollback()
-                    raise
-            else:
-                print("  * 기존 admin 계정이 이미 존재함")
-        except Exception as e:
-            print(f"  * [치명적 오류] 관리자 계정 처리 실패: {e}")
-            raise
-        finally:
-            session.close()
-            print("=== 기본 관리자 계정 생성 완료 ===\n")
 
     def get_admin_user_count(self) -> int:
         session = self.get_session()
         try:
-            count = session.query(User).filter_by(is_admin=True).count()
-            print(f"[DEBUG] 관리자 사용자 수: {count}")
-            return count
-        except Exception as e:
-            print(f"[ERROR] 관리자 수 확인 중 오류: {e}")
-            return 0
+            return session.query(User).filter_by(is_admin=True).count()
         finally:
             session.close()
 

@@ -22,6 +22,38 @@ def resource_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
+
+# --- build/debug helper: print where runtime will look for bundled data ---
+try:
+    import customtkinter as _ctk
+    print(f"[BUILD-DEBUG] customtkinter.__file__ = {_ctk.__file__}")
+except Exception as _e:
+    print(f"[BUILD-DEBUG] customtkinter import failed: {_e}")
+
+import pprint
+print(f"[BUILD-DEBUG] sys._MEIPASS = {getattr(sys, '_MEIPASS', None)}")
+
+_mp = getattr(sys, '_MEIPASS', None)
+if _mp:
+    try:
+        sample = os.listdir(_mp)[:80]
+        print("[BUILD-DEBUG] sample _MEIPASS contents:")
+        pprint.pprint(sample)
+    except Exception as _e:
+        print(f"[BUILD-DEBUG] failed listing _MEIPASS: {_e}")
+
+try:
+    # also print where customtkinter assets should be found
+    import customtkinter
+    ctk_path = os.path.join(os.path.dirname(customtkinter.__file__), 'assets', 'themes')
+    print(f"[BUILD-DEBUG] expected customtkinter themes path: {ctk_path}")
+    try:
+        print("[BUILD-DEBUG] themes folder sample:", os.listdir(ctk_path)[:50])
+    except Exception as _e:
+        print(f"[BUILD-DEBUG] cannot list themes folder: {_e}")
+except Exception:
+    pass
+
 if getattr(sys, 'frozen', False):
     # PyInstaller로 빌드된 경우, .exe 파일이 있는 폴더
     application_path = os.path.dirname(sys.executable)
@@ -33,6 +65,7 @@ else:
 CONFIG_FILE_PATH = resource_path('config.ini')
 
 
+from sqlalchemy import text
 from database.db_manager import db_manager
 from modules.translation import get_texts
 import modules.translation as _translation
@@ -89,10 +122,39 @@ class App(ctk.CTk):
         """최초 실행 시 관리자 계정 생성을 위한 회원가입 창을 띄웁니다."""
         from modules.signup import SignupWindow
         # on_success 콜백으로 on_login_success를 전달하여 가입 후 바로 로그인되도록 함
-        signup_win = SignupWindow(self, is_initial_setup=True, on_success=self.on_login_success)
+        signup_win = SignupWindow(self, is_initial_setup=True, on_success=self.on_first_login_success)
         signup_win.deiconify()
         signup_win.lift()
         signup_win.focus_force()
+
+    def on_first_login_success(self, user):
+        """첫 로그인 성공 시 공유 DB 설정을 안내합니다."""
+        print(f"{datetime.now()}: 첫 로그인 성공")
+        
+        # 1. 현재 DB 경로를 config.ini에 저장
+        config = configparser.ConfigParser()
+        config.read(CONFIG_FILE_PATH, encoding='utf-8')
+        
+        current_db_path = os.path.join(application_path, 
+                                     db_manager.get_db_relative_path(),
+                                     "cosmetic.db")
+        
+        if not config.has_section('Paths'):
+            config.add_section('Paths')
+            
+        config.set('Paths', 'shared_db_path', current_db_path)
+        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
+            config.write(configfile)
+            
+        # 2. 공유 DB 설정 안내
+        messagebox.showinfo("초기 설정 안내",
+            "프로그램 초기 설정이 완료되었습니다.\n\n"
+            "다른 사용자와 데이터를 공유하려면 설정 메뉴에서\n"
+            "공유 DB 경로를 네트워크 드라이브나 공유 폴더로 변경해주세요.",
+            parent=self)
+            
+        # 3. 일반적인 로그인 성공 처리
+        self.on_login_success(user)
 
     def on_initial_setup(self):
         """DB가 처음 생성될 때 호출되는 콜백. 기본 admin 계정을 생성합니다."""
@@ -165,18 +227,65 @@ class App(ctk.CTk):
 
         splash.update()
 
+        def init_database():
+            try:
+                print("\n=== 데이터베이스 초기화 시작 ===")
+                db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)
+                print("=== 데이터베이스 초기화 완료 ===\n")
+                return True
+            except Exception as e:
+                print(f"데이터베이스 초기화 실패: {e}")
+                return False
+
         tasks = [
             (task_descriptions[0], self.load_app_settings),
-            (task_descriptions[1], lambda: db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)),
+            (task_descriptions[1], init_database),
         ]
         
         total_tasks = len(tasks)
 
         def on_load_complete():
-            if not db_manager.has_users():
-                self.show_initial_signup_window()
-            else:
-                self.show_login_window()
+            try:
+                # 데이터베이스 연결 테스트
+                print("\n=== DB 최종 연결 테스트 시작 ===")
+                
+                if not db_manager.Session:
+                    raise RuntimeError("Session이 생성되지 않았습니다.")
+                print("  - Session 객체 확인 완료")
+                    
+                with db_manager.get_session() as session:
+                    result = session.execute(text("SELECT 1"))
+                    print("  - 연결 테스트 성공")
+                    result.fetchall()  # 결과 소비
+                print("=== DB 최종 연결 테스트 완료 ===\n")
+                
+                if not db_manager.has_users():
+                    self.show_initial_signup_window()
+                else:
+                    self.show_login_window()
+                    
+            except Exception as e:
+                error_msg = f"데이터베이스 초기화 확인 실패:\n{str(e)}"
+                print(f"\n[오류] {error_msg}")
+                
+                # DB 엔진과 세션 상태 확인
+                print("\nDB 상태 진단:")
+                print(f"  - Session 객체 존재: {db_manager.Session is not None}")
+                print(f"  - Engine 객체 존재: {db_manager.engine is not None}")
+                
+                try:
+                    if db_manager.engine:
+                        print("  - Engine 연결 테스트 시도...")
+                        with db_manager.engine.connect() as conn:
+                            conn.execute(text("SELECT 1"))
+                            print("    * Engine 직접 연결 성공")
+                    else:
+                        print("    * Engine이 없어 연결 테스트 불가")
+                except Exception as e2:
+                    print(f"    * Engine 연결 실패: {e2}")
+                
+                messagebox.showerror("초기화 오류", error_msg)
+                self.destroy()
 
         def run_tasks(task_index=0):
             if task_index < total_tasks:
@@ -187,7 +296,14 @@ class App(ctk.CTk):
                 progress_label.configure(text=f"{description}")
                 splash.update_idletasks()
 
-                task_func()
+                try:
+                    task_func()
+                    print(f"Task completed successfully: {description}")
+                except Exception as e:
+                    print(f"Error in task '{description}': {e}")
+                    messagebox.showerror("초기화 오류", 
+                                       f"다음 작업 중 오류가 발생했습니다:\n{description}\n\n{str(e)}")
+                    return
                 
                 steps = 10
                 for i in range(steps + 1):
@@ -202,7 +318,22 @@ class App(ctk.CTk):
                 progress_label.configure(text=done_text)
                 progress_bar.set(1)
                 splash.update_idletasks()
-                self.after(300, lambda: (splash.destroy(), on_load_complete()))
+                
+                try:
+                    # DB 연결이 활성 상태인지 한 번 더 확인
+                    if not db_manager.Session:
+                        raise RuntimeError("데이터베이스 연결이 없습니다.")
+                        
+                    with db_manager.get_session() as session:
+                        session.execute(text("SELECT 1"))
+                        print("최종 DB 연결 테스트 성공")
+                    
+                    self.after(300, lambda: (splash.destroy(), on_load_complete()))
+                except Exception as e:
+                    error_msg = f"최종 연결 테스트 실패:\n{str(e)}"
+                    print(error_msg)
+                    messagebox.showerror("데이터베이스 오류", error_msg)
+                    self.destroy()
 
         self.after(100, run_tasks)
 
@@ -1124,9 +1255,21 @@ class App(ctk.CTk):
         """프로그램을 재시작합니다."""
         try:
             print("프로그램 재시작...")
-            self.destroy()
-            time.sleep(1) # 1초 딜레이 추가
+            # 먼저 윈도우/GUI 리소스를 정리
+            try:
+                self.destroy()
+            except Exception:
+                pass
+
+            # 새 프로세스를 백그라운드로 시작
             subprocess.Popen([sys.executable] + sys.argv)
+
+            # 즉시 현재 프로세스를 종료하여 PyInstaller가
+            # 임시 디렉터리(_MEIPASS)를 정리할 수 있도록 합니다.
+            # os._exit(0)은 인터프리터 종료 시 cleanup 핸들러를
+            # 우회하므로 안전하게 프로세스를 종료합니다.
+            import os as _os
+            _os._exit(0)
         except Exception as e:
             print(f"프로그램 재시작 실패: {e}")
 
