@@ -1,6 +1,6 @@
 # database/models.py
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey, Text, DateTime, or_
+from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey, Text, DateTime, or_, Date
 from sqlalchemy.orm import relationship, declarative_base
 from datetime import datetime
 
@@ -64,6 +64,8 @@ class Material(Base):
     id = Column(Integer, primary_key=True)
     code = Column(String(50), unique=True, nullable=False)
     name = Column(String(255), nullable=False)
+    name_en = Column(String(255)) # 영문원료명 추가
+    origin = Column(String(100)) # 원산지 추가
     unit_price = Column(Float, default=0.0)
     package_unit = Column(String(50))
     
@@ -142,6 +144,7 @@ class Formulation(Base):
     change_log = Column(Text, nullable=True) # 변경 이력을 저장할 컬럼
 
     sample_sent_count = Column(Integer, default=0) # 샘플 발송 횟수
+    sample_delivery_date = Column(Date) # 샘플 발송일
     # 구성 원료 관계
     # cascade="all, delete-orphan": Formulation이 삭제될 때 관련된 모든 FormulationItem도 함께 삭제되도록 설정합니다.
     # passive_deletes=True: 데이터베이스의 ON DELETE CASCADE 기능을 사용하도록 SQLAlchemy에 지시합니다.

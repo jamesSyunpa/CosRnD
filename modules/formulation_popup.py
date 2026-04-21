@@ -517,10 +517,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
             # --- 데이터 매핑 ---
             # 중복 검사 전에 객체에 데이터를 먼저 채워 autoflush 오류를 방지합니다.
             form.experiment_name = exp_name
-            try:
-                form.experiment_date = self.exp_date_entry.get()
-            except AttributeError:
-                form.experiment_date = None
+            # .get()은 문자열을 반환하므로, 날짜 객체를 반환하는 .get_date()를 사용합니다.
+            form.experiment_date = self.exp_date_entry.get_date()
 
             form.manager_name = self.exp_manager_entry.get().strip() or None
             form.manager_code = self.exp_code_entry.get().strip().upper() or None

@@ -26,6 +26,9 @@ a = Analysis(
         'modules.login',
         'modules.home_frame',
         'modules.document_management',
+        'modules.comparison_popup',
+        'modules.folder_history_popup',
+        'modules.history_popup',
         'modules.settings_management',
         'modules.data_management',
         'modules.excel_handler',
@@ -33,10 +36,10 @@ a = Analysis(
         'modules.material_management',
         'modules.signup',
         'modules.ui_components',
+        'modules.quality_management',
         'database',
         'database.db_manager',
         'database.models',  # 이게 핵심!
-        'excel_handler',
         'utils.address_search',
         'utils.autocomplete',
     ],
@@ -60,32 +63,6 @@ if os.path.exists('icon.ico'):
     icon_path = os.path.abspath('icon.ico')
     print("✓ icon.ico 발견됨")
 
-# 3. modules 폴더 전체 추가
-if os.path.exists('modules'):
-    for root, dirs, files in os.walk('modules'):
-        for file in files:
-            if file.endswith('.py'):
-                src = os.path.join(root, file)
-                dest = os.path.join(root, file)
-                a.datas.append((dest, src, 'DATA'))
-    print("✓ modules 폴더 추가됨")
-
-# 4. database 폴더 전체 추가 (models.py 포함!)
-if os.path.exists('database'):
-    for root, dirs, files in os.walk('database'):
-        for file in files:
-            if file.endswith('.py'):
-                src = os.path.join(root, file)
-                dest = os.path.join(root, file)
-                a.datas.append((dest, src, 'DATA'))
-                print(f"  - {file} 추가됨")
-    print("✓ database 폴더 추가됨")
-
-# 5. excel_handler.py
-if os.path.exists('excel_handler.py'):
-    a.datas.append(('excel_handler.py', 'excel_handler.py', 'DATA'))
-    print("✓ excel_handler.py 추가됨")
-
 # 6. customtkinter 데이터 파일
 try:
     import customtkinter
@@ -107,14 +84,8 @@ except Exception as e:
 try:
     import tkcalendar
     tkcalendar_path = os.path.dirname(tkcalendar.__file__)
-    tkcalendar_locales = os.path.join(tkcalendar_path, 'locales')
-    
-    if os.path.exists(tkcalendar_locales):
-        locale_files = glob(os.path.join(tkcalendar_locales, '*.py'))
-        for locale_file in locale_files:
-            dest = os.path.join('tkcalendar', 'locales', os.path.basename(locale_file))
-            a.datas.append((dest, locale_file, 'DATA'))
-        print(f"✓ tkcalendar 로케일 {len(locale_files)}개 추가됨")
+    a.datas += collect_data_files('tkcalendar', include_py_files=True)
+    print("✓ tkcalendar 로케일 추가됨")
 except Exception as e:
     print(f"⚠ tkcalendar 수집 실패: {e}")
 

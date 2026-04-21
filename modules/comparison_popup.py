@@ -121,49 +121,55 @@ class FormulationComparisonPopup(ctk.CTkToplevel):
         self.label1.configure(text=f"이전 버전: {self.formulation1.lab_no or self.formulation1.id}")
         self.label2.configure(text=f"최신 버전: {self.formulation2.lab_no or self.formulation2.id}")
 
-        # 처방 아이템을 딕셔너리로 변환 (key: material_code, value: item)
-        items1 = {item.material_code: item for item in self.formulation1.items if item.material_code != "---"}
-        items2 = {item.material_code: item for item in self.formulation2.items if item.material_code != "---"}
+        # 처방 아이템을 순서(order)를 키로 하는 딕셔너리로 변환
+        items1 = {item.order: item for item in sorted(self.formulation1.items, key=lambda x: x.order)}
+        items2 = {item.order: item for item in sorted(self.formulation2.items, key=lambda x: x.order)}
 
         # 변경된 항목만 수집할 리스트
         changed_items_for_reason = []
 
-        all_codes = sorted(list(set(items1.keys()) | set(items2.keys())))
+        max_order = max(list(items1.keys()) + list(items2.keys()) + [0])
 
-        for code in all_codes:
-            item1 = items1.get(code)
-            item2 = items2.get(code)
+        for order in range(max_order + 1):
+            item1 = items1.get(order)
+            item2 = items2.get(order)
 
             # Treeview에 데이터 삽입 및 태그 적용
             if item1 and not item2: # 삭제됨
-                changed_items_for_reason.append({'code': code, 'type': '삭제됨', 'name': item1.material_name})
+                changed_items_for_reason.append({'code': item1.material_code, 'type': '삭제됨', 'name': item1.material_name})
                 self._insert_item(self.tree1, item1, "removed")
                 self._insert_placeholder(self.tree2, "removed")
             elif not item1 and item2: # 추가됨
-                changed_items_for_reason.append({'code': code, 'type': '추가됨', 'name': item2.material_name})
+                changed_items_for_reason.append({'code': item2.material_code, 'type': '추가됨', 'name': item2.material_name})
                 self._insert_placeholder(self.tree1, "added")
                 self._insert_item(self.tree2, item2, "added")
             elif item1 and item2: # 둘 다 존재 -> 내용 비교
-                diff = item2.ratio - item1.ratio
-                if abs(diff) > 1e-9: # 함량 변경
-                    changed_items_for_reason.append({'code': code, 'type': '함량 변경', 'name': item1.material_name})
+                # 코드 또는 함량이 변경된 경우
+                ratio1 = item1.ratio or 0.0
+                ratio2 = item2.ratio or 0.0
+                diff = ratio2 - ratio1
+                
+                if item1.material_code != item2.material_code or abs(diff) > 1e-9:
+                    changed_items_for_reason.append({'code': item2.material_code, 'type': '함량/원료 변경', 'name': item2.material_name})
                     # 이전 버전 표시
-                    self._insert_item(self.tree1, item1, "decreased" if diff > 0 else "increased")
-
+                    self._insert_item(self.tree1, item1, "decreased") # 변경된 이전 값은 항상 파란색
                     # 새 버전 표시 (변화량 포함)
                     ratio_str = f"{item2.ratio:.4f} ({diff:+.4f})"
-                    self._insert_item(self.tree2, item2, "increased" if diff > 0 else "decreased", ratio_override=ratio_str)
+                    self._insert_item(self.tree2, item2, "increased", ratio_override=ratio_str) # 변경된 새 값은 항상 빨간색
                 else: # 변경 없음
                     self._insert_item(self.tree1, item1)
                     self._insert_item(self.tree2, item2)
-
         # 변경된 항목에 대해서만 사유 입력 UI를 순서대로 생성
         for item in changed_items_for_reason:
             self._add_reason_entry(item['code'], item['type'], item['name'])
 
     def _insert_item(self, tree, item, tag="", ratio_override=None):
         """Treeview에 처방 아이템을 삽입합니다."""
-        
+        # 구분선 처리
+        if item.material_code == "---":
+            tree.insert("", "end", values=("", "---", "---", "---"), tags=('separator',))
+            return
+
         if ratio_override:
             ratio_display = ratio_override
         else:

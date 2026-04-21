@@ -150,7 +150,8 @@ class LoginWindow(ctk.CTkToplevel):
             text="회원가입", 
             fg_color="transparent", 
             border_width=2,
-            border_color=("gray70", "gray30"), 
+            border_color=("gray70", "gray30"),
+            text_color=("gray10", "#DCE4EE"), # 라이트/다크 모드에 맞는 텍스트 색상 추가
             command=self.open_signup, 
             width=300,
             height=35,
