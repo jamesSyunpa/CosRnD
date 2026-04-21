@@ -7,11 +7,10 @@ from database.db_manager import db_manager
 from database.models import Client, Formulation, FormulationItem, Material, User
 from datetime import datetime
 from modules import excel_handler
-from modules.ui_components import CustomErrorDialog
-from utils import center_window_on_mouse_display
+from modules.ui_components import CustomErrorDialog, CustomDropdown, AddMaterialDialog
+from utils import center_window_on_mouse_display, safe_focus
 
-# document_management.py에서 클래스들을 가져옵니다.
-from modules.document_management import CustomDropdown, AddMaterialDialog
+# Circular Import 방지: document_management 대신 ui_components에서 직접 import 했습니다.
 from modules.ui_components import try_convert_to_float, HelpPopup
 from modules.translation import get_texts
 from decimal import Decimal, InvalidOperation, getcontext
@@ -115,7 +114,9 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.current_user = user
         self.app = app
         self.on_save_callback = on_save_callback
+        self.on_save_callback = on_save_callback
         self.formulation_id = formulation_id
+        self.is_loading = False # 로딩 중 이벤트 트리거 방지 플래그
         # self.target_client_map = {} # 타겟 거래처 맵 -> 텍스트 입력으로 변경되어 더 이상 필요 없음
         self.sample_sent_count = 0 # 샘플 발송 횟수 저장
         self.formulation_client_map = {} # 본 실험 거래처 맵
@@ -420,6 +421,10 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
     def update_lab_no(self, event=None):
         """고유번호, 실험일, 차수가 모두 있을 때만 LAB NO.를 자동으로 생성합니다."""
+        # 로딩 중이거나, 필수 위젯이 아직 생성되지 않았으면 중단
+        if getattr(self, 'is_loading', False) or not hasattr(self, 'lab_no_entry'):
+            return
+
         unique_code = self.exp_code_entry.get().strip().upper()
         revision = self.revision_entry.get().strip().upper()
         date_str = ""
@@ -494,6 +499,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
     def load_formulation_details(self, formulation_id):
         """특정 처방의 상세 정보를 불러와 폼에 채웁니다."""
+        self.is_loading = True # 로딩 시작 (이벤트 억제)
         self.formulation_id = formulation_id
         session = db_manager.get_session()
         try:
@@ -615,8 +621,10 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     self.update_lab_no()
             else:
                 # 저장된 값이 없으면 기존 로직대로 자동 생성
+                self.is_loading = False # LAB NO 업데이트를 위해 로딩 해제
                 self.update_lab_no()
         finally:
+            self.is_loading = False # 로딩 종료
             session.close()
 
     def save_formulation(self):
@@ -850,7 +858,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.edit_entry.place(x=x, y=y)
         self.edit_entry.insert(0, current_value)
         self.edit_entry.select_range(0, 'end')
-        self.edit_entry.focus_set()
+        safe_focus(self.edit_entry)
         self.edit_entry.bind("<Return>", lambda e, i=selected_item, c=column_id: self.on_edit_entry_commit(i, c))
         self.edit_entry.bind("<FocusOut>", lambda e, i=selected_item, c=column_id: self.on_edit_entry_commit(i, c))
     
@@ -1066,6 +1074,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         excel_handler.export_formulation_template(formulation_data, default_filename)
 
     def _apply_imported_data_to_ui(self, formulation_data):
+        self.is_loading = True # 로딩 시작
         try:
             # '가져오기'는 항상 '신규' 처방으로 처리합니다.
             # 기존에 수정 중이던 ID가 있더라도 이를 무시하고 None으로 설정하여
@@ -1183,6 +1192,11 @@ class FormulationEditPopup(ctk.CTkToplevel):
             messagebox.showinfo(self.texts['success'], self.texts['formulation_import_success'], parent=self)
         except Exception as e:
             CustomErrorDialog(self, title="가져오기 오류", error_message=f"데이터를 적용하는 중 오류가 발생했습니다:\n\n{e}") # noqa
+        finally:
+            self.is_loading = False # 로딩 종료
+            # 마지막으로 LAB NO 업데이트 (필요시)
+            try: self.update_lab_no()
+            except Exception: pass
 
     def import_formulation_from_excel(self):
         if not messagebox.askyesno(self.texts['import_confirm'], self.texts['import_formulation_confirm_msg'], parent=self):

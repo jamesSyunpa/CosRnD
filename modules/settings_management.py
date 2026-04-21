@@ -1,6 +1,6 @@
 # modules/settings_management.py
 import customtkinter as ctk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, ttk
 import configparser
 import os
 import shutil
@@ -13,6 +13,78 @@ from modules.ui_components import HelpPopup
 from utils import center_window_on_mouse_display
 from modules.translation import get_texts
 from modules import excel_handler
+from modules.deletion_request import DeletionRequestManager
+
+class UserManagementDialog(ctk.CTkToplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("사용자 관리")
+        self.geometry("500x400")
+        self.transient(master)
+        self.grab_set()
+        
+        self.setup_ui()
+        try:
+            center_window_on_mouse_display(self)
+        except:
+            pass
+            
+    def setup_ui(self):
+        # List users
+        self.tree_frame = ctk.CTkFrame(self)
+        self.tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Treeview
+        columns = ("id", "username", "real_name", "role")
+        self.tree = ttk.Treeview(self.tree_frame, columns=columns, show="headings", height=15)
+        
+        self.tree.heading("id", text="ID")
+        self.tree.heading("username", text="아이디")
+        self.tree.heading("real_name", text="이름")
+        self.tree.heading("role", text="권한")
+        
+        self.tree.column("id", width=50, anchor="center")
+        self.tree.column("username", width=100, anchor="w")
+        self.tree.column("real_name", width=100, anchor="w")
+        self.tree.column("role", width=80, anchor="center")
+        
+        self.tree.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.tree.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Load data
+        self.load_users()
+        
+        # Buttons
+        btn_frame = ctk.CTkFrame(self)
+        btn_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkButton(btn_frame, text="비밀번호 초기화 (1234)", command=self.reset_password, fg_color="#D32F2F", hover_color="#B71C1C").pack(side="right")
+        
+    def load_users(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        users = db_manager.get_all_users()
+        for u in users:
+            self.tree.insert("", "end", values=(u.id, u.username, u.real_name, u.role))
+            
+    def reset_password(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("경고", "사용자를 선택해주세요.", parent=self)
+            return
+            
+        item = self.tree.item(selected[0])
+        username = item['values'][1]
+        
+        if messagebox.askyesno("확인", f"사용자 '{username}'의 비밀번호를 '1234'로 초기화하시겠습니까?\n해당 사용자는 다음 로그인 시 비밀번호를 변경해야 합니다.", parent=self):
+            if db_manager.reset_user_password(username, "1234"):
+                messagebox.showinfo("성공", "비밀번호가 초기화되었습니다.", parent=self)
+            else:
+                messagebox.showerror("오류", "초기화 실패", parent=self)
 
 class DBPathOptionsDialog(ctk.CTkToplevel):
     """DB 경로 설정 시 관리자에게 옵션을 제공하는 대화상자"""
@@ -244,15 +316,32 @@ class SettingsManagementFrame(ctk.CTkFrame):
         # --- 엑셀 폼 내보내기 ---
         export_frame = ctk.CTkFrame(parent_frame)
         export_frame.grid(row=4, column=0, padx=20, pady=(20, 10), sticky="ew")
-        export_frame.grid_columnconfigure((0, 1, 2), weight=1)
-        ctk.CTkLabel(export_frame, text="엑셀 폼 내보내기", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, pady=(10, 5))
+        export_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        ctk.CTkLabel(export_frame, text="엑셀 폼 내보내기", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
         ctk.CTkButton(export_frame, text="원료 템플릿", command=self.export_material_template).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
         ctk.CTkButton(export_frame, text="거래처 템플릿", command=self.export_client_template).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
         ctk.CTkButton(export_frame, text="사용자 템플릿", command=self.export_user_template).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
+        ctk.CTkButton(export_frame, text="처방 템플릿", command=self.export_formulation_template).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
+
+        # --- 사용자 관리 ---
+        user_mgmt_frame = ctk.CTkFrame(parent_frame)
+        user_mgmt_frame.grid(row=5, column=0, padx=20, pady=(20, 10), sticky="ew")
+        user_mgmt_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(user_mgmt_frame, text="사용자 관리", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, pady=(10, 5))
+        
+        ctk.CTkButton(user_mgmt_frame, text="사용자 비밀번호 초기화 관리", command=lambda: UserManagementDialog(self)).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
+
+        # --- 삭제 요청 관리 ---
+        del_req_frame = ctk.CTkFrame(parent_frame)
+        del_req_frame.grid(row=6, column=0, padx=20, pady=(20, 10), sticky="ew")
+        del_req_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(del_req_frame, text="삭제 요청 관리", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, pady=(10, 5))
+        
+        ctk.CTkButton(del_req_frame, text="삭제 요청 및 복구 센터 열기", command=lambda: DeletionRequestManager(self, self.current_user)).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
 
         # --- 데이터 리셋 ---
         reset_frame = ctk.CTkFrame(parent_frame)
-        reset_frame.grid(row=5, column=0, padx=20, pady=(50, 20), sticky="ew")
+        reset_frame.grid(row=7, column=0, padx=20, pady=(50, 20), sticky="ew")
         reset_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
         ctk.CTkLabel(reset_frame, text="데이터 초기화 (주의: 복구 불가)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
         reset_button_style = {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}
@@ -271,6 +360,15 @@ class SettingsManagementFrame(ctk.CTkFrame):
 
         language = config.get('Appearance', 'language', fallback='korean').capitalize()
         self.language_menu.set(language)
+
+        # DB 알림 설정 로드 (기본값: 1/True)
+        # load_settings가 호출될 때 UI 요소가 아직 생성되지 않았을 수 있음
+        if hasattr(self, 'db_notify_switch'):
+            db_notify = config.getboolean('Notifications', 'show_db_sync_alert', fallback=True)
+            if db_notify:
+                self.db_notify_switch.select()
+            else:
+                self.db_notify_switch.deselect()
 
         db_path = config.get('Paths', 'shared_db_path', fallback="미설정")
         excel_path = config.get('Paths', 'excel_dir', fallback="미설정")
@@ -956,6 +1054,10 @@ class SettingsManagementFrame(ctk.CTkFrame):
 
 
     # ===== Admin-only methods =====
+    def export_formulation_template(self):
+        """처방 템플릿(빈 폼)을 내보냅니다."""
+        excel_handler.export_formulation_blank_template()
+
     def export_material_template(self):
         sheets = {
             "원료정보": ["코드", "원료명", "단가", "포장단위", "거래처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "사용여부(Y/N)"],

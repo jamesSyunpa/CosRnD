@@ -1,4 +1,3 @@
-# database/models.py
 import os
 from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, ForeignKey, Text, DateTime, or_, Date
 from sqlalchemy.orm import relationship, declarative_base
@@ -36,6 +35,9 @@ class User(Base):
     # --- 사용자 편의 기능 설정 ---
     remember_id = Column(Boolean, default=False)
     auto_login = Column(Boolean, default=False)
+    
+    # --- 보안 설정 (2025-02-04) ---
+    force_password_change = Column(Boolean, default=False) # 다음 로그인 시 비밀번호 변경 강제
 
     def __repr__(self):
         return f'<User {self.username}>'
@@ -102,6 +104,8 @@ class Client(Base):
     name = Column(String(100), nullable=False)  # 거래처명
     business_number = Column(String(20))        # 사업자번호
     client_type = Column(String(50))            # 거래처 유형 (예: '원료', 'OEM/ODM', '부자재')
+    # 거래처 구분코드: 고객별 내부 식별용(예: 단축 코드, 분류 코드)
+    classification_code = Column(String(50))
     
     # --- 상세 정보 ---
     ceo_name = Column(String(50))               # 대표자명
@@ -144,9 +148,33 @@ class Material(Base):
     # 수정일과 생성일 추가
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Ingredient와의 관계 설정
+    # Ingredient와의 관계 (Material이 여러 Ingredient를 가질 수 있음)
     ingredients = relationship("Ingredient", back_populates="material", cascade="all, delete-orphan")
+
+
+class ProductCodeAssignment(Base):
+    """거래처별로 할당된 코드 정보
+    - client_id: 할당 대상 거래처
+    - rule_id: 참조되는 코드 규칙 (선택적)
+    - production_formulation_id: 적용된 생산처방 (적용 시 연결)
+    - product_name: 할당 시 연관된 제품명(예: 고객사에 등록된 제품명)
+    - code_value: 수동으로 지정한 코드 값(비어있으면 규칙에 의해 자동 발급)
+    """
+    __tablename__ = 'product_code_assignments'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    client_id = Column(Integer, ForeignKey('clients.id'), nullable=True)
+    rule_id = Column(Integer, ForeignKey('product_code_rules.id'), nullable=True)
+    production_formulation_id = Column(Integer, ForeignKey('production_formulations.id'), nullable=True)
+    product_name = Column(String(255))
+    code_value = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # 관계
+    client = relationship('Client')
+    rule = relationship('ProductCodeRule')
+    production_formulation = relationship('ProductionFormulation')
+    
 
 class Ingredient(Base):
     """전성분 정보 모델 (하나의 원료에 여러개 포함)"""
@@ -177,6 +205,7 @@ class Formulation(Base):
     # 본 실험 처방 정보
     experiment_name = Column(String(255), nullable=False)
     experiment_date = Column(String(20))
+    manufacturing_date = Column(String(20)) # 생산일자 (2025-02-04 추가)
     manager_name = Column(String(50))
     manager_code = Column(String(50)) # 담당번호 (구 unique_code)
     lab_no = Column(String(50)) # LAB NO.
@@ -288,7 +317,8 @@ class ProductionRun(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     production_formulation_id = Column(Integer, ForeignKey('production_formulations.id', ondelete='CASCADE'), nullable=False)
-    run_date = Column(Date)
+    run_date = Column(Date) # 지시일자로 사용
+    production_date = Column(Date) # 실 생산일자 (2025-02-04 추가)
     lot_no = Column(String(100))
     quantity_g = Column(Float)
     notes = Column(Text)
@@ -453,3 +483,50 @@ class DocumentAttachment(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     package = relationship('DocumentPackage', back_populates='attachments')
+
+class DeletionRequest(Base):
+    """삭제 승인 요청 및 백업 데이터 모델"""
+    __tablename__ = 'deletion_requests'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    requester_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    
+    target_table = Column(String(50), nullable=False) # 대상 테이블 (formulations, production_runs 등)
+    target_id = Column(Integer, nullable=False) # 대상 ID
+    target_summary = Column(String(255)) # 대상 요약 정보 (예: 제품명, 제조번호)
+    
+    reason = Column(Text, nullable=False) # 삭제 사유
+    status = Column(String(20), default='PENDING') # PENDING, APPROVED_DELETE, APPROVED_BACKUP, REJECTED
+    
+    backup_data = Column(Text) # 백업 데이터 (JSON 형식)
+    
+    processed_by_id = Column(Integer, ForeignKey('users.id')) # 처리한 관리자
+    admin_comment = Column(Text) # 관리자 코멘트
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 관계
+    requester = relationship('User', foreign_keys=[requester_id])
+    processed_by = relationship('User', foreign_keys=[processed_by_id])
+
+class ProductCodeRule(Base):
+    """반제품/완제품 코드 생성 규칙 데이터"""
+    __tablename__ = 'product_code_rules'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rule_name = Column(String(100), nullable=False) # 규칙명 (예: 반제품 기본 규칙)
+    code_type = Column(String(50), nullable=False, unique=True) # 구분 (SEMI: 반제품, FINISHED: 완제품) - 타입별 유일성 보장
+    
+    prefix = Column(String(20)) # 접두사 (예: S, P)
+    year_format = Column(String(10), default='YY') # 연도 포맷 (YY, YYYY, NONE)
+    separator = Column(String(5), default='-') # 구분자
+    sequence_length = Column(Integer, default=3) # 일련번호 자릿수 (예: 3 -> 001)
+    current_sequence = Column(Integer, default=0) # 현재 번호 (마지막 발급 번호)
+    suffix = Column(String(20)) # 접미사
+    
+    description = Column(Text) # 설명
+    # attribute_schema: JSON 문자열로 추가 속성(예: 온도, 장비 등) 정의
+    # 포맷 예시: [{"key":"TEMP","label":"온도","type":"select","options":["RT","HEAT"],"token_map":{"RT":"R","HEAT":"H"}}]
+    attribute_schema = Column(Text, default='[]')
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

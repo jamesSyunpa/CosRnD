@@ -12,6 +12,7 @@ from modules.material_management import MaterialManagementFrame
 from modules.history_popup import HistoryPopup
 from modules.ui_components import HelpPopup
 from modules.translation import get_texts
+from modules.code_management import CodeManagementFrame
 
 class DataManagementFrame(ctk.CTkFrame):
     def __init__(self, master, user, app):
@@ -42,7 +43,8 @@ class DataManagementFrame(ctk.CTkFrame):
         tab_texts = {
             "ingredient": self.texts.get("ingredient_mgt", "성분 관리"),
             "client": self.texts.get("client_mgt", "거래처 관리"),
-            "user": self.texts.get("user_mgt", "회원 관리")
+            "user": self.texts.get("user_mgt", "회원 관리"),
+            "code": "코드 관리" # 2025-02-04: 코드 관리 탭 추가
         }
 
         self.tab_map = {}
@@ -63,6 +65,16 @@ class DataManagementFrame(ctk.CTkFrame):
             self.tab_key_map["client_mgt"] = tab_texts["client"]
             self.tab_key_map["data/client_mgt"] = tab_texts["client"]
             self.setup_client_management_tab(self.tab_view.tab(tab_texts["client"]))
+
+        # 코드 관리 탭 - RQD, MSAD 접근 가능 (권한 확인 필요)
+        # 연구원도 코드 규칙을 볼 수 있어야 할 수도 있지만, 설정은 관리자만?
+        # 일단 RQD, MSAD만 접근 가능하도록 설정 (데이터 관리자)
+        if self.current_user.can_manage_all_data():
+            self.tab_view.add(tab_texts["code"])
+            self.tab_map[tab_texts["code"]] = "data/code_mgt"
+            self.tab_key_map["code_mgt"] = tab_texts["code"]
+            self.tab_key_map["data/code_mgt"] = tab_texts["code"]
+            self.setup_code_management_tab(self.tab_view.tab(tab_texts["code"]))
 
         # 회원 관리 탭 - RQD, MSAD만 접근 가능
         if self.current_user.can_manage_all_data():
@@ -164,6 +176,13 @@ class DataManagementFrame(ctk.CTkFrame):
         tab_frame.grid_rowconfigure(0, weight=1)
         material_frame = MaterialManagementFrame(tab_frame, self.current_user, self.app)
         material_frame.grid(row=0, column=0, sticky="nsew")
+
+    def setup_code_management_tab(self, tab_frame):
+        """코드 관리 탭의 UI를 설정합니다."""
+        tab_frame.grid_columnconfigure(0, weight=1)
+        tab_frame.grid_rowconfigure(0, weight=1)
+        code_frame = CodeManagementFrame(tab_frame, self.current_user, self.app)
+        code_frame.grid(row=0, column=0, sticky="nsew")
 
     def setup_user_management_tab(self, tab_frame):
         tab_frame.grid_columnconfigure(0, weight=0, minsize=500)
@@ -355,31 +374,38 @@ class DataManagementFrame(ctk.CTkFrame):
         self.load_users()
 
     def setup_client_management_tab(self, tab_frame):
-        tab_frame.grid_rowconfigure(0, weight=1)
+        # 그리드 구조
         tab_frame.grid_columnconfigure(0, weight=1)
+        tab_frame.grid_rowconfigure(0, weight=1)
 
-        paned = tk.PanedWindow(tab_frame, orient="horizontal", sashwidth=6, sashrelief="raised", opaqueresize=False)
+        # PanedWindow로 좌우 분할 (크기 조절 가능)
+        paned = tk.PanedWindow(
+            tab_frame, 
+            orient="horizontal",
+            sashwidth=6,
+            sashrelief="raised",
+            sashpad=2,
+            bg=ctk.ThemeManager.theme["CTkFrame"]["fg_color"][1 if ctk.get_appearance_mode() == "Dark" else 0],
+            bd=0,
+            opaqueresize=False
+        )
         paned.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
+        # 좌측 컨테이너
         left_container = ctk.CTkFrame(paned, fg_color="transparent")
-        left_container.grid_rowconfigure(0, weight=1)
-        left_container.grid_columnconfigure(0, weight=1)
-        paned.add(left_container, minsize=520)
-        paned.paneconfigure(left_container, stretch="always")
+        paned.add(left_container, minsize=400, stretch="always")
 
+        # 우측 컨테이너
         right_container = ctk.CTkFrame(paned, fg_color="transparent")
-        right_container.grid_rowconfigure(0, weight=1)
-        right_container.grid_columnconfigure(0, weight=1)
-        paned.add(right_container, minsize=420)
-        paned.paneconfigure(right_container, stretch="always")
+        paned.add(right_container, minsize=400, stretch="always")
 
-        # 스크롤 가능한 프레임을 생성하여 모든 위젯을 담습니다.
+        # 좌측: 거래처 입력 폼
         scrollable_frame = ctk.CTkScrollableFrame(left_container, fg_color="transparent")
-        scrollable_frame.grid(row=0, column=0, padx=(0, 8), pady=0, sticky="nsew")
+        scrollable_frame.pack(fill="both", expand=True, padx=(0, 3))
 
         form_frame = ctk.CTkFrame(scrollable_frame)
         form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-        form_frame.grid_columnconfigure(1, weight=1) # 입력 필드가 너비를 채우도록 설정
+        form_frame.grid_columnconfigure(1, weight=1)
         
         form_label = ctk.CTkLabel(form_frame, text=self.texts['client_info'], font=ctk.CTkFont(size=14, weight="bold"))
         form_label.grid(row=2, column=0, columnspan=2, pady=(20, 10))
@@ -425,7 +451,7 @@ class DataManagementFrame(ctk.CTkFrame):
 
         # --- 우측: 거래처 목록 ---
         list_frame = ctk.CTkFrame(right_container)
-        list_frame.grid(row=0, column=0, padx=(8, 0), pady=0, sticky="nsew")
+        list_frame.pack(fill="both", expand=True, padx=(3, 0))
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
         
@@ -1069,27 +1095,64 @@ class DataManagementFrame(ctk.CTkFrame):
         self.load_clients()
 
     def load_clients(self):
+        """거래처 목록을 비동기로 로드합니다."""
         search_term = self.client_search_entry.get().strip()
-        for item in self.client_tree.get_children(): self.client_tree.delete(item)
-        clients = db_manager.search_clients(search_term)
+        
+        # 기존 목록 초기화
+        self.client_tree.delete(*self.client_tree.get_children())
+        
+        # 로딩 표시
+        loading_id = self.client_tree.insert("", "end", values=("로딩 중...", "", "", "", "", "", "", "", "", "", "", ""))
+        
+        import threading
+        threading.Thread(target=self._fetch_clients_thread, args=(search_term, loading_id), daemon=True).start()
 
-        for i, client in enumerate(clients):
-            active_status = "Y" if client.is_active else "N"
-            tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-            self.client_tree.insert("", "end", iid=client.id, tags=(tag,), values=(
-                str(i + 1),  # 구분 번호
-                client.client_type, 
-                client.business_number,
-                client.name,
-                getattr(client, 'ceo_name', ''),
-                client.manager_name, 
-                client.phone, 
-                getattr(client, 'fax', ''), 
-                client.email,
-                getattr(client, 'zip_code', ''),
-                client.address,
-                active_status
-            ))
+    def _fetch_clients_thread(self, search_term, loading_id):
+        try:
+            # db_manager.search_clients는 세션을 내부에서 열고 닫음 (동기 함수)
+            # 하지만 여기서 호출하면 이 스레드에서 실행됨
+            clients = db_manager.search_clients(search_term)
+            
+            display_data = []
+            for i, client in enumerate(clients):
+                active_status = "Y" if client.is_active else "N"
+                tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+                
+                display_data.append((
+                    client.id,
+                    (tag,),
+                    (
+                        str(i + 1),
+                        client.client_type or "", 
+                        client.business_number or "",
+                        client.name or "",
+                        getattr(client, 'ceo_name', '') or "",
+                        client.manager_name or "", 
+                        client.phone or "", 
+                        getattr(client, 'fax', '') or "", 
+                        client.email or "",
+                        getattr(client, 'zip_code', '') or "",
+                        client.address or "",
+                        active_status
+                    )
+                ))
+            
+            self.after(0, lambda: self._update_client_tree(loading_id, display_data))
+            
+        except Exception as e:
+            print(f"[오류] 거래처 로딩 실패: {e}")
+            self.after(0, lambda: messagebox.showerror("로딩 오류", f"거래처 목록을 불러오지 못했습니다.\n{e}"))
+
+    def _update_client_tree(self, loading_id, display_data):
+        try:
+            if self.client_tree.exists(loading_id):
+                self.client_tree.delete(loading_id)
+                
+            for iid, tags, values in display_data:
+                self.client_tree.insert("", "end", iid=iid, tags=tags, values=values)
+        except Exception as e:
+            print(f"[오류] 거래처 트리 업데이트 실패: {e}")
+
 
     def on_client_tree_select(self, event):
         selected_item = self.client_tree.selection()
@@ -1117,6 +1180,11 @@ class DataManagementFrame(ctk.CTkFrame):
             set_entry_value("email", client.email)
             set_entry_value("zip", getattr(client, 'zip_code', ""))
             set_entry_value("address", client.address)
+            # classification_code 노출 (추가 필드)
+            try:
+                set_entry_value("classification_code", getattr(client, 'classification_code', '') or "")
+            except Exception:
+                pass
 
             self.is_active_var.set("on" if client.is_active else "off")
             self._selected_client_id = client.id 
@@ -1171,6 +1239,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 "이메일": self.client_entries["email"].get(),
                 "우편번호": self.client_entries["zip"].get(),
                 "주소": self.client_entries["address"].get(),
+                "구분코드": self.client_entries.get("classification_code").get() if self.client_entries.get("classification_code") is not None else "",
                 "사용 여부": self.is_active_var.get() == "on"
             }
 
@@ -1203,6 +1272,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 log_change("담당자명", client.manager_name or "", new_values["담당자명"])
                 log_change("연락처", client.phone or "", new_values["연락처"])
                 log_change("이메일", client.email or "", new_values["이메일"])
+                log_change("구분코드", client.classification_code or "", new_values.get("구분코드", ""))
                 log_change("사용 여부", client.is_active, new_values["사용 여부"])
 
             client.client_type = new_values["거래처 유형"]
@@ -1216,6 +1286,11 @@ class DataManagementFrame(ctk.CTkFrame):
             client.zip_code = new_values["우편번호"]
             client.address = new_values["주소"]
             client.is_active = new_values["사용 여부"]
+            # 분류 코드 저장
+            try:
+                client.classification_code = new_values.get("구분코드")
+            except Exception:
+                pass
             
             if log_entries:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

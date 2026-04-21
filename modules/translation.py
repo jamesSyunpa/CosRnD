@@ -82,7 +82,7 @@ TRANSLATIONS = {
         "client_info": "거래처 정보", "client_search": "거래처 검색", "client_type": "거래처 유형", "is_active": "사용 여부", "client_list": "거래처 목록",
         "client_type_values": ["원료", "OEM/ODM", "부자재", "기타"],
         "client_type_filter_values": ["- 유형 선택 -", "원료", "OEM/ODM", "부자재", "기타"],
-        "client_labels": {"code": "거래처코드(사업자번호)", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소"},
+        "client_labels": {"code": "거래처코드(사업자번호)", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소", "classification_code": "거래처 구분코드"},
         "client_tree_columns": {"id": "ID", "type": "유형", "code": "거래처코드", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소", "active": "사용여부"},
 
         # Document Management
@@ -100,6 +100,7 @@ TRANSLATIONS = {
         1. 목록 생성: '처방 목록' 탭에서 처방을 선택한 후, '전성분' 탭으로 와서 '전체 목록 생성' 버튼을 누르면 모든 전성분 목록이 한 번에 생성됩니다.
         """,
         "formulation_folders": "처방 폴더", "icon_size": "아이콘 크기:", "client_filter": "거래처 필터:", "back_to_folders": "◀ 뒤로 가기",
+        "back_to_clients": "업체 목록으로", "unassigned_client": "미지정",
         "compare_history": "이력 비교", "reset_selection": "선택 초기화", "edit_sample_count": "발송수정", "send_sample": "샘플발송", "folder": "폴더", "formulations": "개 처방",
         "select_formulation_to_edit": "수정할 처방을 목록에서 선택하세요.", "select_one_formulation_to_edit": "하나의 처방만 선택하여 수정할 수 있습니다.",
         "select_two_formulations_to_compare": "비교할 두 개의 처방을 선택해주세요.", "select_folder_first": "폴더를 먼저 선택해주세요.",
@@ -129,7 +130,7 @@ TRANSLATIONS = {
         "create_all_lists": "전체 목록 생성", "export_to_excel": "엑셀로 내보내기", "select_columns_to_display": "표시할 열 선택",
         "complex_ingredients_for_docs": "복합 전성분 (서류용)", "single_ingredients_by_ratio": "단일 전성분 (함량순)", "ingredients_for_design": "디자인용 전성분",
         "by_raw_material": "원료별 목록", "summed_ingredients": "전성분 합계",
-    "complex_ingredient_tree_columns": {"no": {"text": "NO", "width": 40, "anchor": "center", "visible": True}, "material_name": {"text": "원료명", "width": 200, "visible": True}, "inci_name": {"text": "INCI Name", "width": 200, "visible": True}, "name_ko": {"text": "성분의 한글명", "width": 200, "visible": True}, "rm_ratio": {"text": "RM 함량(%)", "width": 120, "anchor": "e", "visible": True}, "ing_ratio": {"text": "성분 함량(%)", "width": 120, "anchor": "e", "visible": True}, "actual_wt": {"text": "Actual Wt (%)", "width": 120, "anchor": "e", "visible": True}, "cas_no": {"text": "CAS No.", "width": 120, "visible": True}, "function": {"text": "Ingredient function", "width": 150, "visible": True}, "hs_code": {"text": "HS CODE", "width": 100, "visible": False}, "origin": {"text": "원산지", "width": 100, "visible": False}, "material_name_en": {"text": "영문원료명", "width": 150, "visible": False}, "nmpa_reg_num": {"text": "NMPA", "width": 120, "visible": False}, "remark": {"text": "Remark", "width": 100, "visible": True}},
+    "complex_ingredient_tree_columns": {"no": {"text": "NO", "width": 40, "anchor": "center", "visible": True}, "material_name": {"text": "원료명", "width": 200, "visible": True}, "inci_name": {"text": "INCI Name", "width": 200, "visible": True}, "name_ko": {"text": "성분의 한글명", "width": 200, "visible": True}, "rm_ratio": {"text": "RM 함량(%)", "width": 120, "anchor": "e", "visible": True}, "ing_ratio": {"text": "성분 함량(%)", "width": 120, "anchor": "e", "visible": True}, "actual_wt": {"text": "Actual Wt (%)", "width": 120, "anchor": "e", "visible": True}, "cas_no": {"text": "CAS No.", "width": 120, "visible": True}, "function": {"text": "Ingredient function", "width": 150, "visible": True}, "hs_code": {"text": "HS CODE", "width": 100, "visible": False}, "origin": {"text": "원산지", "width": 100, "visible": False}, "material_name_en": {"text": "영문원료명", "width": 150, "visible": False}, "nmpa_reg_num": {"text": "NMPA", "width": 120, "visible": False}, "supplier": {"text": "거래처명", "width": 150, "visible": False}, "remark": {"text": "Remark", "width": 100, "visible": True}},
     "total_rm_ratio_label": "RM or ingredient % in fla 합계:", "total_actual_wt_label": "Actual Wt (%) 합계:", "summed_ingredient_tree_columns": {"phase": "구분", "name_en": "영문명", "name_ko": "국문명", "total_ratio": "총 함량(%)", "cas_no": "CAS No.", "function": "기능"},
     "total_ratio_sum": "총 함량(%) 합계:", "clipboard_copy_dev": "클립보드 복사 기능은 개발 예정입니다.",
     "single_ingredient_tree_columns": {"no": {"text": "NO", "width": 40, "anchor": "center", "visible": True}, "name_en": {"text": "INGREDIENT", "width": 250, "visible": True}, "ci_no": {"text": "C.I NO", "width": 80, "visible": False}, "total_ratio": {"text": "% (W/W)", "width": 100, "anchor": "e", "visible": True}, "cas_no": {"text": "CAS. NO", "width": 120, "visible": True}, "function": {"text": "FUNCTION", "width": 150, "visible": True}, "hs_code": {"text": "HS CODE", "width": 100, "visible": False}, "nmpa_reg_num": {"text": "NMPA", "width": 120, "visible": False}, "remark": {"text": "비고", "width": 150, "visible": False}},
@@ -161,7 +162,7 @@ TRANSLATIONS = {
     # Formulation Popup
     "formulation_popup_title": "처방 생성/수정", "formulation_details": "처방 상세 정보", "use_target_info": "타겟 정보 사용",
     "target_sample_name": "타겟 샘플명", "target_ph": "타겟 pH", "today": "당일:", "next_day": "익일:", "target_viscosity": "타겟 점도",
-    "pin_and_machine": "사용핀 및 기계", "target_client": "타겟 거래처", "experiment_name": "실험품명", "experiment_date": "실험년월일",
+    "pin_and_machine": "사용핀 및 기계", "target_client": "타겟 거래처", "experiment_name": "실험품명", "experiment_date": "지시일자", "manufacturing_date": "생산일자",
     "manager_name": "담당자", "manager_code": "담당번호", "lab_no": "LAB NO.", "revision": "차수", "client": "거래처",
     "experiment_results": "실험 결과", "ph": "pH", "viscosity": "점도", "evaluation_and_notes": "품평결과 및 특이사항", "change_history": "변경 이력",
     "formulation_content": "처방 내용", "total_experiment_amount_g": "총 실험량(g):", "to_100": "To 100",
@@ -183,6 +184,18 @@ TRANSLATIONS = {
     # Add Material Dialog
     "add_material_title": "원료 추가", "material_search": "원료 검색:", "no_ingredients_registered": "등록된 전성분이 없습니다.",
     "ingredient_report": "원료목록보고 자료",
+    
+    # Ingredient Lookup Tab
+    "ingredient_lookup": "원료/성분 조회",
+    "ingredient_lookup_placeholder": "성분명(한글/영문) 또는 CAS No를 줄 단위로 입력하세요...",
+    "search_ingredients": "검색",
+    "export_lookup_to_excel": "Excel로 내보내기",
+    "import_lookup_from_excel": "Excel에서 가져오기",
+    "clear_results": "결과 초기화",
+    "ingredient_lookup_columns": {"material_code": "원료코드", "name_ko": "성분명(한글)", "name_en": "성분명(영문)", "function": "효능(기능)", "cas_no": "CAS No."},
+    "lookup_results_count": "검색 결과: {count}건",
+    "no_search_results": "검색 결과가 없습니다.",
+    "enter_search_terms": "검색할 성분명 또는 CAS No를 입력하세요.",
     },
     "english": {
     # Generic
@@ -239,7 +252,7 @@ TRANSLATIONS = {
         "client_info": "Client Information", "client_search": "Client Search", "client_type": "Client Type", "is_active": "Is Active", "client_list": "Client List",
         "client_type_values": ["Raw Material", "OEM/ODM", "Packaging", "Other"],
         "client_type_filter_values": ["- Select Type -", "Raw Material", "OEM/ODM", "Packaging", "Other"],
-        "client_labels": {"code": "Client Code(Biz No.)", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address"},
+        "client_labels": {"code": "Client Code(Biz No.)", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address", "classification_code": "Classification Code"},
         "client_tree_columns": {"id": "ID", "type": "Type", "code": "Client Code", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address", "active": "Is Active"},
 
         # Document Management
@@ -257,6 +270,7 @@ TRANSLATIONS = {
         1. Create Lists: Select a formulation, go to 'Ingredient List' tab, and click 'Create All Lists'.
         """,
         "formulation_folders": "Formulation Folders", "icon_size": "Icon Size:", "client_filter": "Client Filter:", "back_to_folders": "◀ Back",
+        "back_to_clients": "Back to Clients", "unassigned_client": "Unassigned",
         "compare_history": "Compare History", "reset_selection": "Reset Selection", "edit_sample_count": "Edit Sent", "send_sample": "Send Sample", "folder": "Folder", "formulations": "formulations",
         "select_formulation_to_edit": "Please select a formulation to edit from the list.", "select_one_formulation_to_edit": "You can only edit one formulation at a time.",
         "select_two_formulations_to_compare": "Please select two formulations to compare.", "select_folder_first": "Please select a folder first.",
@@ -323,7 +337,7 @@ TRANSLATIONS = {
         "ingredients_for_design": "Ingredients for Design",
         "by_raw_material": "By Raw Material",
         "summed_ingredients": "Summed Ingredients",
-    "complex_ingredient_tree_columns": {"no": {"text": "NO", "width": 40, "anchor": "center", "visible": True}, "material_name": {"text": "Material Name", "width": 200, "visible": True}, "inci_name": {"text": "INCI Name", "width": 200, "visible": True}, "name_ko": {"text": "Ingredient Name (KO)", "width": 200, "visible": True}, "rm_ratio": {"text": "RM Ratio(%)", "width": 120, "anchor": "e", "visible": True}, "ing_ratio": {"text": "Ing. Ratio(%)", "width": 120, "anchor": "e", "visible": True}, "actual_wt": {"text": "Actual Wt (%)", "width": 120, "anchor": "e", "visible": True}, "cas_no": {"text": "CAS No.", "width": 120, "visible": True}, "function": {"text": "Ingredient function", "width": 150, "visible": True}, "hs_code": {"text": "HS CODE", "width": 100, "visible": False}, "origin": {"text": "Origin", "width": 100, "visible": False}, "material_name_en": {"text": "Material Name (EN)", "width": 150, "visible": False}, "nmpa_reg_num": {"text": "NMPA", "width": 120, "visible": False}, "remark": {"text": "Remark", "width": 100, "visible": True}},
+    "complex_ingredient_tree_columns": {"no": {"text": "NO", "width": 40, "anchor": "center", "visible": True}, "material_name": {"text": "Material Name", "width": 200, "visible": True}, "inci_name": {"text": "INCI Name", "width": 200, "visible": True}, "name_ko": {"text": "Ingredient Name (KO)", "width": 200, "visible": True}, "rm_ratio": {"text": "RM Ratio(%)", "width": 120, "anchor": "e", "visible": True}, "ing_ratio": {"text": "Ing. Ratio(%)", "width": 120, "anchor": "e", "visible": True}, "actual_wt": {"text": "Actual Wt (%)", "width": 120, "anchor": "e", "visible": True}, "cas_no": {"text": "CAS No.", "width": 120, "visible": True}, "function": {"text": "Ingredient function", "width": 150, "visible": True}, "hs_code": {"text": "HS CODE", "width": 100, "visible": False}, "origin": {"text": "Origin", "width": 100, "visible": False}, "material_name_en": {"text": "Material Name (EN)", "width": 150, "visible": False}, "nmpa_reg_num": {"text": "NMPA", "width": 120, "visible": False}, "supplier": {"text": "Supplier", "width": 150, "visible": False}, "remark": {"text": "Remark", "width": 100, "visible": True}},
     "total_rm_ratio_label": "Total RM or ingredient % in fla:",
     "total_actual_wt_label": "Total Actual Wt (%):",
     "summed_ingredient_tree_columns": {"phase": "Phase", "name_en": "Name (EN)", "name_ko": "Name (KO)", "total_ratio": "Total Ratio(%)", "cas_no": "CAS No.", "function": "Function"},
@@ -423,6 +437,18 @@ TRANSLATIONS = {
     "material_search": "Material Search:",
     "no_ingredients_registered": "No ingredients registered.",
     "ingredient_report": "Ingredient List Report",
+    
+    # Ingredient Lookup Tab
+    "ingredient_lookup": "Material/Ingredient Lookup",
+    "ingredient_lookup_placeholder": "Enter ingredient names (Korean/English) or CAS No, one per line...",
+    "search_ingredients": "Search",
+    "export_lookup_to_excel": "Export to Excel",
+    "import_lookup_from_excel": "Import from Excel",
+    "clear_results": "Clear Results",
+    "ingredient_lookup_columns": {"material_code": "Material Code", "name_ko": "Name (Korean)", "name_en": "Name (English)", "function": "Function", "cas_no": "CAS No."},
+    "lookup_results_count": "Search Results: {count}",
+    "no_search_results": "No search results found.",
+    "enter_search_terms": "Enter ingredient names or CAS No to search.",
     }
 }
 

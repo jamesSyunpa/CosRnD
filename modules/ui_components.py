@@ -126,7 +126,8 @@ class CustomDropdown(ctk.CTkFrame):
             item_button.pack(fill="x", expand=True, pady=1)
 
         self.dropdown_toplevel.bind("<FocusOut>", lambda e: self.close_dropdown())
-        self.dropdown_toplevel.after(10, self.dropdown_toplevel.focus_set)
+        # Schedule a safe focus set (check existence before calling)
+        self.dropdown_toplevel.after(10, lambda: self.dropdown_toplevel.focus_set() if self.dropdown_toplevel and self.dropdown_toplevel.winfo_exists() else None)
 
     def close_dropdown(self):
         if self.dropdown_toplevel:
@@ -245,7 +246,7 @@ class AddMaterialDialog(ctk.CTkToplevel):
             self.material_tree.delete(item)
 
         # `load_ingredients=True`를 전달하여 전성분 정보를 함께 로드합니다.
-        materials = db_manager.search_materials(search_term, load_ingredients=True)
+        materials = db_manager.search_materials(search_term, load_ingredients=True, search_ingredients=True)
 
         try:
             for mat in materials:
@@ -322,7 +323,10 @@ def try_convert_to_float(value):
     if value is None:
         return None
     try:
-        return float(value)
+        val = float(value)
+        # 10자리 정도에서 반올림하여 부동소수점 오차(45.57 -> 45.569999...) 제거
+        # 일반적인 화장품 함량에서는 4~6자리도 충분하지만 안전하게 8자리 사용
+        return round(val, 8)
     except (ValueError, TypeError):
         return value
 

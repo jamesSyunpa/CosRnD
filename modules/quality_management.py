@@ -73,6 +73,7 @@ class QualityManagementFrame(ctk.CTkFrame):
             "파": {"name": "체모 제거용 제품류", "items": {"파1": "제모제", "파2": "그 밖의 체모 제거용 제품류", "파3": "제모 왁스"}},
         }
         self.functional_types = {
+            "없음": "기능성화장품 아님",
             "F1": "미백", "F2": "주름개선", "F3": "자외선차단", "F4": "미백+주름개선",
             "F5": "미백+자외선차단", "F6": "주름개선+자외선차단", "F7": "미백+주름개선+자외선차단",
             "F8": "염모/탈염/탈색", "F9": "체모 제모", "F10": "탈모증상 완화",
@@ -336,12 +337,19 @@ class QualityManagementFrame(ctk.CTkFrame):
             type_code = type_selected.split(" : ")[0] if " : " in type_selected else type_selected
             functional_selected = self.report_entries["기능성화장품유형"].get()
             functional_type_code = functional_selected.split(" : ")[0] if " : " in functional_selected else ""
+            
+            # "없음"이 선택된 경우 기능성 유형과 품목코드를 빈칸으로 처리
+            if functional_type_code == "없음":
+                functional_type_code = ""
+                functional_code = ""
+            else:
+                functional_code = self.report_entries["기능성화장품품목코드"].get()
 
             collected.append({
                 'product_name': self.report_entries["제품명"].get(),
                 'type_code': type_code,
                 'functional_type_code': functional_type_code,
-                'functional_code': self.report_entries["기능성화장품품목코드"].get(),
+                'functional_code': functional_code,
                 'manufacturer': self.report_entries["제조업자상호"].get(),
                 'usage': self.report_entries.get("용도").get() if self.report_entries.get("용도") else "",
                 'custom_content': self.report_entries.get("맞춤형내용물").get() if self.report_entries.get("맞춤형내용물") else "",
@@ -449,9 +457,17 @@ class QualityManagementFrame(ctk.CTkFrame):
                     self.report_entries["유형표시"].set(header.type_code)
             except Exception:
                 pass
+            # 기능성 유형 설정 - 빈 문자열이면 "없음"으로 표시
             if header.functional_type_code:
                 self.report_entries["기능성화장품유형"].set(header.functional_type_code)
-            self.report_entries["기능성화장품품목코드"].delete(0, 'end'); self.report_entries["기능성화장품품목코드"].insert(0, header.functional_code or '')
+            else:
+                self.report_entries["기능성화장품유형"].set("없음 : 기능성화장품 아님")
+            
+            # 기능성 품목코드 설정
+            self.report_entries["기능성화장품품목코드"].delete(0, 'end')
+            if header.functional_type_code:  # 기능성 유형이 있을 때만 품목코드 표시
+                self.report_entries["기능성화장품품목코드"].insert(0, header.functional_code or '')
+            
             self.report_entries["용도"].set(header.usage or '')
             self.report_entries["맞춤형내용물"].set(header.custom_content or '')
 
