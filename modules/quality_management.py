@@ -170,10 +170,47 @@ class QualityManagementFrame(ctk.CTkFrame):
         self.ingredient_report_picker.grid(row=0, column=1, padx=(0, 8), sticky="ew")
         ctk.CTkButton(db_frame, text="불러오기", command=self.load_selected_ingredient_report,
                       fg_color="#4C9AFF", hover_color="#1F6AA5", width=100).grid(row=0, column=2)
+        ctk.CTkButton(db_frame, text="삭제", command=self.delete_selected_ingredient_report,
+                      fg_color="#D32F2F", hover_color="#B71C1C", width=80).grid(row=0, column=3)
 
         self._redraw_report_table()
         # 최근 저장 목록 로드
         self.refresh_ingredient_report_list()
+
+    def delete_selected_ingredient_report(self):
+        """선택한 원료목록보고를 DB에서 삭제합니다."""
+        if not getattr(self.current_user, 'can_delete', None) or not self.current_user.can_delete():
+            messagebox.showwarning("권한 없음", "삭제 권한이 없습니다.", parent=self)
+            return
+        sel = self.ingredient_report_picker.get()
+        if not sel or '|' not in sel:
+            messagebox.showwarning("선택 필요", "삭제할 항목을 선택하세요.", parent=self)
+            return
+        try:
+            report_id = int(sel.split('|')[0].strip())
+        except Exception:
+            messagebox.showwarning("선택 오류", "선택된 항목을 해석할 수 없습니다.", parent=self)
+            return
+        name_preview = ' | '.join([p.strip() for p in sel.split('|')[1:3]]) if '|' in sel else ''
+        if not messagebox.askyesno("삭제 확인", f"선택한 원료목록보고를 삭제하시겠습니까?\n\n{sel}\n\n이 작업은 되돌릴 수 없습니다.", parent=self):
+            return
+        session = db_manager.get_session()
+        try:
+            header = session.query(IngredientReport).filter_by(id=report_id).first()
+            if not header:
+                messagebox.showwarning("오류", "선택한 데이터가 존재하지 않습니다.", parent=self)
+                return
+            session.delete(header)
+            session.commit()
+            if self.current_ingredient_report_id == report_id:
+                self.current_ingredient_report_id = None
+            self.refresh_ingredient_report_list()
+            messagebox.showinfo("삭제 완료", "원료목록보고가 삭제되었습니다.", parent=self)
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror("오류", f"삭제 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
 
     def _update_subcategory_combo(self, selected_main_category):
         main_code = selected_main_category.split(" : ")[0]
@@ -835,6 +872,8 @@ class QualityManagementFrame(ctk.CTkFrame):
         self.semi_coa_picker.grid(row=0, column=1, padx=(0, 8), sticky="ew")
         ctk.CTkButton(db_frame, text="불러오기", command=self.load_selected_semi_coa,
                       fg_color="#4C9AFF", hover_color="#1F6AA5", width=100).grid(row=0, column=2)
+        ctk.CTkButton(db_frame, text="삭제", command=self.delete_selected_semi_coa,
+                      fg_color="#D32F2F", hover_color="#B71C1C", width=80).grid(row=0, column=3)
 
         self._redraw_coa_table()
         self.refresh_semi_coa_list()
@@ -1071,6 +1110,40 @@ class QualityManagementFrame(ctk.CTkFrame):
         finally:
             session.close()
 
+    def delete_selected_semi_coa(self):
+        """선택한 반제품 COA를 DB에서 삭제합니다."""
+        if not getattr(self.current_user, 'can_delete', None) or not self.current_user.can_delete():
+            messagebox.showwarning("권한 없음", "삭제 권한이 없습니다.", parent=self)
+            return
+        sel = self.semi_coa_picker.get()
+        if not sel or '|' not in sel:
+            messagebox.showwarning("선택 필요", "삭제할 항목을 선택하세요.", parent=self)
+            return
+        try:
+            header_id = int(sel.split('|')[0].strip())
+        except Exception:
+            messagebox.showwarning("선택 오류", "선택된 항목을 해석할 수 없습니다.", parent=self)
+            return
+        if not messagebox.askyesno("삭제 확인", f"선택한 반제품 시험성적서를 삭제하시겠습니까?\n\n{sel}\n\n이 작업은 되돌릴 수 없습니다.", parent=self):
+            return
+        session = db_manager.get_session()
+        try:
+            header = session.query(SemiFinishedCOA).filter_by(id=header_id).first()
+            if not header:
+                messagebox.showwarning("오류", "선택한 데이터가 존재하지 않습니다.", parent=self)
+                return
+            session.delete(header)
+            session.commit()
+            if self.current_semi_coa_id == header_id:
+                self.current_semi_coa_id = None
+            self.refresh_semi_coa_list()
+            messagebox.showinfo("삭제 완료", "반제품 시험성적서가 삭제되었습니다.", parent=self)
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror("오류", f"삭제 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
+
     def generate_semi_product_report(self):
         """입력된 데이터를 기반으로 동적 행을 포함한 엑셀 파일을 생성합니다."""
         try:
@@ -1083,7 +1156,7 @@ class QualityManagementFrame(ctk.CTkFrame):
             dynamic_test_items = []
             for i, row_widgets in enumerate(self.coa_item_rows):
                 item_data = (
-                    row_widgets['num'].cget("text"),
+                    row_widgets['num_label'].cget("text"),
                     row_widgets['name'].get(),
                     row_widgets['criteria'].get(),
                     row_widgets['result'].get(),
@@ -1281,6 +1354,8 @@ class QualityManagementFrame(ctk.CTkFrame):
         self.finished_coa_picker.grid(row=0, column=1, padx=(0, 8), sticky="ew")
         ctk.CTkButton(db_frame, text="불러오기", command=self.load_selected_finished_coa,
                       fg_color="#4C9AFF", hover_color="#1F6AA5", width=100).grid(row=0, column=2)
+        ctk.CTkButton(db_frame, text="삭제", command=self.delete_selected_finished_coa,
+                      fg_color="#D32F2F", hover_color="#B71C1C", width=80).grid(row=0, column=3)
 
         self._redraw_finished_product_table()
         self.refresh_finished_coa_list()
@@ -1746,6 +1821,44 @@ class QualityManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("불러오기 완료", "완제품 시험성적서가 로드되었습니다.", parent=self)
         except Exception as e:
             messagebox.showerror("오류", f"불러오기 중 오류가 발생했습니다: {e}", parent=self)
+        finally:
+            session.close()
+
+    def delete_selected_finished_coa(self):
+        """선택한 완제품 COA를 DB에서 삭제합니다."""
+        # 권한 확인
+        if not getattr(self.current_user, 'can_delete', None) or not self.current_user.can_delete():
+            messagebox.showwarning("권한 없음", "삭제 권한이 없습니다.", parent=self)
+            return
+        # 선택값 파싱
+        sel = self.finished_coa_picker.get()
+        if not sel or '|' not in sel:
+            messagebox.showwarning("선택 필요", "삭제할 항목을 선택하세요.", parent=self)
+            return
+        try:
+            header_id = int(sel.split('|')[0].strip())
+        except Exception:
+            messagebox.showwarning("선택 오류", "선택된 항목을 해석할 수 없습니다.", parent=self)
+            return
+        # 확인 다이얼로그
+        if not messagebox.askyesno("삭제 확인", f"선택한 완제품 시험성적서를 삭제하시겠습니까?\n\n{sel}\n\n이 작업은 되돌릴 수 없습니다.", parent=self):
+            return
+        # 삭제 실행
+        session = db_manager.get_session()
+        try:
+            header = session.query(FinishedProductCOA).filter_by(id=header_id).first()
+            if not header:
+                messagebox.showwarning("오류", "선택한 데이터가 존재하지 않습니다.", parent=self)
+                return
+            session.delete(header)
+            session.commit()
+            if self.current_finished_coa_id == header_id:
+                self.current_finished_coa_id = None
+            self.refresh_finished_coa_list()
+            messagebox.showinfo("삭제 완료", "완제품 시험성적서가 삭제되었습니다.", parent=self)
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror("오류", f"삭제 중 오류가 발생했습니다: {e}", parent=self)
         finally:
             session.close()
 

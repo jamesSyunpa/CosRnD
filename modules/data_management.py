@@ -167,6 +167,32 @@ class DataManagementFrame(ctk.CTkFrame):
             # 탭이 아직 생성되지 않았거나 다른 오류 발생 시
             print(f"[오류] 성분 관리 탭 새로고침 실패: {e}")
 
+    def focus_material_by_id(self, material_id: int):
+        """외부에서 원료 ID를 받아 성분 관리 탭을 열고 해당 항목을 선택합니다."""
+        try:
+            # 성분 관리 탭으로 전환
+            self.switch_to_tab('data/ingredient_mgt')
+            # 탭의 자식 중 MaterialManagementFrame을 찾아 위임
+            ingredient_tab_label = self.tab_key_map.get('data/ingredient_mgt') or self.tab_key_map.get('ingredient_mgt')
+            tab_widget = None
+            try:
+                if ingredient_tab_label:
+                    tab_widget = self.tab_view.tab(ingredient_tab_label)
+            except Exception:
+                # 라벨 해석 실패 시 현재 탭 컨테이너에서 탐색
+                tab_widget = self.tab_view
+            if not tab_widget:
+                tab_widget = self.tab_view
+            for child in tab_widget.winfo_children():
+                if hasattr(child, 'focus_material_by_id'):
+                    ok = child.focus_material_by_id(material_id)
+                    if ok:
+                        return True
+            return False
+        except Exception as e:
+            print(f"[경고] 성분 관리 탭 포커스 실패: {e}")
+            return False
+
     # ==============================================================================
     # 아래는 settings_management.py에서 이동 및 통합된 UI 설정 메서드들입니다.
     # ==============================================================================
@@ -292,6 +318,13 @@ class DataManagementFrame(ctk.CTkFrame):
         ).grid(row=current_row, column=1, padx=10, pady=5, sticky="w")
         current_row += 1
 
+        # 사용자 변경 이력 미리보기
+        ctk.CTkLabel(user_form_frame, text="변경 이력", font=ctk.CTkFont(size=12, weight="bold")).grid(row=current_row, column=0, padx=10, pady=(5, 0), sticky="nw")
+        self.user_history_preview = ctk.CTkTextbox(user_form_frame, height=120, wrap="word")
+        self.user_history_preview.grid(row=current_row, column=1, padx=10, pady=(5, 0), sticky="nsew")
+        self.user_history_preview.configure(state="disabled")
+        current_row += 1
+
         # 이력 보기 버튼
         self.user_history_button = ctk.CTkButton(user_form_frame, text=self.texts['view_selected_history'], command=self.show_selected_user_history, state="disabled")
         self.user_history_button.grid(row=current_row, column=1, padx=10, pady=10, sticky="e")
@@ -390,11 +423,19 @@ class DataManagementFrame(ctk.CTkFrame):
         ctk.CTkCheckBox(form_frame, text=self.texts['is_active'], variable=self.is_active_var, onvalue="on", offvalue="off").grid(row=len(labels)+4, column=1, padx=10, pady=10, sticky="e") # noqa
         
         current_row = len(labels) + 5
+        # 거래처 변경 이력 미리보기
+        ctk.CTkLabel(form_frame, text="변경 이력", font=ctk.CTkFont(size=12, weight="bold")).grid(row=current_row, column=0, padx=10, pady=(5, 0), sticky="nw")
+        self.client_history_preview = ctk.CTkTextbox(form_frame, height=120, wrap="word")
+        self.client_history_preview.grid(row=current_row, column=1, padx=10, pady=(5, 0), sticky="nsew")
+        self.client_history_preview.configure(state="disabled")
+        current_row += 1
         self.client_history_button = ctk.CTkButton(form_frame, text=self.texts['view_selected_history'], command=self.show_selected_client_history, state="disabled")
         self.client_history_button.grid(row=current_row, column=1, padx=10, pady=10, sticky="e")
 
+        # 다음 행으로 이동 후 버튼 프레임 배치 (이전 위젯과 겹치지 않도록)
+        current_row += 1
         button_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
-        button_frame.grid(row=len(labels)+5, column=0, columnspan=2, pady=10)
+        button_frame.grid(row=current_row, column=0, columnspan=2, pady=10, sticky="w")
         
         self.client_save_button = ctk.CTkButton(button_frame, text=self.texts['save'], command=self.save_client)
         self.client_save_button.pack(side="left", padx=5)
@@ -588,13 +629,32 @@ class DataManagementFrame(ctk.CTkFrame):
         try:
             for row in data:
                 biz_num = get_val(row, "거래처코드(사업자번호)", "business_number")
-                if not biz_num: continue
-                
+                if not biz_num: 
+                    continue
+
+                # 기존/신규 판별 및 이전 스냅샷 확보
+                prev = None
                 client = session.query(Client).filter_by(business_number=str(biz_num)).first()
+                is_new = False
                 if not client:
                     client = Client(business_number=str(biz_num))
                     session.add(client)
+                    is_new = True
+                else:
+                    prev = {
+                        'name': client.name or '',
+                        'client_type': client.client_type or '',
+                        'ceo_name': getattr(client, 'ceo_name', '') or '',
+                        'manager_name': client.manager_name or '',
+                        'phone': client.phone or '',
+                        'fax': getattr(client, 'fax', '') or '',
+                        'email': client.email or '',
+                        'zip_code': getattr(client, 'zip_code', '') or '',
+                        'address': client.address or '',
+                        'is_active': bool(client.is_active),
+                    }
 
+                # 값 업데이트
                 client.client_type = get_val(row, "거래처 유형", "client_type") or "기타" # noqa
                 client.name = get_val(row, "거래처명", "name")
                 setattr(client, 'ceo_name', get_val(row, "대표자명", "ceo_name"))
@@ -606,6 +666,50 @@ class DataManagementFrame(ctk.CTkFrame):
                 client.address = get_val(row, "주소", "address")
                 is_active_val = get_val(row, "사용여부(Y/N)", "is_active(Y/N)") or "Y"
                 client.is_active = str(is_active_val).upper() == "Y"
+
+                # 변경 이력 기록: (엑셀 가져오기) 표시로 일괄 업로드 집계 가능하게
+                try:
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    user_name = getattr(self.current_user, 'username', 'unknown')
+                    action = "신규 생성" if is_new else "정보 수정"
+                    header = f"[{timestamp}] by {user_name} - {action} (엑셀 가져오기)"
+                    lines = []
+                    def add_nonempty(label, val):
+                        if val is None:
+                            return
+                        if isinstance(val, str) and not val.strip():
+                            return
+                        lines.append(f"{label}: '{val}'")
+                    def add_change(label, old, new):
+                        if (old or "") != (new or ""):
+                            lines.append(f"{label}: '{old}' -> '{new}'")
+
+                    if is_new:
+                        add_nonempty("거래처명", client.name)
+                        add_nonempty("사업자번호", client.business_number)
+                        add_nonempty("유형", client.client_type)
+                        add_nonempty("연락처", client.phone)
+                        add_nonempty("이메일", client.email)
+                        add_nonempty("주소", client.address)
+                        add_nonempty("사용여부", "Y" if client.is_active else "N")
+                    else:
+                        add_change("거래처명", prev['name'], client.name or '')
+                        add_change("유형", prev['client_type'], client.client_type or '')
+                        add_change("대표자명", prev['ceo_name'], getattr(client, 'ceo_name', '') or '')
+                        add_change("담당자명", prev['manager_name'], client.manager_name or '')
+                        add_change("연락처", prev['phone'], client.phone or '')
+                        add_change("팩스", prev['fax'], getattr(client, 'fax', '') or '')
+                        add_change("이메일", prev['email'], client.email or '')
+                        add_change("우편번호", prev['zip_code'], getattr(client, 'zip_code', '') or '')
+                        add_change("주소", prev['address'], client.address or '')
+                        add_change("사용여부", 'Y' if prev['is_active'] else 'N', 'Y' if client.is_active else 'N')
+
+                    if lines:
+                        body = "- " + "\n- ".join(lines)
+                        client.change_log = (client.change_log + "\n\n" if getattr(client, 'change_log', None) else "") + f"{header}\n{body}"
+                except Exception:
+                    # 로깅 실패는 전체 처리를 막지 않음
+                    pass
 
             session.commit()
             messagebox.showinfo("성공", f"{len(data)}개의 거래처 정보가 처리되었습니다.")
@@ -718,6 +822,18 @@ class DataManagementFrame(ctk.CTkFrame):
             
             self._selected_user_id = user.id
             self.user_history_button.configure(state="normal")
+
+            # 변경 이력 미리보기 업데이트
+            try:
+                self.user_history_preview.configure(state="normal")
+                self.user_history_preview.delete("1.0", "end")
+                if getattr(user, 'change_log', None):
+                    self.user_history_preview.insert("1.0", str(user.change_log))
+                else:
+                    self.user_history_preview.insert("1.0", "저장된 변경 이력이 없습니다.")
+                self.user_history_preview.configure(state="disabled")
+            except Exception:
+                pass
 
             # 마스터 계정 선택 시 권한/삭제 비활성화 및 안내 표시
             is_master_target = (user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD')
@@ -955,6 +1071,14 @@ class DataManagementFrame(ctk.CTkFrame):
                 pass
         if self.user_tree.selection():
             self.user_tree.selection_remove(self.user_tree.selection()[0])
+        # 이력 미리보기 초기화
+        try:
+            self.user_history_preview.configure(state="normal")
+            self.user_history_preview.delete("1.0", "end")
+            self.user_history_preview.insert("1.0", "")
+            self.user_history_preview.configure(state="disabled")
+        except Exception:
+            pass
 
     def get_user_label_by_key(self, key):
         """user_entries의 키(영문)로 레이블(한글)을 찾습니다."""
@@ -1027,6 +1151,17 @@ class DataManagementFrame(ctk.CTkFrame):
             self.is_active_var.set("on" if client.is_active else "off")
             self._selected_client_id = client.id 
             self.client_history_button.configure(state="normal")
+            # 변경 이력 미리보기 업데이트
+            try:
+                self.client_history_preview.configure(state="normal")
+                self.client_history_preview.delete("1.0", "end")
+                if getattr(client, 'change_log', None):
+                    self.client_history_preview.insert("1.0", str(client.change_log))
+                else:
+                    self.client_history_preview.insert("1.0", "저장된 변경 이력이 없습니다.")
+                self.client_history_preview.configure(state="disabled")
+            except Exception:
+                pass
     
     def save_client(self):
         code = self.client_entries["code"].get()
@@ -1167,6 +1302,14 @@ class DataManagementFrame(ctk.CTkFrame):
         self._selected_client_id = None
         if self.client_tree.selection():
             self.client_tree.selection_remove(self.client_tree.selection()[0])
+        # 이력 미리보기 초기화
+        try:
+            self.client_history_preview.configure(state="normal")
+            self.client_history_preview.delete("1.0", "end")
+            self.client_history_preview.insert("1.0", "")
+            self.client_history_preview.configure(state="disabled")
+        except Exception:
+            pass
 
     # --- 이력 조회 메서드들 ---
     def show_selected_user_history(self):

@@ -432,6 +432,8 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 materials_count = 0
                 ingredients_count = 0
                 new_clients_count = 0
+                # 이번 가져오기 과정에서 새로 생성된 거래처 목록 (집계 및 이력 기록용)
+                created_clients = []  # [(Client, name, business_number)]
                 
                 print(f"가져올 원료 데이터: {len(materials_data)}개")
                 print(f"가져올 전성분 데이터: {len(ingredients_data)}개")
@@ -541,6 +543,11 @@ class MaterialManagementFrame(ctk.CTkFrame):
                                 session.add(new_client)
                                 session.flush()
                                 client_id = new_client.id
+                                # 새 거래처 생성 기록용으로 보관 (가져오기 일괄 업로드 집계를 위해)
+                                try:
+                                    created_clients.append((new_client, str(client_name_val).strip(), biz_num_str))
+                                except Exception:
+                                    pass
                                 client_map_by_biz_num[biz_num_str] = client_id
                                 # 이름 맵에도 추가하여 일관성 유지
                                 client_map_by_name[str(client_name_val).strip()] = client_id
@@ -566,6 +573,11 @@ class MaterialManagementFrame(ctk.CTkFrame):
                                     session.add(new_client)
                                     session.flush()
                                     client_id = new_client.id
+                                    # 새 거래처 생성 기록용으로 보관
+                                    try:
+                                        created_clients.append((new_client, client_name_str, None))
+                                    except Exception:
+                                        pass
                                     # 새로 생성된 클라이언트를 이름 맵에 추가하여 중복 생성을 방지합니다.
                                     client_map_by_name[client_name_str] = client_id
                                     new_clients_count += 1
@@ -805,6 +817,35 @@ class MaterialManagementFrame(ctk.CTkFrame):
                             material.change_log = (material.change_log + "\n\n" if material.change_log else "") + f"{log_header}\n{log_body}"
                 except Exception as _log_err:
                     print(f"[경고] 가져오기 변경 이력 기록 실패: {_log_err}")
+
+                # --- 거래처(공급처) 신규 생성 이력도 남김: 일괄 업로드 집계를 위해 (엑셀 가져오기) 마커 포함 ---
+                try:
+                    if created_clients:
+                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        user_name = getattr(self.current_user, 'username', 'unknown')
+                        for cli_obj, cli_name, cli_biz in created_clients:
+                            try:
+                                header = f"[{timestamp}] by {user_name} - 신규 생성 (엑셀 가져오기)"
+                                lines = []
+                                if cli_name:
+                                    lines.append(f"거래처명: '{cli_name}'")
+                                if cli_biz:
+                                    lines.append(f"사업자번호: '{cli_biz}'")
+                                # 타입 정보가 있으면 추가
+                                try:
+                                    if getattr(cli_obj, 'client_type', None):
+                                        lines.append(f"유형: '{getattr(cli_obj, 'client_type')}'")
+                                except Exception:
+                                    pass
+                                if lines:
+                                    body = "- " + "\n- ".join(lines)
+                                    cli_obj.change_log = (cli_obj.change_log + "\n\n" if getattr(cli_obj, 'change_log', None) else "") + f"{header}\n{body}"
+                            except Exception:
+                                continue
+                        # 변경 사항 DB 반영
+                        session.flush()
+                except Exception as _cli_log_err:
+                    print(f"[경고] 거래처 가져오기 변경 이력 기록 실패: {_cli_log_err}")
 
                 # 데이터베이스 커밋
                 session.commit()
@@ -1574,6 +1615,12 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 # UI 새로고침
                 self.refresh_data()
                 self.clear_material_form()
+                # 홈 화면도 즉시 최신 이력을 반영하도록 새로고침 (사용자가 홈으로 돌아가면 바로 보이도록)
+                try:
+                    if hasattr(self, 'app') and getattr(self.app, 'frames', None) and self.app.frames.get('home'):
+                        self.app.frames['home'].refresh_data()
+                except Exception as _e:
+                    print(f"[경고] 홈 화면 새로고침 실패(무시): {_e}")
                 
             except Exception as e:
                 session.rollback()
@@ -1645,3 +1692,30 @@ class MaterialManagementFrame(ctk.CTkFrame):
             HistoryPopup(self, "전체 원료 변경 이력", materials, item_name_key='name', item_code_key='code')
         finally:
             session.close()
+    
+    def focus_material_by_id(self, material_id: int):
+        """원료 목록에서 해당 ID를 찾아 선택하고 상세를 표시합니다."""
+        try:
+            # 목록 최신화 후 탐색
+            self.load_materials()
+            target_iid = None
+            for iid in self.material_tree.get_children():
+                try:
+                    vals = self.material_tree.item(iid, 'values')
+                    # values 구조: (group, id, code, name, ...)
+                    if len(vals) >= 2 and str(vals[1]) == str(material_id):
+                        target_iid = iid
+                        break
+                except Exception:
+                    continue
+            if target_iid:
+                self.material_tree.selection_set(target_iid)
+                self.material_tree.focus(target_iid)
+                self.material_tree.see(target_iid)
+                # 선택 핸들러 호출로 상세 로드
+                self.on_material_tree_select(event=None)
+                return True
+            return False
+        except Exception as e:
+            print(f"[경고] 원료 포커스 실패: {e}")
+            return False
