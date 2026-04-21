@@ -241,7 +241,7 @@ def export_multisheet_data_to_excel(sheets_data, default_filename="export.xlsx")
     except Exception as e:
         messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
 
-def export_formulation_template(formulation_data, default_filename="formulation.xlsx"):
+def export_formulation_template(formulation_data, default_filename="formulation.xlsx", is_lab_journal=False):
     """처방 정보를 특정 템플릿 형식의 엑셀 파일로 내보냅니다."""
     initial_dir = get_excel_path()
     timestamped_filename = get_timestamped_filename(default_filename)
@@ -257,44 +257,47 @@ def export_formulation_template(formulation_data, default_filename="formulation.
 
     save_excel_path(os.path.dirname(file_path))
 
+    # --- 스타일 정의 ---
+    # 테두리
+    thin = Side(style='thin')
+    medium = Side(style='medium')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    medium_border = Border(left=medium, right=medium, top=medium, bottom=medium)
+    
+    # 폰트
+    title_font = Font(name='맑은 고딕', size=18, bold=True)
+    header_font = Font(name='맑은 고딕', size=11, bold=True)
+    default_font = Font(name='맑은 고딕', size=10)
+    total_font = Font(name='맑은 고딕', size=10, bold=True)
+
+    # 정렬
+    center_align = Alignment(horizontal='center', vertical='center')
+    left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    right_align = Alignment(horizontal='right', vertical='center')
+
+    # 채우기
+    header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    total_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+
+    def set_column_widths_for_sheet(sheet):
+        """시트의 컬럼 너비를 설정하는 헬퍼 함수"""
+        sheet.column_dimensions['A'].width = 18
+        sheet.column_dimensions['B'].width = 20
+        sheet.column_dimensions['C'].width = 40
+        sheet.column_dimensions['D'].width = 15
+        sheet.column_dimensions['E'].width = 15
+        sheet.column_dimensions['F'].width = 25 # 비고 열 추가
+
     try:
         wb = Workbook()
         wb.remove(wb.active) # 기본 시트 제거
 
-        # --- 스타일 정의 ---
-        # 테두리
-        thin = Side(style='thin')
-        medium = Side(style='medium')
-        thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        medium_border = Border(left=medium, right=medium, top=medium, bottom=medium)
-        
-        # 폰트
-        title_font = Font(name='맑은 고딕', size=18, bold=True)
-        header_font = Font(name='맑은 고딕', size=11, bold=True)
-        default_font = Font(name='맑은 고딕', size=10)
-        total_font = Font(name='맑은 고딕', size=10, bold=True)
-
-        # 정렬
-        center_align = Alignment(horizontal='center', vertical='center')
-        left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
-        right_align = Alignment(horizontal='right', vertical='center')
-
-        # 채우기
-        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-        total_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
-
-        def set_column_widths_for_sheet(sheet):
-            """시트의 컬럼 너비를 설정하는 헬퍼 함수"""
-            sheet.column_dimensions['A'].width = 18
-            sheet.column_dimensions['B'].width = 20
-            sheet.column_dimensions['C'].width = 40
-            sheet.column_dimensions['D'].width = 15
-            sheet.column_dimensions['E'].width = 15
-            sheet.column_dimensions['F'].width = 25 # 비고 열 추가
-
         # --- 상세 정보 쓰기 ---
         def write_sheet_data(sheet, sheet_details, sheet_items, set_column_widths=True, is_target_sheet=False):
-            """시트에 상세 정보와 아이템 목록을 쓰는 헬퍼 함수"""
+            """
+            시트에 상세 정보와 아이템 목록을 쓰는 헬퍼 함수
+            is_lab_journal 플래그에 따라 헤더와 내용을 다르게 처리합니다.
+            """
             
             def apply_border_to_range(cell_range, border_style):
                 """지정된 범위의 모든 셀에 테두리를 적용합니다."""
@@ -304,13 +307,22 @@ def export_formulation_template(formulation_data, default_filename="formulation.
                         cell.border = border_style
 
             # --- 문서 제목 ---
-            sheet.merge_cells('A1:C2') # 제목 셀 병합 (결재란과 겹치지 않도록)
-            title_cell = sheet['A1']
-            title_cell.value = "타겟 정보 (Target Information)" if is_target_sheet else "처방전 (Formulation Sheet)"
+            if is_lab_journal:
+                # 실험일지는 전체 너비(J열까지)로 병합
+                sheet.merge_cells('A1:J2')
+            else:
+                # 처방전은 결재란을 제외하고 병합
+                sheet.merge_cells('A1:C2')
+            
+            title_cell = sheet['A1'] # 병합된 셀의 첫 번째 셀
+            if is_lab_journal:
+                title_cell.value = "실험일지 (Lab Journal)"
+            else:
+                title_cell.value = "타겟 정보 (Target Information)" if is_target_sheet else "처방전 (Formulation Sheet)"
             title_cell.font = title_font; title_cell.alignment = center_align
             
-            # --- 결재란 추가 (오른쪽 위) ---
-            if not is_target_sheet:
+            # --- 결재란 추가 (실험일지, 타겟 정보 시트에는 없음) ---
+            if not is_target_sheet and not is_lab_journal:
                 approval_labels = ["작성", "검토", "승인"]
                 for i, label in enumerate(approval_labels):
                     col_idx = i + 4 # D, E, F 열로 수정
@@ -325,9 +337,16 @@ def export_formulation_template(formulation_data, default_filename="formulation.
                     sign_cell = sheet.cell(row=2, column=col_idx)
                     sign_cell.border = thin_border
                     sheet.row_dimensions[2].height = 40 # 서명 공간 높이
+            
+                # 결재란 전체에 중간 테두리 적용
+                approval_range = f"D1:F2"
+                for row in sheet[approval_range]:
+                    for cell in row:
+                        cell.border = thin_border
 
-            # --- 상단 정보 섹션 ---
-            row_idx = 4 # 결재란 아래부터 시작
+
+            # --- 상단 정보 섹션 (실험일지에는 없음) ---
+            row_idx = 4
             if is_target_sheet:
                 info_layout = [
                     ("타겟 샘플명", sheet_details.get("타겟 샘플명")), ("타겟 거래처", sheet_details.get("타겟 거래처")),
@@ -340,21 +359,21 @@ def export_formulation_template(formulation_data, default_filename="formulation.
                     ("담당번호", str(sheet_details.get("담당번호") or "").upper()), ("총 실험량", sheet_details.get("총 실험량")),
                 ]
 
-            for i in range(0, len(info_layout), 2):
-                sheet.row_dimensions[row_idx].height = 25
-                # 레이블
-                cell_a = sheet[f"A{row_idx}"]; cell_a.value = info_layout[i][0]; cell_a.font = header_font; cell_a.fill = header_fill; cell_a.alignment = center_align
-                if i + 1 < len(info_layout):
-                    cell_d = sheet[f"D{row_idx}"]; cell_d.value = info_layout[i+1][0]; cell_d.font = header_font; cell_d.fill = header_fill; cell_d.alignment = center_align
-                # 값
-                sheet.merge_cells(f"B{row_idx}:C{row_idx}")
-                cell_b = sheet[f"B{row_idx}"]; cell_b.value = info_layout[i][1]; cell_b.alignment = left_align
-                if i + 1 < len(info_layout):
-                    cell_e = sheet[f"E{row_idx}"]; cell_e.value = info_layout[i+1][1]; cell_e.alignment = left_align
-                row_idx += 1
-            
-            # 상단 정보 섹션 테두리
-            apply_border_to_range(f"A4:F{row_idx-1}", thin_border)
+            if not is_lab_journal:
+                for i in range(0, len(info_layout), 2):
+                    sheet.row_dimensions[row_idx].height = 25
+                    # 레이블
+                    cell_a = sheet[f"A{row_idx}"]; cell_a.value = info_layout[i][0]; cell_a.font = header_font; cell_a.fill = header_fill; cell_a.alignment = center_align
+                    if i + 1 < len(info_layout):
+                        cell_d = sheet[f"D{row_idx}"]; cell_d.value = info_layout[i+1][0]; cell_d.font = header_font; cell_d.fill = header_fill; cell_d.alignment = center_align
+                    # 값
+                    sheet.merge_cells(f"B{row_idx}:C{row_idx}")
+                    cell_b = sheet[f"B{row_idx}"]; cell_b.value = info_layout[i][1]; cell_b.alignment = left_align
+                    if i + 1 < len(info_layout):
+                        cell_e = sheet[f"E{row_idx}"]; cell_e.value = info_layout[i+1][1]; cell_e.alignment = left_align
+                    row_idx += 1
+                # 상단 정보 섹션 테두리
+                apply_border_to_range(f"A4:F{row_idx-1}", thin_border)
 
             # --- 타겟 정보 시트 처리 ---
             if is_target_sheet:
@@ -391,39 +410,57 @@ def export_formulation_template(formulation_data, default_filename="formulation.
             # --- 처방 정보 시트 처리 (아래는 is_target_sheet=False 일 때만 실행) ---
             
             # --- 처방 내용 헤더 ---
-            item_headers = ["구분", "코드", "원료명", "함량(%)", "실험량(g)", "비고"]
-            item_header_row_num = row_idx + 1
+            if is_lab_journal:
+                item_headers = ["실험 날짜", "품명", "pH", "점도", "비중", "Pin", "실험번호", "업체", "샘플 전달", "기타"]
+                item_header_row_num = 4 # 상단 정보가 없으므로 4행부터 시작
+            else:
+                item_headers = ["구분", "코드", "원료명", "함량(%)", "실험량(g)", "비고"]
+                item_header_row_num = row_idx + 1
             sheet.row_dimensions[item_header_row_num].height = 25
             for col_idx, header_text in enumerate(item_headers, 1):
-                cell = sheet.cell(row=item_header_row_num, column=col_idx, value=header_text)
+                cell = sheet.cell(row=item_header_row_num, column=col_idx, value=header_text) # noqa
                 cell.border = thin_border; cell.font = header_font; cell.alignment = center_align; cell.fill = header_fill
+                # 실험일지 너비 자동 조절을 위해 헤더 길이도 계산에 포함
+                if is_lab_journal:
+                    sheet.column_dimensions[cell.column_letter].max_len = len(header_text)
 
             # --- 처방 내용 데이터 ---
             current_item_row = item_header_row_num + 1
-            total_ratio = 0.0; total_amount = 0.0
+            total_ratio = 0.0; total_amount = 0.0 # noqa
             for item in sheet_items:
                 sheet.row_dimensions[current_item_row].height = 20
                 is_separator = item.get("코드") == "---"
-                
-                item_values = [item.get("구분"), item.get("코드"), item.get("원료명"), 
-                               try_convert_to_float(item.get("함량(%)")) if not is_separator else "---",
-                               try_convert_to_float(item.get("실험량(g)")) if not is_separator else "---", ""] # 비고 칸 추가
+
+                if is_lab_journal:
+                    item_values = [item.get(h) for h in item_headers]
+                else:
+                    item_values = [item.get("구분"), item.get("코드"), item.get("원료명"), 
+                                   try_convert_to_float(item.get("함량(%)")) if not is_separator else "---",
+                                   try_convert_to_float(item.get("실험량(g)")) if not is_separator else "---", ""] # 비고 칸 추가
 
                 for col_idx, value in enumerate(item_values, 1):
                     cell = sheet.cell(row=current_item_row, column=col_idx, value=value)
                     cell.border = thin_border; cell.font = default_font
-                    if is_separator:
-                        cell.fill = total_fill # 합계 행과 같은 회색 배경
+                    if is_lab_journal:
+                        # 실험일지는 모든 셀을 가운데 정렬
                         cell.alignment = center_align
+                        # 컬럼 너비 자동 조절을 위해 최대 길이 계산
+                        if not hasattr(sheet.column_dimensions[cell.column_letter], 'max_len'): # noqa
+                            sheet.column_dimensions[cell.column_letter].max_len = 0
+                        sheet.column_dimensions[cell.column_letter].max_len = max(sheet.column_dimensions[cell.column_letter].max_len, len(str(value)))
                     else:
-                        if col_idx in [1, 2]: cell.alignment = center_align
-                        elif col_idx == 3: cell.alignment = left_align
-                        else: 
-                            cell.alignment = right_align
-                            if isinstance(value, (int, float)):
-                                cell.number_format = '0.0000'
-                                if col_idx == 4: total_ratio += value
-                                if col_idx == 5: total_amount += value
+                        if is_separator:
+                            cell.fill = total_fill # 합계 행과 같은 회색 배경
+                            cell.alignment = center_align
+                        else:
+                            if col_idx in [1, 2]: cell.alignment = center_align
+                            elif col_idx == 3: cell.alignment = left_align
+                            else: 
+                                cell.alignment = right_align
+                                if isinstance(value, (int, float)):
+                                    cell.number_format = '0.0000'
+                                    if col_idx == 4: total_ratio += value
+                                    if col_idx == 5: total_amount += value
                 current_item_row += 1
 
             # --- 합계 행 추가 ---
@@ -441,47 +478,57 @@ def export_formulation_template(formulation_data, default_filename="formulation.
 
             for col_char in "ABCDEF": sheet[f'{col_char}{total_row}'].border = thin_border
             
-            # 처방 내용 섹션 테두리
-            apply_border_to_range(f"A{item_header_row_num}:F{total_row}", thin_border)
+            # 실험일지인 경우 합계 행과 실험 결과 섹션을 숨깁니다.
+            if is_lab_journal:
+                sheet.row_dimensions[total_row].hidden = True
+            else:
+                # --- 실험 결과 섹션 ---
+                row_idx = total_row + 2
+                result_start_row = row_idx
 
-            # --- 실험 결과 섹션 ---
-            row_idx = total_row + 2
-            result_start_row = row_idx
+                # pH 행
+                sheet.row_dimensions[row_idx].height = 25
+                sheet[f"A{row_idx}"].value = "pH"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
+                sheet[f"B{row_idx}"].value = f"당일: {sheet_details.get('pH (당일)', '')}"; sheet[f"B{row_idx}"].alignment = left_align
+                sheet[f"C{row_idx}"].value = f"익일: {sheet_details.get('pH (익일)', '')}"; sheet[f"C{row_idx}"].alignment = left_align
+                row_idx += 1
 
-            # pH 행
-            sheet.row_dimensions[row_idx].height = 25
-            sheet[f"A{row_idx}"].value = "pH"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
-            sheet[f"B{row_idx}"].value = f"당일: {sheet_details.get('pH (당일)', '')}"; sheet[f"B{row_idx}"].alignment = left_align
-            sheet[f"C{row_idx}"].value = f"익일: {sheet_details.get('pH (익일)', '')}"; sheet[f"C{row_idx}"].alignment = left_align
-            row_idx += 1
+                # 점도 행
+                sheet.row_dimensions[row_idx].height = 25
+                sheet[f"A{row_idx}"].value = "점도"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
+                sheet[f"B{row_idx}"].value = f"당일: {sheet_details.get('점도 (당일)', '')}"; sheet[f"B{row_idx}"].alignment = left_align
+                sheet[f"C{row_idx}"].value = f"익일: {sheet_details.get('점도 (익일)', '')}"; sheet[f"C{row_idx}"].alignment = left_align
+                row_idx += 1
 
-            # 점도 행
-            sheet.row_dimensions[row_idx].height = 25
-            sheet[f"A{row_idx}"].value = "점도"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
-            sheet[f"B{row_idx}"].value = f"당일: {sheet_details.get('점도 (당일)', '')}"; sheet[f"B{row_idx}"].alignment = left_align
-            sheet[f"C{row_idx}"].value = f"익일: {sheet_details.get('점도 (익일)', '')}"; sheet[f"C{row_idx}"].alignment = left_align
-            row_idx += 1
+                # 사용핀 및 기계 행
+                sheet.row_dimensions[row_idx].height = 25
+                sheet[f"A{row_idx}"].value = "사용핀 및 기계"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
+                sheet.merge_cells(f"B{row_idx}:F{row_idx}")
+                sheet[f"B{row_idx}"].value = sheet_details.get("사용핀 및 기계", ""); sheet[f"B{row_idx}"].alignment = left_align
+                row_idx += 1
 
-            # 사용핀 및 기계 행
-            sheet.row_dimensions[row_idx].height = 25
-            sheet[f"A{row_idx}"].value = "사용핀 및 기계"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
-            sheet.merge_cells(f"B{row_idx}:F{row_idx}")
-            sheet[f"B{row_idx}"].value = sheet_details.get("사용핀 및 기계", ""); sheet[f"B{row_idx}"].alignment = left_align
-            row_idx += 1
+                # 품평결과 및 특이사항 행
+                sheet.row_dimensions[row_idx].height = 80
+                sheet[f"A{row_idx}"].value = "품평결과 및 특이사항"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
+                sheet.merge_cells(f"B{row_idx}:F{row_idx}")
+                sheet[f"B{row_idx}"].value = sheet_details.get("품평결과 및 특이사항", ""); sheet[f"B{row_idx}"].alignment = left_align
+                row_idx += 1
 
-            # 품평결과 및 특이사항 행
-            sheet.row_dimensions[row_idx].height = 80
-            sheet[f"A{row_idx}"].value = "품평결과 및 특이사항"; sheet[f"A{row_idx}"].font = header_font; sheet[f"A{row_idx}"].fill = header_fill; sheet[f"A{row_idx}"].alignment = center_align
-            sheet.merge_cells(f"B{row_idx}:F{row_idx}")
-            sheet[f"B{row_idx}"].value = sheet_details.get("품평결과 및 특이사항", ""); sheet[f"B{row_idx}"].alignment = left_align
-            row_idx += 1
+                # 실험 결과 섹션 테두리 (F열까지)
+                apply_border_to_range(f"A{result_start_row}:F{row_idx-1}", thin_border)
 
-            # 실험 결과 섹션 테두리 (F열까지)
-            apply_border_to_range(f"A{result_start_row}:F{row_idx-1}", thin_border)
+            # 처방 내용 섹션 테두리 (실험일지일 경우 F열이 아닌 마지막 열까지)
+            end_col_char = 'J' if is_lab_journal else 'F'
+            apply_border_to_range(f"A{item_header_row_num}:{end_col_char}{total_row}", thin_border)
 
             # --- 컬럼 너비 설정 ---
             if set_column_widths:
-                set_column_widths_for_sheet(sheet)
+                if is_lab_journal:
+                    for col_dim in sheet.column_dimensions.values():
+                        if hasattr(col_dim, 'max_len'):
+                            col_dim.width = col_dim.max_len + 5
+                else:
+                    set_column_widths_for_sheet(sheet)
 
         details = formulation_data.get("details", {}); items = formulation_data.get("items", [])
         target_details = formulation_data.get("target_details")
@@ -503,26 +550,24 @@ def export_formulation_template(formulation_data, default_filename="formulation.
 
     except Exception as e:
         messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+        # 오류 발생 시에도 파일은 생성되도록 복구 로직 추가
         details = formulation_data.get("details", {}); items = formulation_data.get("items", [])
         target_details = formulation_data.get("target_details")
         if target_details:
-            # 타겟 정보가 있을 경우: 2개 시트 생성
+            # 타겟 정보가 있을 경우: 2개 시트 생성 (실험일지 모드에서는 실행되지 않음)
             ws_formulation = wb.create_sheet("처방 정보")
             write_sheet_data(ws_formulation, details, items)
 
             ws_target = wb.create_sheet("타겟 정보")
             # 타겟 정보 시트에는 처방 내용(items)이 없으므로 빈 리스트 전달
             write_sheet_data(ws_target, target_details, [], is_target_sheet=True)
+        elif is_lab_journal:
+            ws_journal = wb.create_sheet("실험일지")
+            write_sheet_data(ws_journal, details, items, is_lab_journal=True)
         else:
-            # 타겟 정보가 없을 경우: 기존 방식대로 1개 시트 생성
             ws_formulation = wb.create_sheet("처방 정보")
             write_sheet_data(ws_formulation, details, items)
-
         wb.save(file_path)
-        messagebox.showinfo("성공", f"처방 정보가 '{file_path}'에 저장되었습니다.")
-
-    except Exception as e:
-        messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
 
 def try_convert_to_float(value):
     """값을 float으로 변환 시도, 실패 시 원래 값 반환"""
@@ -891,3 +936,151 @@ def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_l
         messagebox.showinfo("성공", f"전성분 목록이 '{file_path}'에 저장되었습니다.")
     except Exception as e:
         messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+
+def export_functional_cosmetics_report_template(report_data=None):
+    """UI에서 작성된 내용을 바탕으로 기능성화장품 심사제외품목 보고서를 생성하고 내보냅니다."""
+    if report_data is None:
+        report_data = {}
+
+    initial_dir = get_excel_path()
+    product_name = report_data.get("제품명(국문)", "기능성보고서")
+    default_filename = f"{product_name}_심사제외보고서.xlsx"
+    timestamped_filename = get_timestamped_filename(default_filename)
+    file_path = filedialog.asksaveasfilename(
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        initialdir=initial_dir,
+        initialfile=timestamped_filename,
+        title="심사제외 품목 보고서 저장"
+    )
+    if not file_path:
+        return
+
+    save_excel_path(os.path.dirname(file_path))
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "기능성심사제외보고서"
+
+        # --- Styles ---
+        title_font = Font(name='맑은 고딕', size=16, bold=True)
+        header_font = Font(name='맑은 고딕', size=11, bold=True)
+        default_font = Font(name='맑은 고딕', size=10)
+        
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align_top_wrap = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        # --- Column widths ---
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 45
+        ws.column_dimensions['C'].width = 50
+
+        # --- Title ---
+        ws.merge_cells("A1:C1")
+        title_cell = ws['A1']
+        title_cell.value = "기능성화장품 심사제외품목 보고서"
+        title_cell.font = title_font
+        title_cell.alignment = center_align
+        ws.row_dimensions[1].height = 30
+
+        row_idx = 3
+
+        def write_row_and_style(r_idx, values, is_header=False):
+            """Helper to write a row and apply styles"""
+            cells = []
+            for c_idx, value in enumerate(values, 1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
+                cells.append(cell)
+            
+            for cell in cells:
+                cell.border = thin_border
+                cell.font = default_font
+                cell.alignment = left_align_top_wrap
+            
+            if is_header and cells:
+                cells[0].font = header_font
+            
+            # Auto row height for multiline content in the last cell
+            if len(values) > 2 and values[2] and isinstance(values[2], str):
+                num_lines = values[2].count('\n') + 1
+                if num_lines > 1:
+                    ws.row_dimensions[r_idx].height = 15 * num_lines
+
+        # --- Data Parsing ---
+        spf_pa_text = report_data.get("자외선 관련 (SPF / PA)", "")
+        spf, pa = "", ""
+        if "/" in spf_pa_text:
+            parts = [p.strip() for p in spf_pa_text.split('/')]
+            spf, pa = (parts[0], parts[1]) if len(parts) > 1 else (parts[0], "")
+        else:
+            if "spf" in spf_pa_text.lower(): spf = spf_pa_text
+            elif "pa" in spf_pa_text.lower(): pa = spf_pa_text
+        
+        effects = report_data.get("효능·효과", "").replace(", ", "\n")
+
+        # --- Report Layout ---
+        layout = [
+            ("보고정보", "제품명", report_data.get("제품명(국문)")),
+            (None, "제품의 pH 기준치", report_data.get("pH (실측값)")),
+            (None, "대상구분", report_data.get("제출유형")),
+            ("제10조 제1항 제3호에 해당하는 경우", "이미 심사받은 품목", report_data.get("이미 심사받은 품목")),
+            (None, "활성물질용량", report_data.get("활성물질용량")),
+            (None, "자외선차단지수(SPF)", spf),
+            (None, "자외선 A차단등급(PA)", pa),
+            (None, "고시한 기준 및 시험방법", report_data.get("고시한 기준 및 시험방법")),
+            (None, "효능효과", effects),
+            (None, "용법용량", report_data.get("용법·용량")),
+            (None, "사용할 때의 주의사항", report_data.get("사용할 때의 주의사항")),
+            ("총량관리", "자동 입력", ""),
+        ]
+
+        # --- Write data and merge cells ---
+        merge_start_row = 3
+        for val_a, val_b, val_c in layout:
+            if val_a is not None and row_idx > merge_start_row:
+                ws.merge_cells(start_row=merge_start_row, start_column=1, end_row=row_idx - 1, end_column=1)
+                ws.cell(merge_start_row, 1).alignment = left_align_top_wrap
+                merge_start_row = row_idx
+            
+            write_row_and_style(row_idx, [val_a, val_b, val_c], is_header=(val_a is not None))
+            row_idx += 1
+        ws.merge_cells(start_row=merge_start_row, start_column=1, end_row=row_idx - 1, end_column=1)
+        ws.cell(merge_start_row, 1).alignment = left_align_top_wrap
+
+        # --- Section: 원료성분 및 배합 비율 ---
+        start_row = row_idx
+        
+        ingredients_text = report_data.get("원료성분 및 배합비율", "")
+        ingredients_list = []
+        if ingredients_text and "예시:" not in ingredients_text:
+            for line in ingredients_text.splitlines():
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    name = parts[0].strip()
+                    amount = parts[1].strip()
+                    ingredients_list.append((name, amount))
+                elif line.strip():
+                    ingredients_list.append((line.strip(), ""))
+        
+        if not ingredients_list:
+            write_row_and_style(row_idx, ["원료성분 및 배합 비율", "(내용 없음)", ""], is_header=True)
+            ws.merge_cells(start_row=row_idx, start_column=2, end_row=row_idx, end_column=3)
+            row_idx += 1
+        else:
+            first_ing_name, first_ing_amount = ingredients_list[0]
+            write_row_and_style(row_idx, ["원료성분 및 배합 비율", first_ing_name, first_ing_amount], is_header=True)
+            row_idx += 1
+            for name, amount in ingredients_list[1:]:
+                write_row_and_style(row_idx, [None, name, amount])
+                row_idx += 1
+
+        ws.merge_cells(start_row=start_row, start_column=1, end_row=row_idx - 1, end_column=1)
+        ws.cell(start_row, 1).alignment = left_align_top_wrap
+
+        wb.save(file_path)
+        messagebox.showinfo("성공", f"보고서 파일이 '{file_path}'에 저장되었습니다.")
+    except Exception as e:
+        messagebox.showerror("내보내기 오류", f"보고서 파일 저장 중 오류가 발생했습니다: {e}")

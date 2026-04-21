@@ -19,6 +19,7 @@ else:
 CONFIG_FILE_PATH = os.path.join(application_path, 'config.ini')
 
 from database.db_manager import db_manager
+from modules.translation import get_texts
 from modules.login import LoginWindow
 from modules.settings_management import SettingsManagementFrame
 from modules.quality_management import QualityManagementFrame # 품질관리 프레임 import
@@ -36,22 +37,15 @@ FRAME_QUALITY = "quality" # 품질관리 프레임 이름 추가
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.language = "korean" # 기본 언어 설정
         self.title("화장품 연구소 관리 시스템")
 
         # 최근 활동 기록을 위한 설정
-        self.ACTION_CONFIG = {
-            "document/처방 관리": {"icon": "℞", "title": "처방 관리"},
-            "document/문서": {"icon": "📄", "title": "연구소 문서"},
-            "data/성분 관리": {"icon": "🧪", "title": "성분 관리"},
-            "data/거래처 관리": {"icon": "🏢", "title": "거래처 관리"},
-            "data/회원 관리": {"icon": "👥", "title": "회원 관리"},
-            "settings/설정": {"icon": "⚙️", "title": "앱 설정"},
-            "quality/품질 관리": {"icon": "🔬", "title": "품질 관리"}, # 품질관리 활동 추가
-        }
         self.recent_actions = deque(maxlen=5) # 화면에 표시할 최대 개수
         
         self.current_user = None
         self.withdraw()  # 메인 창 숨김
+        self.load_app_settings() # UI 생성 전 설정 로드
         
         # DB 초기화 (application_path 전달)
         db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)
@@ -108,6 +102,20 @@ class App(ctk.CTk):
         self.center_on_mouse_screen()
         self.deiconify()
 
+    def load_app_settings(self):
+        """config.ini에서 앱 설정을 로드합니다 (테마, 언어 등)."""
+        config = configparser.ConfigParser()
+        config.read(CONFIG_FILE_PATH, encoding='utf-8')
+        
+        # 테마 설정 로드 및 적용
+        theme = config.get('Appearance', 'theme', fallback='system')
+        ctk.set_appearance_mode(theme)
+        
+        # 언어 설정 로드
+        lang_setting = config.get('Appearance', 'language', fallback='korean').lower()
+        self.language = 'english' if lang_setting == 'english' else 'korean'
+        print(f"로드된 언어 설정: {self.language}")
+
     def setup_main_ui(self):
         print(f"{datetime.now()}: setup_main_ui 호출")
         
@@ -120,10 +128,30 @@ class App(ctk.CTk):
         self.navigation_frame.grid(row=0, column=0, sticky="nsew")
         self.navigation_frame.grid_columnconfigure(0, weight=1)
 
+        # --- 언어별 텍스트 ---
+        current_texts = get_texts(self.language)
+
+        # ACTION_CONFIG를 언어에 맞게 동적으로 생성
+        self.ACTION_CONFIG = {
+            f"document/{current_texts['formulation_mgt']}": {"icon": "℞", "title": current_texts['formulation_mgt']},
+            f"document/{current_texts['document_sub']}": {"icon": "📄", "title": current_texts['document_sub']},
+            f"data/{current_texts['ingredient_mgt']}": {"icon": "🧪", "title": current_texts['ingredient_mgt']},
+            f"data/{current_texts['client_mgt']}": {"icon": "🏢", "title": current_texts['client_mgt']},
+            f"data/{current_texts['user_mgt']}": {"icon": "👥", "title": current_texts['user_mgt']},
+            f"settings/{current_texts['settings_sub']}": {"icon": "⚙️", "title": current_texts['settings_sub']},
+            f"quality/{current_texts['coa']}": {"icon": "🔬", "title": current_texts['coa']},
+            f"quality/{current_texts['msds']}": {"icon": "🔬", "title": current_texts['msds']},
+            f"quality/{current_texts['prod_standard']}": {"icon": "🔬", "title": current_texts['prod_standard']},
+            f"quality/{current_texts['mfg_record']}": {"icon": "🔬", "title": current_texts['mfg_record']},
+        }
+
+        # 프로그램 제목 설정
+        self.title("R&D Management System" if self.language == "english" else "화장품 연구소 관리 시스템")
+
         # 네비게이션 제목
         self.navigation_frame_label = ctk.CTkLabel(
             self.navigation_frame, 
-            text="메뉴",
+            text=current_texts["menu"],
             font=ctk.CTkFont(size=16, weight="bold")
         )
         self.navigation_frame_label.grid(row=0, column=0, padx=15, pady=(20, 30))
@@ -138,9 +166,9 @@ class App(ctk.CTk):
         
         self.nav_buttons = {}
         all_nav_items = [
-            {"name": FRAME_HOME, "text": "메인 화면", "admin_only": False},
-            {"name": FRAME_DOCUMENT, "text": "연구소", "admin_only": False},
-            {"name": FRAME_QUALITY, "text": "품질 관리", "admin_only": False}, # 품질관리 메뉴 추가
+            {"name": FRAME_HOME, "text": current_texts["home"], "admin_only": False},
+            {"name": FRAME_DOCUMENT, "text": current_texts["document"], "admin_only": False},
+            {"name": FRAME_QUALITY, "text": current_texts["quality"], "admin_only": False},
         ]
 
         current_row = 1
@@ -165,8 +193,8 @@ class App(ctk.CTk):
         # 데이터 관리 버튼
         self.data_button = ctk.CTkButton(
             self.navigation_frame,
-            text="데이터 관리",
-            command=lambda: self.navigate_and_record("data/성분 관리"),
+            text=current_texts["data"],
+            command=lambda: self.navigate_and_record("data/" + current_texts["ingredient_mgt"]),
             width=140, height=35, font=ctk.CTkFont(size=12),
             fg_color="#E65100", hover_color="#BF360C", anchor="center"  # 주황색 계열
         )
@@ -177,8 +205,8 @@ class App(ctk.CTk):
         if self.current_user.is_admin:
             self.settings_button = ctk.CTkButton(
                 self.navigation_frame,
-                text="설정 관리",
-                command=lambda: self.navigate_and_record("settings/설정"),
+                text=current_texts["settings"],
+                command=lambda: self.navigate_and_record("settings/" + current_texts["settings_sub"]),
                 width=140, height=35, font=ctk.CTkFont(size=12), fg_color="gray50", hover_color="gray30", anchor="center"
             )
             self.settings_button.grid(row=current_row, column=0, padx=15, pady=8)
@@ -187,7 +215,7 @@ class App(ctk.CTk):
         # 로그아웃 버튼 (다른 스타일)
         self.logout_button = ctk.CTkButton(
             self.navigation_frame, 
-            text="로그아웃", 
+            text=current_texts["logout"],
             command=self.logout,
             width=140,
             height=35,
@@ -212,8 +240,8 @@ class App(ctk.CTk):
             self.main_content_frame,
             self.current_user,
             self,  # App 인스턴스 전달
-            self.recent_actions,
-            self.ACTION_CONFIG
+            self.recent_actions, # noqa
+            self.ACTION_CONFIG,
         )
         self.frames[FRAME_HOME].grid(row=0, column=0, sticky="nsew")
         
@@ -222,8 +250,9 @@ class App(ctk.CTk):
             self.main_content_frame, 
             self.current_user, 
             self,
-            CONFIG_FILE_PATH,
-            application_path
+            config_path=CONFIG_FILE_PATH,
+            application_path=application_path,
+            language=self.language
         )
         self.frames[FRAME_SETTINGS].grid(row=0, column=0, sticky="nsew")
         
@@ -232,7 +261,8 @@ class App(ctk.CTk):
         self.frames[FRAME_DATA] = DataManagementFrame(
             self.main_content_frame,
             self.current_user,
-            self
+            self,
+            language=self.language
         )
         self.frames[FRAME_DATA].grid(row=0, column=0, sticky="nsew")
 
@@ -240,7 +270,8 @@ class App(ctk.CTk):
         self.frames[FRAME_DOCUMENT] = DocumentManagementFrame(
             self.main_content_frame,
             self.current_user,
-            self
+            self,
+            language=self.language
         )
         self.frames[FRAME_DOCUMENT].grid(row=0, column=0, sticky="nsew")
 
@@ -248,7 +279,8 @@ class App(ctk.CTk):
         self.frames[FRAME_QUALITY] = QualityManagementFrame(
             self.main_content_frame,
             self.current_user,
-            self
+            self,
+            language=self.language
         )
         self.frames[FRAME_QUALITY].grid(row=0, column=0, sticky="nsew")
         # 기본 선택
@@ -400,6 +432,12 @@ class App(ctk.CTk):
         config.set('Appearance', 'folder_icon_size', str(icon_size))
         with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
             config.write(configfile)
+            
+        # 문서 관리 탭의 설정 저장
+        doc_frame = self.frames.get(FRAME_DOCUMENT)
+        if doc_frame and hasattr(doc_frame, 'save_journal_settings'):
+            doc_frame.save_journal_settings(config)
+
 
     def center_on_mouse_screen(self):
         """
@@ -437,6 +475,16 @@ class App(ctk.CTk):
         self.geometry(f"{width}x{height}+{x}+{y}") # 최종 크기와 위치 설정
         self.minsize(int(screen_width * 0.6), int(screen_height * 0.6))
 
+    def recreate_main_ui(self):
+        """메인 UI를 재생성하여 언어 변경 등을 반영합니다."""
+        # 기존 메인 UI 위젯들 제거
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # 메인 UI 재생성
+        self.setup_main_ui()
+        self.update_treeview_style()
+
     def restart_program(self):
         """프로그램을 재시작합니다."""
         print("프로그램 재시작...")
@@ -445,13 +493,7 @@ class App(ctk.CTk):
         os.execv(sys.executable, ['python'] + sys.argv)
 
 if __name__ == "__main__":
-    # config.ini에서 테마 설정을 읽어와 적용
-    config = configparser.ConfigParser()
-    if os.path.exists(CONFIG_FILE_PATH):
-        config.read(CONFIG_FILE_PATH, encoding='utf-8')
-    
-    theme = config.get('Appearance', 'theme', fallback='system')
-    ctk.set_appearance_mode(theme)
+    # App 생성자에서 설정을 로드하므로 여기서 미리 적용할 필요 없음
     ctk.set_default_color_theme("blue")
     
     app = App()

@@ -18,6 +18,7 @@ a = Analysis(
         'sqlalchemy.dialects.sqlite',
         'sqlalchemy.ext.declarative',  # 추가
         'customtkinter',
+        'customtkinter.windows.widgets.ctk_button', # 명시적 추가
         'tkcalendar',
         'openpyxl',
         'bcrypt',
@@ -36,6 +37,7 @@ a = Analysis(
         'modules.material_management',
         'modules.signup',
         'modules.ui_components',
+        'modules.translation',
         'modules.quality_management',
         'database',
         'database.db_manager',
@@ -65,18 +67,8 @@ if os.path.exists('icon.ico'):
 
 # 6. customtkinter 데이터 파일
 try:
-    import customtkinter
-    ctk_path = os.path.dirname(customtkinter.__file__)
-    ctk_assets = os.path.join(ctk_path, 'assets')
-    
-    if os.path.exists(ctk_assets):
-        for root, dirs, files in os.walk(ctk_assets):
-            for file in files:
-                src_file = os.path.join(root, file)
-                rel_path = os.path.relpath(src_file, ctk_path)
-                dest_path = os.path.join('customtkinter', rel_path)
-                a.datas.append((dest_path, src_file, 'DATA'))
-        print("✓ customtkinter assets 추가됨")
+    a.datas += collect_data_files('customtkinter')
+    print("✓ customtkinter assets 추가됨")
 except Exception as e:
     print(f"⚠ customtkinter 수집 실패: {e}")
 
@@ -84,7 +76,7 @@ except Exception as e:
 try:
     import tkcalendar
     tkcalendar_path = os.path.dirname(tkcalendar.__file__)
-    a.datas += collect_data_files('tkcalendar', include_py_files=True)
+    a.datas += collect_data_files('tkcalendar')
     print("✓ tkcalendar 로케일 추가됨")
 except Exception as e:
     print(f"⚠ tkcalendar 수집 실패: {e}")
