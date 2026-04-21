@@ -78,22 +78,41 @@ class ClipboardErrorDialog(ctk.CTkToplevel):
 
 class DocumentManagementFrame(ctk.CTkFrame):
     """문서/처방/생산/패키지 관리 메인 프레임 (세련된 UI + 재사용 패턴)."""
-    def __init__(self, master, current_user, app, texts=None):
+    def __init__(self, master, current_user, app, texts=None, mode="research"):
         super().__init__(master, corner_radius=0, fg_color="transparent")
         self.current_user = current_user
         self.app = app
         self.language = getattr(app, 'language', 'korean')
         self.texts = texts or get_texts(self.language)
+        self.mode = mode or "research"
+        self._selected_formulation_id = None
 
         # 레이아웃 기본 설정
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # 상단 도움말 버튼 영역 (place로 겹치게 배치)
+        # 도움말 버튼 (place로 겹치게 배치)
         top_frame = ctk.CTkFrame(self, fg_color="transparent")
         top_frame.grid(row=0, column=0, sticky="nsew")
         self.help_button = ctk.CTkButton(top_frame, text=self.texts['help'], width=80, command=self.show_help)
         self.help_button.place(relx=0.98, y=10, anchor="ne")
+
+        # 패키지 전용 모드일 경우 별도 레이아웃으로 처리
+        if self.mode == "package_only":
+            self.tab_view = None
+            self.tab_map = {}
+            self.package_tab_label = None
+            package_container = ctk.CTkFrame(self, fg_color="transparent")
+            package_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+            package_container.grid_columnconfigure(0, weight=1)
+            package_container.grid_rowconfigure(0, weight=1)
+
+            self.setup_package_tab(package_container)
+            try:
+                self.refresh_package_list()
+            except Exception:
+                pass
+            return
 
         # 최상위 탭 뷰
         self.tab_view = ctk.CTkTabview(
@@ -107,23 +126,36 @@ class DocumentManagementFrame(ctk.CTkFrame):
         )
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # 탭 구성
-        self.tab_map = {
-            self.texts.get("formulation_mgt", "처방 관리"): "document/formulation_mgt",
-            self.texts.get("document_sub", "문서"): "document/document_sub",
-        }
-        for tab_name in self.tab_map.keys():
-            self.tab_view.add(tab_name)
+        # 탭 구성 (모드별 구성 요소 제어)
+        self.tab_map = {}
+        formulation_tab_label = self.texts.get("formulation_mgt", "처방 관리")
+        document_tab_label = self.texts.get("document_sub", "문서")
 
-        # 내부 탭 초기화
-        self.setup_formulation_tab(self.tab_view.tab(self.texts.get("formulation_mgt", "처방 관리")))
-        self.setup_document_sub_tabs(self.tab_view.tab(self.texts.get("document_sub", "문서")))
+        # 연구/전체 모드에서는 처방 탭 포함
+        include_formulation_tab = self.mode in ("research", "full")
+        if include_formulation_tab:
+            self.tab_map[formulation_tab_label] = "document/formulation_mgt"
+            self.tab_view.add(formulation_tab_label)
 
-        # 초기 데이터 로드
-        try:
-            self.load_formulations()
-        except Exception:
-            pass
+        # 문서 탭은 항상 유지하되, 서브 탭 구성은 모드에 따라 조정
+        self.tab_map[document_tab_label] = "document/document_sub"
+        self.tab_view.add(document_tab_label)
+
+        if include_formulation_tab:
+            self.setup_formulation_tab(self.tab_view.tab(formulation_tab_label))
+
+        include_package_sub_tab = self.mode in ("full",)
+        self.setup_document_sub_tabs(
+            self.tab_view.tab(document_tab_label),
+            include_package_tab=include_package_sub_tab
+        )
+
+        # 초기 데이터 로드 (처방 탭이 존재할 때만 수행)
+        if include_formulation_tab:
+            try:
+                self.load_formulations()
+            except Exception:
+                pass
 
     # ------------------------------
     # 권한/상태 헬퍼
@@ -181,7 +213,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             return ['초안']
         return []
 
-    def setup_document_sub_tabs(self, tab_frame):
+    def setup_document_sub_tabs(self, tab_frame, include_package_tab=True):
         """'문서' 탭 내부에 서브 탭들을 설정합니다."""
         tab_frame.grid_columnconfigure(0, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
@@ -192,20 +224,22 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # 요청된 하위 탭들 추가
         doc_sub_tab_view.add(self.texts["property_spec"])
         doc_sub_tab_view.add(self.texts["report"])
-        # 통합 패키지 탭 추가
-        try:
-            package_tab_label = self.texts.get("package", "패키지")
-        except Exception:
-            package_tab_label = "패키지"
-        doc_sub_tab_view.add(package_tab_label)
-        
+        package_tab_label = None
+        if include_package_tab:
+            try:
+                package_tab_label = self.texts.get("package", "패키지")
+            except Exception:
+                package_tab_label = "패키지"
+            doc_sub_tab_view.add(package_tab_label)
+
         # 패키지 탭 라벨 저장 (탭 변경 감지용)
         self.package_tab_label = package_tab_label
 
         # 각 탭의 UI 설정
         self.setup_lab_journal_tab(doc_sub_tab_view.tab(self.texts["property_spec"]))
         self.setup_functional_report_tab(doc_sub_tab_view.tab(self.texts["report"]))
-        self.setup_package_tab(doc_sub_tab_view.tab(package_tab_label))
+        if include_package_tab and package_tab_label:
+            self.setup_package_tab(doc_sub_tab_view.tab(package_tab_label))
 
     def on_doc_sub_tab_change(self):
         """문서 관리 하위 탭 전환 시, '패키지' 탭이 선택되면 목록을 자동 갱신합니다."""
@@ -225,6 +259,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         HelpPopup(self, title, message)
 
     def on_tab_change(self):
+        if not getattr(self, 'tab_view', None):
+            return
         selected_tab = self.tab_view.get()
         # 탭 이름에 해당하는 고유 키를 찾아서 활동을 기록합니다.
         static_key = self.tab_map.get(selected_tab)
@@ -232,12 +268,20 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.app.record_action(static_key)
 
     def switch_to_tab(self, tab_name):
+        if not getattr(self, 'tab_view', None):
+            return
         if tab_name in self.tab_view._name_list: # pylint: disable=protected-access
             self.tab_view.set(tab_name)
 
     def refresh_data(self):
         """문서 관리 프레임의 데이터를 새로고침합니다. (선택 유지)"""
         print("문서 관리 프레임 데이터 새로고침...")
+        if self.mode == "package_only":
+            try:
+                self.refresh_package_list()
+            except Exception as e:
+                print(f"[오류] 패키지 목록 새로고침 실패: {e}")
+            return
         try:
             # 현재 선택된 ID와 뷰 상태 저장
             selected_ids = self.get_selected_formulation_ids()
@@ -506,6 +550,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.delete_button.pack(side="right", padx=3) # 오른쪽에 여백 추가
         self.copy_button = ctk.CTkButton(bottom_button_frame, text="처방 복사", width=65, height=26, fg_color="#2B7A3B", hover_color="#236030", command=self.copy_formulation, font=("", 12))
         self.copy_button.pack(side="right", padx=3)
+        self.create_package_button = ctk.CTkButton(bottom_button_frame, text="패키지 저장", width=85, height=26, command=self.create_document_package, font=("", 12))
+        self.create_package_button.pack(side="right", padx=3)
         self.edit_button = ctk.CTkButton(bottom_button_frame, text=self.texts['edit'], width=60, height=26, command=lambda: self.open_formulation_popup(edit_mode=True), font=("", 12))
         self.edit_button.pack(side="right", padx=3)
         self.new_button = ctk.CTkButton(bottom_button_frame, text=self.texts['new'], width=60, height=26, command=lambda: self.open_formulation_popup(edit_mode=False), font=("", 12))
@@ -967,7 +1013,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         header = ctk.CTkFrame(tab_frame, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=10, pady=(10,5))
 
-        ctk.CTkButton(header, text="새 패키지 저장", width=90, command=self.create_document_package, font=("", 11)).pack(side="left")
+        create_btn = ctk.CTkButton(header, text="새 패키지 저장", width=90, command=self.create_document_package, font=("", 11))
+        create_btn.pack(side="left")
         ctk.CTkButton(header, text="패키지 상세", width=80, command=self.open_selected_package_detail, font=("", 11)).pack(side="left", padx=(5,0))
         ctk.CTkButton(header, text="문서 링크 추가", width=95, command=self.add_package_link, font=("", 11)).pack(side="left", padx=(5,0))
         ctk.CTkButton(header, text="첨부 추가", width=75, command=self.add_package_attachment, font=("", 11)).pack(side="left", padx=(5,0))
@@ -976,6 +1023,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
                      fg_color="darkred", hover_color="red", font=("", 11)).pack(side="left", padx=(5,0))
         
         ctk.CTkLabel(header, text="선택된 처방의 통합 자료를 하나로 저장/관리합니다.", text_color="gray", font=("", 10)).pack(side="left", padx=(10,0))
+
+        if self.mode == "package_only":
+            self.create_package_redirect_button = create_btn
+            create_btn.configure(command=self._redirect_to_document_for_package)
 
         list_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
         list_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0,10))
@@ -993,6 +1044,18 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.package_tree.configure(yscrollcommand=pkg_v_scroll.set)
         # 패키지 선택 핸들러
         self.package_tree.bind("<<TreeviewSelect>>", self.on_package_tree_select)
+
+    def _redirect_to_document_for_package(self):
+        """패키지 생성 기능을 연구소 문서 화면으로 안내합니다."""
+        try:
+            messagebox.showinfo("안내", "패키지 생성을 위해 연구소 > 문서 화면에서 처방을 선택한 뒤 '패키지 저장' 버튼을 사용하세요.", parent=self)
+        except Exception:
+            pass
+        try:
+            if hasattr(self.app, 'navigate_and_record'):
+                self.app.navigate_and_record("document")
+        except Exception:
+            pass
 
     # ------------------------------
     # 생산 처방 탭

@@ -77,6 +77,14 @@ class User(Base):
         """삭제 승인 권한 - RQD, MSAD"""
         return bool(self.is_admin) or self.role in ['RQD', 'MSAD']
     
+    def can_delete_formulation(self):
+        """처방 삭제 권한 - 삭제 권한과 동일 정책"""
+        return self.can_delete()
+
+    def has_package_management_access(self):
+        """문서 관리(패키지) 메뉴 접근 권한 - RQ 이상"""
+        return bool(self.is_admin) or self.role in ['RQ', 'RQD', 'MSAD']
+
     def is_master_admin(self):
         """최고 관리자 권한 (백업 기능 포함)"""
         # 정책 변경: RQD도 마스터 권한을 모두 포함
