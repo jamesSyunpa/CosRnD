@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 class DBManager:
     _instance = None
@@ -473,6 +473,11 @@ class DBManager:
                         print(f"테이블 '{table_name}'이(가) 아직 생성되지 않았습니다. create_all에서 생성됩니다.")
                     else:
                         print(f"테이블 '{table_name}' 스키마 업데이트 중 오류 발생: {e}")
+        # 누락된 테이블 생성 보장 (공유 DB 경로에서도 동작하도록)
+        try:
+            Base.metadata.create_all(self.engine)
+        except Exception as e:
+            print(f"[경고] create_all 수행 중 오류(무시): {e}")
         print("데이터베이스 스키마 확인 및 업데이트 완료.")
 
     def _check_and_run_migrations(self):

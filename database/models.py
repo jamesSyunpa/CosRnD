@@ -228,3 +228,103 @@ class FormulationItem(Base):
     
     formulation = relationship("Formulation", back_populates="items")
     material = relationship("Material") # material_id가 NULL일 수 있으므로 outer join
+
+# ----------------------------------------------------------------------------
+# 품질관리 저장용 테이블들 (원료목록보고, 반제품/완제품 COA)
+# ----------------------------------------------------------------------------
+
+
+class IngredientReport(Base):
+    __tablename__ = 'ingredient_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    manufacturer = Column(String(255))
+    type_code = Column(String(100))  # 유형
+    functional_type_code = Column(String(100))  # 기능성 유형
+    functional_code = Column(String(100))  # 기능성 코드
+    usage = Column(String(255))  # 용도
+    custom_content = Column(Text)  # 자율기재사항
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    items = relationship('IngredientReportItem', back_populates='report', cascade='all, delete-orphan')
+
+
+class IngredientReportItem(Base):
+    __tablename__ = 'ingredient_report_items'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_id = Column(Integer, ForeignKey('ingredient_reports.id', ondelete='CASCADE'), nullable=False)
+    row_no = Column(Integer)
+    ingredient_name = Column(String(255), nullable=False)
+
+    report = relationship('IngredientReport', back_populates='items')
+
+
+class SemiFinishedCOA(Base):
+    __tablename__ = 'semi_finished_coa'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    lot_no = Column(String(100))
+    manufacture_date = Column(Date)
+    test_date = Column(Date)
+    examiner = Column(String(100))  # 시험자
+    overall_result = Column(String(100))  # 종합판정
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    items = relationship('SemiFinishedCOAItem', back_populates='header', cascade='all, delete-orphan')
+
+
+class SemiFinishedCOAItem(Base):
+    __tablename__ = 'semi_finished_coa_items'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    header_id = Column(Integer, ForeignKey('semi_finished_coa.id', ondelete='CASCADE'), nullable=False)
+    seq_no = Column(Integer)  # 번호
+    item_name = Column(String(255))  # 시험항목
+    spec = Column(String(255))  # 시험기준
+    result = Column(String(255))  # 시험결과
+    remark = Column(String(255))  # 비고
+
+    header = relationship('SemiFinishedCOA', back_populates='items')
+
+
+class FinishedProductCOA(Base):
+    __tablename__ = 'finished_product_coa'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    semi_mfg_date = Column(Date)  # 반제품 제조일자
+    semi_lot_no = Column(String(100))  # 반제품 제조번호
+    pack_date = Column(Date)  # 포장일자
+    finished_lot_no = Column(String(100))  # 완제품 제조번호
+    expiry_date = Column(Date)  # 유통기한
+    unit_volume_ml = Column(Float)  # 용량(ml)
+    sampling_method = Column(String(255))  # 검체채취방법
+    test_date = Column(Date)
+    examiner = Column(String(100))
+    reviewer = Column(String(100))  # 확인자
+    overall_result = Column(String(100))
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    items = relationship('FinishedProductCOAItem', back_populates='header', cascade='all, delete-orphan')
+
+
+class FinishedProductCOAItem(Base):
+    __tablename__ = 'finished_product_coa_items'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    header_id = Column(Integer, ForeignKey('finished_product_coa.id', ondelete='CASCADE'), nullable=False)
+    item_id = Column(String(50))  # 항목 ID (예: 1~7 또는 '특이사항')
+    item_name = Column(String(255))  # 항목명
+    spec = Column(String(255))  # 시험기준
+    result = Column(String(255))  # 시험결과
+    note = Column(String(255))  # 비고/특이사항
+
+    header = relationship('FinishedProductCOA', back_populates='items')
