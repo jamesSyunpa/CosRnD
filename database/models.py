@@ -239,6 +239,7 @@ class ProductionFormulation(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     source_formulation_id = Column(Integer, ForeignKey('formulations.id'), nullable=False)
     product_name = Column(String(255), nullable=False)
+    production_code = Column(String(50))  # 생산코드 (LAB NO.는 참고용)
     lab_no = Column(String(50))
     revision = Column(String(50))
     base_weight_g = Column(Float)  # 기준 중량(g)
@@ -273,6 +274,27 @@ class ProductionStep(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     production = relationship('ProductionFormulation', back_populates='steps')
+
+class ProductionRun(Base):
+    __tablename__ = 'production_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    production_formulation_id = Column(Integer, ForeignKey('production_formulations.id', ondelete='CASCADE'), nullable=False)
+    run_date = Column(Date)
+    lot_no = Column(String(100))
+    quantity_g = Column(Float)
+    notes = Column(Text)
+    
+    # 물성치 필드 추가
+    specific_gravity = Column(String(50))  # 비중
+    viscosity_initial = Column(String(50))  # 점도(당일)
+    viscosity_next_day = Column(String(50))  # 점도(익일)
+    ph_initial = Column(String(50))  # pH(당일)
+    ph_next_day = Column(String(50))  # pH(익일)
+    
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    production = relationship('ProductionFormulation')
 
 # ----------------------------------------------------------------------------
 # 품질관리 저장용 테이블들 (원료목록보고, 반제품/완제품 COA)

@@ -1776,27 +1776,69 @@ class App(ctk.CTk):
 
     def center_on_mouse_screen(self):
         """
-        마우스 커서가 위치한 모니터의 중앙에 창을 배치하고 크기를 조절합니다.
+        마우스 커서가 위치한 모니터의 중앙에 창을 배치하고, 해당 모니터 기준 비율로 크기를 조절합니다.
         """
-        self.update_idletasks()
+        try:
+            # Windows에서는 마우스가 있는 모니터의 작업 영역을 기준으로 크기를 산정
+            if sys.platform.startswith('win'):
+                import ctypes
 
-        pointer_x = self.winfo_pointerx()
-        pointer_y = self.winfo_pointery()
+                class POINT(ctypes.Structure):
+                    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
-        self.geometry(f'+{pointer_x}+{pointer_y}')
-        self.update_idletasks()
-        
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
+                class RECT(ctypes.Structure):
+                    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
-        width = int(screen_width * 0.85)
-        height = int(screen_height * 0.8)
+                class MONITORINFO(ctypes.Structure):
+                    _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", RECT), ("rcWork", RECT), ("dwFlags", ctypes.c_ulong)]
 
-        x = (screen_width // 2) - (width // 2)
-        y = (screen_height // 2) - (height // 2)
+                user32 = ctypes.windll.user32
+                pt = POINT()
+                if not user32.GetCursorPos(ctypes.byref(pt)):
+                    raise RuntimeError("GetCursorPos failed")
 
-        self.geometry(f"{width}x{height}+{x}+{y}")
-        self.minsize(int(screen_width * 0.6), int(screen_height * 0.7))
+                MONITOR_DEFAULTTONEAREST = 2
+                hmon = user32.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+                if not hmon:
+                    raise RuntimeError("MonitorFromPoint failed")
+
+                mi = MONITORINFO()
+                mi.cbSize = ctypes.sizeof(MONITORINFO)
+                if not user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                    raise RuntimeError("GetMonitorInfoW failed")
+
+                work = mi.rcWork
+                mon_w = max(100, work.right - work.left)
+                mon_h = max(100, work.bottom - work.top)
+
+                width = int(mon_w * 0.85)
+                height = int(mon_h * 0.8)
+
+                # 마우스가 위치한 모니터 정중앙 배치
+                center_window_on_mouse_display(self, width=width, height=height)
+                # 최소 크기도 해당 모니터 기준으로 설정
+                self.minsize(int(mon_w * 0.6), int(mon_h * 0.7))
+                return
+
+            # 기타 OS: 단일 스크린 기준 폴백
+            self.update_idletasks()
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            width = int(sw * 0.85)
+            height = int(sh * 0.8)
+            center_window_on_mouse_display(self, width=width, height=height)
+            self.minsize(int(sw * 0.6), int(sh * 0.7))
+        except Exception:
+            # 최후 폴백: 기존 중앙 배치 로직
+            self.update_idletasks()
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            width = int(sw * 0.85)
+            height = int(sh * 0.8)
+            x = (sw // 2) - (width // 2)
+            y = (sh // 2) - (height // 2)
+            self.geometry(f"{width}x{height}+{x}+{y}")
+            self.minsize(int(sw * 0.6), int(sh * 0.7))
 
     def recreate_main_ui(self):
         """메인 UI를 재생성하여 언어 변경 등을 반영합니다."""

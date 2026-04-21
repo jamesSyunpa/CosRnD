@@ -1,347 +1,141 @@
-import customtkinter as ctk
-from tkinter import ttk
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
+from datetime import datetime
 
-ctk.set_appearance_mode("light")
-ctk.set_default_color_theme("blue")
+wb = Workbook()
+ws = wb.active
+ws.title = "생산처방"
 
-class ProcessTemplateApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        self.title("생산처방 템플릿 (확장형)")
-        self.geometry("1400x800")
-        self.minsize(1000, 600)
-        self.configure(padx=20, pady=20)
+# Row 1-2 merges
+ws.merge_cells('A1:F2')
+ws['A1'] = '생산지시서'
+ws['A1'].font = Font(size=14, bold=True)
+ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
 
-        # === 전체 프레임 ===
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+ws.merge_cells('G1:H2')
+ws['G1'] = '결재방'
+ws['G1'].alignment = Alignment(horizontal='center', vertical='center')
 
-        main_frame = ctk.CTkFrame(self)
-        main_frame.grid(row=0, column=0, sticky="nsew")
+# Row 3
+ws.merge_cells('A3:D3')
+ws['A3'] = '세럼'
+ws['A3'].alignment = Alignment(horizontal='center')
+ws['E3'] = '생산코드'
+ws['F3'] = 'BA112147'
+ws['G3'] = '제조자'
 
-        main_frame.grid_columnconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(1, weight=2)
-        main_frame.grid_rowconfigure(0, weight=1)
+# Row 4
+ws['A4'] = '지시일'
+ws['B4'] = '2025-11-02 14:18'
+ws['C4'] = '적용일'
+ws['D4'] = '2025-11-01'
+ws['E4'] = '생산량(kg)'
+ws['F4'] = '1.0 kg'
+ws['G4'] = '수득량'
 
-        # 왼쪽: 처방내용
-        left_frame = ctk.CTkFrame(main_frame)
-        left_frame.grid(row=0, column=0, padx=(10,5), pady=10, sticky="nsew")
-        left_frame.grid_rowconfigure(1, weight=1)
+# Row 5 empty
 
-        ctk.CTkLabel(left_frame, text="처방내용", font=("맑은 고딕", 16, "bold")).grid(row=0, column=0, pady=(10,5))
+# Row 6 headers
+ws['A6'] = 'Ph'
+ws['B6'] = '구분'
+ws['C6'] = '코드'
+ws['D6'] = '원료명'
+ws['E6'] = '함량(%)'
+ws['F6'] = '생산량(kg)'
+ws['G6'] = '제조공정'
+ws['H6'] = '공정검사'
 
-        self.recipe_text = ctk.CTkTextbox(left_frame)
-        self.recipe_text.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+# A phase rows 7-10
+ws['A7'] = 'A'
+ws.merge_cells('A7:A10')
+ws['A7'].alignment = Alignment(vertical='center', horizontal='center')
+ws['B7'] = '1'
+ws['C7'] = '3036'
+ws['D7'] = 'Zemea Select Propanediol'
+ws['E7'] = '3.4'
+ws['F7'] = '0.034'
+ws.merge_cells('G7:G10')
+ws['G7'] = '공정1. 수상 용해 (A상)\nA상을 유화조에 투입하여 완전히 용해.\n* H/M : 1500rpm\n* P/M : 20rpm\n시간 :\n온도 :             ℃\nH/M:              rpm\nP/M:              rpm'
+ws['G7'].alignment = Alignment(wrap_text=True, vertical='top')
+ws.merge_cells('H7:H10')
+ws['H7'].alignment = Alignment(vertical='center')
 
-        # 오른쪽: 제조공정 / 공정검사
-        right_frame = ctk.CTkFrame(main_frame)
-        right_frame.grid(row=0, column=1, padx=(5,10), pady=10, sticky="nsew")
-        right_frame.grid_rowconfigure(1, weight=1)
+# Row 8
+ws['B8'] = '2'
+ws['C8'] = '3001'
+ws['D8'] = 'Glycerin'
+ws['E8'] = '1.5'
+ws['F8'] = '0.015'
 
-        ctk.CTkLabel(right_frame, text="제조공정 / 공정검사", font=("맑은 고딕", 16, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
+# Row 9
+ws['B9'] = '3'
+ws['C9'] = '7094'
+ws['D9'] = 'Peptosome Neo'
+ws['E9'] = '60.08'
+ws['F9'] = '0.6008'
 
-        # 테이블 프레임
-        table_frame = ctk.CTkFrame(right_frame)
-        table_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
-        table_frame.grid_rowconfigure(0, weight=1)
-        table_frame.grid_columnconfigure(0, weight=1)
+# Row 10
+ws['B10'] = '4'
+ws['C10'] = '7095'
+ws['D10'] = 'Glucan 3M'
+ws['E10'] = '35'
+ws['F10'] = '0.35'
 
-        # Treeview 생성
-        columns = ("제조공정", "공정검사")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=12)
-        self.tree.heading("제조공정", text="제조공정")
-        self.tree.heading("공정검사", text="공정검사")
-        self.tree.column("제조공정", anchor="nw", width=300)
-        self.tree.column("공정검사", anchor="nw", width=300)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        
-        # 스타일 설정
-        style = ttk.Style()
-        style.configure('Treeview', 
-                       wraplength=280, 
-                       padding=5, 
-                       borderwidth=2, 
-                       relief='solid',
-                       rowheight=30)
-        style.configure('Treeview.Treeheading', 
-                       padding=5,
-                       borderwidth=2,
-                       relief='solid')
-        style.map('Treeview',
-                  background=[('selected', '#0078d4')],
-                  foreground=[('selected', 'white')])
-        
-        # 행의 배경색 교대로 설정
-        self.tree.tag_configure('oddrow', background='#f0f0f0')
-        self.tree.tag_configure('evenrow', background='white')
+# B phase rows 11-12
+ws['A11'] = 'B'
+ws.merge_cells('A11:A12')
+ws['A11'].alignment = Alignment(vertical='center', horizontal='center')
+ws['B11'] = '5'
+ws['C11'] = '1052'
+ws['D11'] = 'TREHA'
+ws['E11'] = '0.01'
+ws['F11'] = '0.0001'
+ws.merge_cells('G11:G12')
+ws['G11'] = '공정2. 점증제 분산 (B상)\nB상을 별도의 용기에서 디스퍼믹서 10분간 팽윤시킨 후 유화조에 서서히 투입 하여 75℃ 가온하면서 교반.\n* 75℃, 5분\n* H/M : 2000rpm\n* P/M : 20rpm\n공정3. 45℃ 냉각\n시간 :\n온도 :             ℃\nH/M:              rpm'
+ws['G11'].alignment = Alignment(wrap_text=True, vertical='top')
+ws.merge_cells('H11:H12')
+ws['H11'].alignment = Alignment(vertical='center')
 
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.tree.configure(yscroll=scrollbar.set)
+# Row 12
+ws['B12'] = '6'
+ws['C12'] = '7096'
+ws['D12'] = 'Hydrolyzed Sodium Hyaluronate'
+ws['E12'] = '0.01'
+ws['F12'] = '0.0001'
 
-        # 버튼 프레임
-        button_frame = ctk.CTkFrame(right_frame)
-        button_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5,10))
-        button_frame.grid_columnconfigure(0, weight=1)
+# Row 13
+ws['A13'] = '합계 (Total)'
+ws.merge_cells('A13:D13')
+ws['A13'].alignment = Alignment(horizontal='center')
+ws['E13'] = '100'
 
-        add_button = ctk.CTkButton(button_frame, text="행 추가", command=self.add_row, width=100)
-        add_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+# Auto-adjust columns (병합된 셀 처리)
+for col_idx in range(1, ws.max_column + 1):
+    column = get_column_letter(col_idx)
+    max_length = 0
+    
+    for row in range(1, ws.max_row + 1):
+        cell = ws.cell(row=row, column=col_idx)
+        # 병합된 셀이 아닌 경우만 처리
+        if cell.value and not isinstance(cell, type(ws['A1']).__bases__[0]):
+            try:
+                cell_length = len(str(cell.value))
+                if cell_length > max_length:
+                    max_length = cell_length
+            except:
+                pass
+    
+    # 최소 10, 최대 50으로 제한
+    adjusted_width = min(max(max_length + 2, 10), 50)
+    ws.column_dimensions[column].width = adjusted_width
 
-        delete_button = ctk.CTkButton(button_frame, text="선택 삭제", command=self.delete_row, width=100)
-        delete_button.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+# 행 높이 조정
+ws.row_dimensions[1].height = 30
+ws.row_dimensions[7].height = 120
+ws.row_dimensions[11].height = 120
 
-        auto_size_button = ctk.CTkButton(button_frame, text="자동 크기조정", command=self.auto_size_all, width=120, fg_color="green")
-        auto_size_button.grid(row=0, column=2, padx=5, pady=5, sticky="w")
-
-        # 이벤트 바인딩
-        self.tree.bind("<Double-1>", self.start_edit)
-        self.tree.bind("<Configure>", self._on_tree_resize)
-
-        self.edit_entry = None
-
-    def add_row(self):
-        """새 행 추가"""
-        row_count = len(self.tree.get_children())
-        tag = 'evenrow' if row_count % 2 == 0 else 'oddrow'
-        self.tree.insert("", "end", values=("", ""), tags=(tag,))
-        self.after(100, self.auto_size_all)
-
-    def delete_row(self):
-        """선택된 행 삭제"""
-        selected = self.tree.selection()
-        for item in selected:
-            self.tree.delete(item)
-
-    def start_edit(self, event):
-        """셀 더블클릭 시 직접 편집 시작"""
-        item = self.tree.identify_row(event.y)
-        col = self.tree.identify_column(event.x)
-        
-        if not item or not col:
-            return
-
-        try:
-            col_idx = int(col.replace('#', '')) - 1
-        except (ValueError, IndexError):
-            return
-            
-        if col_idx < 0 or col_idx >= len(self.tree["columns"]):
-            return
-            
-        col_name = self.tree["columns"][col_idx]
-        
-        # 공정검사 칼럼이면 테이블 편집 창 열기
-        if col_name == "공정검사":
-            self.open_inspection_editor(item)
-        else:
-            # 제조공정은 multiline textbox
-            self.open_process_editor(item)
-
-    def open_process_editor(self, item):
-        """제조공정 편집 (multiline textbox)"""
-        current_value = self.tree.set(item, "제조공정")
-        bbox = self.tree.bbox(item, "#1")
-        if not bbox:
-            return
-
-        x, y, width, height = bbox
-
-        if self.edit_entry:
-            self.edit_entry.destroy()
-
-        self.edit_entry = ctk.CTkTextbox(self.tree, width=width, height=max(height, 80), wrap="word")
-        self.edit_entry.insert("1.0", current_value)
-        self.edit_entry.place(x=self.tree.winfo_x() + x, y=self.tree.winfo_y() + y)
-        self.edit_entry.focus()
-
-        def save_value(event=None):
-            new_value = self.edit_entry.get("1.0", "end-1c").strip()
-            new_value = new_value.replace("가", "")
-            new_value = new_value.replace('"', '')
-            new_value = new_value.strip()
-            
-            self.tree.set(item, "제조공정", new_value)
-            if self.edit_entry:
-                self.edit_entry.destroy()
-            self.edit_entry = None
-            self.after(50, self.auto_size_all)
-
-        def cancel_edit(event=None):
-            if self.edit_entry:
-                self.edit_entry.destroy()
-                self.edit_entry = None
-
-        def handle_key(event):
-            if event.keysym == "Return" and not event.state & 0x1:
-                save_value()
-                return "break"
-            elif event.keysym == "Escape":
-                cancel_edit()
-                return "break"
-
-        self.edit_entry.bind("<Key-Return>", handle_key)
-        self.edit_entry.bind("<Escape>", cancel_edit)
-        self.edit_entry.bind("<FocusOut>", save_value)
-
-    def open_inspection_editor(self, item):
-        """공정검사 편집 (체크박스 폼)"""
-        current_value = self.tree.set(item, "공정검사")
-        
-        # 기존 값 파싱 (줄바꿈으로 분리)
-        checked_fields = set()
-        if current_value:
-            for line in current_value.split('\n'):
-                line = line.strip()
-                if line.startswith("시간"):
-                    checked_fields.add("시간")
-                elif line.startswith("온도"):
-                    checked_fields.add("온도")
-                elif line.startswith("HE/M"):
-                    checked_fields.add("HE/M")
-                elif line.startswith("H/M"):
-                    checked_fields.add("H/M")
-                elif line.startswith("P/M"):
-                    checked_fields.add("P/M")
-
-        # 편집 창
-        edit_window = ctk.CTkToplevel(self)
-        edit_window.title("공정검사 편집")
-        edit_window.geometry("400x350")
-        edit_window.resizable(False, False)
-
-        edit_window.grid_rowconfigure(1, weight=1)
-        edit_window.grid_columnconfigure(0, weight=1)
-
-        # 설명
-        ctk.CTkLabel(edit_window, text="필요한 공정검사 항목을 선택하세요:", font=("맑은 고딕", 12, "bold")).grid(row=0, column=0, pady=(15, 10), padx=20, sticky="w")
-
-        # 스크롤 프레임
-        scroll_frame = ctk.CTkScrollableFrame(edit_window)
-        scroll_frame.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
-
-        # 체크박스 항목들 - 실제 출력 형식 정의
-        inspection_items = [
-            ("시간", "시간", "시간 :"),
-            ("온도", "온도", "온도 :             ℃"),
-            ("헨셀믹서(HE/M)", "HE/M", "HE/M:              rpm"),
-            ("호모믹서(H/M)", "H/M", "H/M:              rpm"),
-            ("패들믹서(P/M)", "P/M", "P/M:              rpm")
-        ]
-
-        check_vars = {}
-        for label, key, output_format in inspection_items:
-            var = ctk.BooleanVar(value=key in checked_fields)
-            check_vars[key] = (var, output_format)
-            checkbox = ctk.CTkCheckBox(scroll_frame, text=label, variable=var, font=("맑은 고딕", 11))
-            checkbox.pack(anchor="w", pady=8)
-
-        # 버튼 프레임
-        btn_frame = ctk.CTkFrame(edit_window)
-        btn_frame.grid(row=2, column=0, padx=20, pady=15, sticky="ew")
-        btn_frame.grid_columnconfigure(0, weight=1)
-
-        def save_inspection():
-            # 선택된 항목들을 형식에 맞춰 저장
-            selected_lines = []
-            for key, (var, output_format) in check_vars.items():
-                if var.get():
-                    selected_lines.append(output_format)
-            
-            final_value = "\n".join(selected_lines)
-            self.tree.set(item, "공정검사", final_value)
-            edit_window.destroy()
-            self.after(50, self.auto_size_all)
-
-        ctk.CTkButton(btn_frame, text="저장", command=save_inspection, width=100, fg_color="green").pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="취소", command=edit_window.destroy, width=100).pack(side="left", padx=5)
-
-    def auto_size_all(self):
-        """자동으로 컬럼 너비와 행 높이를 조정"""
-        self.auto_size_columns()
-        self.auto_size_rows()
-
-    def auto_size_columns(self):
-        """컬럼 너비 자동 조정"""
-        for col_name in ["제조공정", "공정검사"]:
-            max_width = len(col_name) * 8 + 40
-            
-            for item in self.tree.get_children():
-                value = str(self.tree.set(item, col_name))
-                lines = value.split('\n')
-                longest_line = max(lines, key=len) if lines else ""
-                width = len(longest_line) * 7 + 40
-                max_width = max(max_width, width)
-            
-            final_width = min(max_width, 600)
-            self.tree.column(col_name, width=final_width)
-            
-            style = ttk.Style()
-            style.configure('Treeview', wraplength=final_width - 30, padding=5)
-
-    def auto_size_rows(self):
-        """행 높이 자동 조정"""
-        if not self.tree.get_children():
-            return
-
-        max_height = 25
-        
-        for item in self.tree.get_children():
-            max_lines = 1
-            for col in self.tree["columns"]:
-                value = str(self.tree.set(item, col))
-                lines = value.count('\n') + 1
-                max_lines = max(max_lines, lines)
-            
-            item_height = 20 + (max_lines - 1) * 18
-            max_height = max(max_height, item_height)
-
-        style = ttk.Style()
-        style.configure('Treeview', rowheight=max_height)
-
-    def _on_tree_resize(self, event):
-        """테이블 리사이즈 시 컬럼 자동조정"""
-        self.after(50, self.auto_size_columns)
-
-    def show_preview(self):
-        preview = ctk.CTkToplevel(self)
-        preview.title("미리보기")
-        preview.geometry("900x600")
-        preview.minsize(700, 500)
-
-        preview.grid_rowconfigure(2, weight=1)
-        preview.grid_columnconfigure(0, weight=1)
-
-        # 처방내용
-        ctk.CTkLabel(preview, text="처방내용", font=("맑은 고딕", 14, "bold")).grid(row=0, column=0, pady=(10,5))
-        recipe_text = ctk.CTkTextbox(preview, height=120)
-        recipe_text.grid(row=1, column=0, sticky="ew", padx=20)
-        recipe_text.insert("1.0", self.recipe_text.get("1.0", "end"))
-        recipe_text.configure(state="disabled")
-
-        # 제조공정 / 공정검사
-        ctk.CTkLabel(preview, text="제조공정 / 공정검사", font=("맑은 고딕", 14, "bold")).grid(row=2, column=0, pady=(10,5))
-
-        frame = ctk.CTkFrame(preview)
-        frame.grid(row=3, column=0, sticky="nsew", padx=20, pady=10)
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
-
-        tree = ttk.Treeview(frame, columns=("제조공정", "공정검사"), show="headings")
-        tree.heading("제조공정", text="제조공정")
-        tree.heading("공정검사", text="공정검사")
-        tree.column("제조공정", anchor="nw", width=self.tree.column("제조공정", "width"))
-        tree.column("공정검사", anchor="nw", width=self.tree.column("공정검사", "width"))
-
-        for item in self.tree.get_children():
-            values = (self.tree.set(item, "제조공정"), self.tree.set(item, "공정검사"))
-            tree.insert("", "end", values=values)
-
-        tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        tree.configure(yscroll=scrollbar.set)
-
-# 실행
-if __name__ == "__main__":
-    app = ProcessTemplateApp()
-    app.mainloop()
+# Save
+filename = f'생산처방_세럼_A_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+wb.save(filename)
+print(f"생성 완료: {filename}")

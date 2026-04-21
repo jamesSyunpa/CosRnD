@@ -3,9 +3,12 @@ import openpyxl
 from openpyxl import Workbook
 from tkinter import filedialog, messagebox
 from openpyxl.styles import Border, Side, Alignment, Font, PatternFill
+from openpyxl.drawing.image import Image as XLImage
 import configparser
 from datetime import datetime
 import os
+from PIL import Image, ImageDraw, ImageFont
+import tempfile
 
 # --- 경로 설정을 읽기 위한 설정 ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -144,63 +147,692 @@ def export_multisheet_template(sheets_with_headers, default_filename="template.x
     try:
         workbook = Workbook()
         workbook.remove(workbook.active)
-        for sheet_name, headers in sheets_with_headers.items():
-            sheet = workbook.create_sheet(title=sheet_name)
-            sheet.append(headers)
-        workbook.save(file_path)
-        messagebox.showinfo("성공", f"엑셀 폼이 '{file_path}'에 저장되었습니다.")
+        # NOTE: revised exporter is defined at module level; this function handles only multi-sheet template export.
     except Exception as e:
-        messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+        messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
 
-def import_multisheet_data():
-    """여러 시트를 가진 엑셀 파일에서 데이터를 가져옵니다."""
-    initial_dir = get_excel_path()
-    file_path = filedialog.askopenfilename(
-        filetypes=[("Excel files", "*.xlsx")],
-        initialdir=initial_dir,
-        title="가져올 엑셀 파일 선택"
-    )
-    if not file_path:
-        return None
+def export_production_formulation_revised_to_excel(
+    production_data,
+    default_filename: str = "production_revised.xlsx",
+    file_path: str | None = None,
+    open_print_preview: bool = False,
+):
+    """수정본 템플릿(생산처방ui.py의 병합/모양 준용)으로 단일 시트 내보내기.
+    - 상단 레이아웃을 생산처방ui.py처럼 구성:
+        • 제목: A1:F2 병합, 중앙 정렬("생산지시서")
+        • 결재란 자리: G1:H2 병합(텍스트 라벨만), 기존 색상/테두리는 유지
+        • 기본정보: 3행/4행에 제품명과 핵심 정보 배치 (병합 위치는 ui.py 참고)
+    - 본문 표: A..H = [Ph, 구분, 코드, 원료명, 함량(%), 생산량(kg), 제조공정, 공정검사]
+        • 같은 Ph 구간은 A열을 세로 병합
+        • 제조공정/공정검사도 Ph 구간 단위로 각각 세로 병합
+        • 각 구간의 텍스트는 해당 구간 아이템들 중 가장 긴 내용으로 채움
+    - 색상/테두리/폰트 등 스타일은 기존(원래) 정의를 그대로 사용
+    - 인쇄 설정은 기존 수정본과 동일(세로, 여백 축소, 머리글/바닥글 등)
+    """
 
-    save_excel_path(os.path.dirname(file_path))
+    # 파일 경로 결정
+    if file_path is None:
+        if open_print_preview:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            file_path = tmp.name
+            tmp.close()
+        else:
+            initial_dir = get_excel_path()
+            timestamped_filename = get_timestamped_filename(default_filename)
+            chosen = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[["Excel files", "*.xlsx"]],
+                initialdir=initial_dir,
+                initialfile=timestamped_filename,
+                title="생산처방(수정본) 저장"
+            )
+            if not chosen:
+                return
+            file_path = chosen
+            save_excel_path(os.path.dirname(file_path))
 
-    def clean_cell(cell):
-        """
-        셀 값 정리:
-        - None 또는 '-' → 빈 문자열
-        - 문자열은 앞뒤 공백 제거
-        """
-        if cell is None:
-            return ""
-        if isinstance(cell, str):
-            cell = cell.strip()
-            if cell == "-":
-                return ""
-        return cell
+    # 스타일
+    thin = Side(style='thin', color='2C3E50')
+    medium = Side(style='medium', color='2C3E50')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    medium_border = Border(left=medium, right=medium, top=medium, bottom=medium)
+    title_font = Font(name='맑은 고딕', size=20, bold=True, color='1F4E78')
+    header_font = Font(name='맑은 고딕', size=11, bold=True, color='2C3E50')
+    header_font_white = Font(name='맑은 고딕', size=11, bold=True, color='FFFFFF')
+    label_font = Font(name='맑은 고딕', size=10, bold=True, color='34495E')
+    default_font = Font(name='맑은 고딕', size=10, color='2C3E50')
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    left_top = Alignment(horizontal='left', vertical='top', wrap_text=True)
+    right = Alignment(horizontal='right', vertical='center', wrap_text=True)
+    header_fill = PatternFill(start_color="E8F4F8", end_color="E8F4F8", fill_type="solid")
+    table_header_fill = PatternFill(start_color="5B9BD5", end_color="5B9BD5", fill_type="solid")
+    label_fill = PatternFill(start_color="D5E8F0", end_color="D5E8F0", fill_type="solid")
 
     try:
-        workbook = openpyxl.load_workbook(file_path, data_only=True)
-        all_data = {}
-        for sheet_name in workbook.sheetnames:
-            sheet = workbook[sheet_name]
-            headers = [cell.value for cell in sheet[1]]
-            data_list = []
-            for row in sheet.iter_rows(min_row=2, values_only=True):
-                # 전부 비거나 '-'인 행 건너뜀
-                if all(cell is None or str(cell).strip() in ("", "-") for cell in row):
-                    continue
-                # 헤더 개수 맞추기
-                row = list(row) + [None] * (len(headers) - len(row))
-                # 셀 값 정리
-                row = [clean_cell(cell) for cell in row]
-                row_data = dict(zip(headers, row))
-                data_list.append(row_data)
-            all_data[sheet_name] = data_list
-        return all_data
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "생산처방"
+
+        # 1) 제목: A1:F2 병합 (ui.py 준용)
+        ws.merge_cells('A1:F2')
+        tcell = ws['A1']
+        tcell.value = "생산지시서"
+        tcell.font = title_font
+        tcell.alignment = center
+        ws.row_dimensions[1].height = 30
+        ws.row_dimensions[2].height = 22
+
+        # 2) 결재란: G1:H2 영역에 승인 스탬프 이미지를 삽입(오른쪽 정렬 폭에 맞춤)
+        #    - 왼쪽에 '결' '재' 세로 라벨, 상단에 '작성/검토/승인', 하단 서명칸
+        from openpyxl.drawing.image import Image as XLImage  # type: ignore
+        def create_approval_image_v2(canvas_width: int) -> str:
+            base_h = 140  # 기본 높이(여유 확보, 잘림 방지)
+            img = Image.new('RGB', (canvas_width, base_h), 'white')
+            drw = ImageDraw.Draw(img)
+            col_left_w = max(28, int(canvas_width * 0.12))
+            rest_w = canvas_width - col_left_w
+            col_w = rest_w // 3
+            header_h = int(base_h * 0.45)
+            # 바깥 테두리
+            drw.rectangle([0, 0, canvas_width-1, base_h-1], outline='#2C3E50', width=2)
+            # 세로 구분선 (왼쪽 라벨/3분할)
+            drw.line([col_left_w, 0, col_left_w, base_h], fill='#2C3E50', width=1)
+            drw.line([col_left_w + col_w, 0, col_left_w + col_w, base_h], fill='#2C3E50', width=1)
+            drw.line([col_left_w + col_w*2, 0, col_left_w + col_w*2, base_h], fill='#2C3E50', width=1)
+            # 가로 구분선(헤더/서명칸): 왼쪽 라벨 칸은 위 칸과 병합되도록 선을 비켜감
+            drw.line([col_left_w, header_h, canvas_width, header_h], fill='#2C3E50', width=1)
+            # 헤더 배경 제거(흰색 유지)
+            try:
+                f_bold = ImageFont.truetype("malgunbd.ttf", 16)
+            except Exception:
+                f_bold = ImageFont.load_default()
+            # 왼쪽 세로 '결' '재' 배치
+            # - '결'은 헤더 영역과 바로 아래 칸을 병합한 상단 블록 중앙
+            # - '재'는 하단 블록 중앙 (상단/하단을 내부 구분선으로 나눔)
+            w_g, h_g = drw.textbbox((0,0), '결', font=f_bold)[2:4]
+            w_j, h_j = drw.textbbox((0,0), '재', font=f_bold)[2:4]
+            # 내부 구분선 없이, 전체 높이를 반으로 나누어 각 절반의 가운데에 배치
+            y_k = int(base_h * 0.25) - h_g//2
+            y_j = int(base_h * 0.75) - h_j//2
+            drw.text((max(2, (col_left_w - w_g)//2), max(2, y_k)), '결', fill='#2C3E50', font=f_bold)
+            drw.text((max(2, (col_left_w - w_j)//2), max(2, y_j)), '재', fill='#2C3E50', font=f_bold)
+            # 헤더 텍스트
+            heads = ['작성','검토','승인']
+            for i, txt in enumerate(heads):
+                x0 = col_left_w + i*col_w
+                x1 = x0 + col_w
+                tw, th = drw.textbbox((0,0), txt, font=f_bold)[2:4]
+                drw.text((x0 + (col_w - tw)//2, (header_h - th)//2), txt, fill='#2C3E50', font=f_bold)
+            tf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            img.save(tf.name, 'PNG'); tf.close()
+            return tf.name
+
+        # G/H 폭을 기준으로 이미지 너비 산정 (엑셀 폭 단위를 픽셀로 근사: *7)
+        gh_px = int((26 + 22) * 7)  # G=26, H=22 (fixed widths). 여백 없이 정확히 맞춤
+        ap_img_path = create_approval_image_v2(gh_px)
+        ap_img = XLImage(ap_img_path)
+        ap_img.anchor = 'G1'
+        ws.add_image(ap_img)
+        # 행 높이 보정(이미지를 수용)
+        ws.row_dimensions[1].height = 90
+        ws.row_dimensions[2].height = 0
+
+        # 3) 기본정보 (ui.py 배치 준용)
+        details = production_data.get('details', {})
+        # Row 3: 제품명(A3 라벨, B3:D3 값 병합), 생산코드(E3:F3), 제조자(G3:H3)
+        prod_name = details.get('제품명', '')
+        # A3 라벨
+        ws['A3'].value = '제품명'; ws['A3'].font = label_font; ws['A3'].fill = label_fill; ws['A3'].alignment = center; ws['A3'].border = thin_border
+        # B3:D3 병합 값
+        ws.merge_cells('B3:D3')
+        ws['B3'].value = prod_name
+        ws['B3'].font = default_font
+        ws['B3'].alignment = left
+        # 개별 셀 테두리 유지
+        ws['B3'].border = thin_border
+        ws['C3'].border = thin_border
+        ws['D3'].border = thin_border
+        ws['E3'].value = '생산코드'; ws['E3'].font = label_font; ws['E3'].fill = label_fill; ws['E3'].alignment = center; ws['E3'].border = thin_border
+        ws['F3'].value = details.get('생산코드', ''); ws['F3'].font = default_font; ws['F3'].alignment = left; ws['F3'].border = thin_border
+        ws['G3'].value = '제조자'; ws['G3'].font = label_font; ws['G3'].fill = label_fill; ws['G3'].alignment = center; ws['G3'].border = thin_border
+        ws['H3'].value = details.get('제조자', ''); ws['H3'].font = default_font; ws['H3'].alignment = left; ws['H3'].border = thin_border
+        # 라벨/값 셀 테두리 보강
+        for c in ['A','B','C','D']:
+            ws[f"{c}3"].border = thin_border
+        ws.row_dimensions[3].height = 24
+
+        # Row 4: 지시일/적용일/생산량/수득량
+        ws['A4'].value = '지시일'; ws['A4'].font = label_font; ws['A4'].fill = label_fill; ws['A4'].alignment = center; ws['A4'].border = thin_border
+        ws['B4'].value = details.get('지시일', details.get('출력일시','')); ws['B4'].font = default_font; ws['B4'].alignment = left; ws['B4'].border = thin_border
+        ws['C4'].value = '적용일'; ws['C4'].font = label_font; ws['C4'].fill = label_fill; ws['C4'].alignment = center; ws['C4'].border = thin_border
+        ws['D4'].value = details.get('적용일',''); ws['D4'].font = default_font; ws['D4'].alignment = left; ws['D4'].border = thin_border
+        ws['E4'].value = '생산량(kg)'; ws['E4'].font = label_font; ws['E4'].fill = label_fill; ws['E4'].alignment = center; ws['E4'].border = thin_border
+        ws['F4'].value = details.get('생산량(kg)',''); ws['F4'].font = default_font; ws['F4'].alignment = right; ws['F4'].border = thin_border
+        ws['G4'].value = '수득량'; ws['G4'].font = label_font; ws['G4'].fill = label_fill; ws['G4'].alignment = center; ws['G4'].border = thin_border
+        ws['H4'].value = details.get('수득량',''); ws['H4'].font = default_font; ws['H4'].alignment = right; ws['H4'].border = thin_border
+        ws.row_dimensions[4].height = 24
+
+        # Row 5: 빈 줄(여백)
+        ws.row_dimensions[5].height = 6
+
+        # 4) 테이블 헤더 (UI 기준 A..H)
+        headers = ["Ph", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "제조공정", "공정검사"]
+        header_row = 6
+        ws.row_dimensions[header_row].height = 28
+        for c_idx, h in enumerate(headers, 1):
+            hc = ws.cell(row=header_row, column=c_idx, value=h)
+            hc.font = header_font_white
+            hc.fill = table_header_fill
+            hc.alignment = center
+            hc.border = medium_border
+
+        # 5) 데이터 행 (Ph 구간 병합: A/G/H)
+        current = header_row + 1
+        total_ratio = 0.0
+        items = production_data.get('items', [])
+
+        def norm_phase(v):
+            s = str(v).strip() if v is not None else ''
+            return s.replace('Ph.', '').replace('PH', '').strip() if s else ''
+
+        # 연속 구간으로 그룹화
+        groups = []  # list of (phase, start_idx, end_idx) on items index (0-based)
+        if items:
+            start = 0
+            cur_ph = norm_phase(items[0].get('Ph', items[0].get('Ph.', '')))
+            for idx in range(1, len(items)):
+                ph = norm_phase(items[idx].get('Ph', items[idx].get('Ph.', '')))
+                if ph != cur_ph:
+                    groups.append((cur_ph, start, idx-1))
+                    start = idx; cur_ph = ph
+            groups.append((cur_ph, start, len(items)-1))
+
+        for ph, s_idx, e_idx in groups:
+            group_len = e_idx - s_idx + 1
+            # 그룹 내 최대 줄 수(공정/검사 텍스트)로 행 높이 가늠
+            proc_texts = []
+            insp_texts = []
+            for i in range(s_idx, e_idx+1):
+                proc_texts.append(str(items[i].get('제조공정', '') or '').replace('"','').replace("'", ''))
+                insp_texts.append(str(items[i].get('공정검사', '') or '').replace('"','').replace("'", ''))
+            group_proc = max(proc_texts, key=len) if proc_texts else ''
+            group_insp = max(insp_texts, key=len) if insp_texts else ''
+            max_lines = max(group_proc.count('\n')+1 if group_proc else 1, group_insp.count('\n')+1 if group_insp else 1)
+            per_row_height = max(24, int(18 * max_lines / group_len) + 2)
+
+            # 각 아이템 행 작성
+            for i in range(s_idx, e_idx+1):
+                item = items[i]
+                # 생산량(kg) 보정
+                qty_kg = item.get('생산량(kg)')
+                if qty_kg in (None, ""):
+                    try:
+                        g = float(item.get('기준중량(g)'))
+                        qty_kg = g / 1000.0
+                    except Exception:
+                        qty_kg = item.get('생산량(kg)')
+
+                vals = [
+                    norm_phase(item.get('Ph', item.get('Ph.', ''))),
+                    item.get('구분'), item.get('코드'), item.get('원료명'),
+                    item.get('함량(%)'), qty_kg,
+                    '', ''  # 병합 예정(G,H)
+                ]
+
+                ws.row_dimensions[current].height = per_row_height
+                for c_idx, val in enumerate(vals, 1):
+                    cell = ws.cell(row=current, column=c_idx, value=val)
+                    cell.border = thin_border
+                    cell.font = default_font
+                    if c_idx in (1,2,3):
+                        cell.alignment = center
+                    elif c_idx == 4:
+                        cell.alignment = left
+                    elif c_idx in (5,6):
+                        try:
+                            fval = float(val)
+                            cell.value = fval
+                            if c_idx == 5:
+                                cell.number_format = '0.0000'
+                                total_ratio += fval
+                            else:
+                                cell.number_format = '#,##0.0'
+                        except Exception:
+                            pass
+                        cell.alignment = right
+                    else:
+                        cell.alignment = left_top
+                current += 1
+
+            # A열, G열, H열을 그룹 단위로 병합 후 값/정렬 적용
+            start_row = header_row + 1 + s_idx if groups and groups[0][1] == 0 else (current - group_len)
+            # start_row 계산 보정: current는 그룹 끝 다음 행이므로...
+            start_row = current - group_len
+            end_row = current - 1
+            if group_len >= 1:
+                # A열 병합 및 표시
+                if start_row < end_row:
+                    ws.merge_cells(start_row=start_row, start_column=1, end_row=end_row, end_column=1)
+                a_cell = ws.cell(row=start_row, column=1, value=(ph or ''))
+                a_cell.alignment = center; a_cell.border = thin_border; a_cell.font = header_font
+
+                # G열 병합 및 텍스트
+                if start_row < end_row:
+                    ws.merge_cells(start_row=start_row, start_column=7, end_row=end_row, end_column=7)
+                g_cell = ws.cell(row=start_row, column=7, value=group_proc)
+                g_cell.alignment = left_top; g_cell.border = thin_border; g_cell.font = default_font
+
+                # H열 병합 및 텍스트
+                if start_row < end_row:
+                    ws.merge_cells(start_row=start_row, start_column=8, end_row=end_row, end_column=8)
+                h_cell = ws.cell(row=start_row, column=8, value=group_insp)
+                h_cell.alignment = left_top; h_cell.border = thin_border; h_cell.font = default_font
+
+        # 6) 합계 행 (병합 없이 표시)
+        sum_row = current
+        ws.row_dimensions[sum_row].height = 28
+        for col in range(1, 9):
+            c = ws.cell(row=sum_row, column=col)
+            c.fill = table_header_fill
+            c.border = medium_border
+        ws.cell(row=sum_row, column=1, value="합계 (Total)").font = header_font_white
+        sr = ws.cell(row=sum_row, column=5, value=total_ratio)
+        sr.font = header_font_white
+        sr.number_format = '0.0000'
+        sr.alignment = right
+
+        # 7) 필터/고정
+        ws.auto_filter.ref = f"A{header_row}:H{sum_row}"
+        ws.freeze_panes = f"A{header_row+1}"
+
+        # 8) 컬럼 폭 고정
+        fixed_widths = {
+            'A': 8, 'B': 10, 'C': 15, 'D': 45, 'E': 12, 'F': 12, 'G': 26, 'H': 22
+        }
+        for col, w in fixed_widths.items():
+            ws.column_dimensions[col].width = w
+
+        # 9) 인쇄 설정 (세로 + 여백 축소) + 머리글/바닥글 + 타이틀 행 반복/인쇄 영역
+        try:
+            ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+            ws.sheet_properties.pageSetUpPr.fitToPage = True
+            ws.print_options.horizontalCentered = True
+            ws.page_margins.left = 0.3; ws.page_margins.right = 0.3
+            ws.page_margins.top = 0.4; ws.page_margins.bottom = 0.4
+            # 머리글/바닥글: 날짜/시간, 문서명, 페이지 번호
+            try:
+                ws.header_footer.left_header = "&D &T"
+                title_text = f"생산지시서 - {details.get('제품명','')}"
+                ws.header_footer.center_header = title_text
+                ws.header_footer.right_footer = "Page &[Page] / &[Pages]"
+            except Exception:
+                pass
+            # 각 페이지에 표 헤더 반복
+            try:
+                ws.print_title_rows = f"1:{header_row}"
+            except Exception:
+                pass
+            # 인쇄 영역 지정
+            try:
+                ws.print_area = f"A1:H{sum_row}"
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        wb.save(file_path)
+
+        # 미리보기/출력 처리
+        if open_print_preview:
+            try:
+                import win32com.client as win32  # type: ignore
+                excel = win32.Dispatch("Excel.Application")
+                excel.Visible = True
+                wb_com = excel.Workbooks.Open(os.path.abspath(file_path))
+                try:
+                    wb_com.ActiveSheet.PrintPreview()
+                finally:
+                    wb_com.Close(SaveChanges=False)
+                    excel.Quit()
+            except Exception:
+                try:
+                    os.startfile(os.path.abspath(file_path))
+                except Exception:
+                    try:
+                        os.startfile(os.path.abspath(file_path), "print")
+                    except Exception:
+                        pass
+        else:
+            messagebox.showinfo("성공", f"생산지시서가 '{file_path}'에 저장되었습니다.")
     except Exception as e:
-        messagebox.showerror("오류", f"파일을 읽는 중 오류가 발생했습니다: {e}")
-        return None
+        messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+
+
+def export_production_formulation_original_to_excel(
+    production_data,
+    default_filename: str = "production.xlsx",
+    file_path: str | None = None,
+    open_print_preview: bool = False,
+):
+    """원래 템플릿으로 생산처방을 내보냅니다.
+    - 제목: A1:F2 병합, "생산처방서\nProduction Formulation Sheet"
+    - 결재란: G-H 영역 이미지(우측 정렬, 약 1/3 확대), H열 우측 끝 정렬
+    - 기본정보: 좌측 B–E 병합, 우측 G/H 라벨/값(병합 없음)
+    - 비고: 2–8 병합
+    - 본문: "계량량(kg)" 포함, Phase/H/I 병합, 지브라 스트라이프, 합계 행
+    - 컬럼폭: H=26.25, I=17.25, D는 30~50, 기타 최대 20
+    - 인쇄: 가로 모드, fitToWidth=1, 여백 0.3/0.5
+    - 추가 시트: 제조공정, 원료 환산
+    """
+
+    # 파일 경로 결정
+    if file_path is None:
+        if open_print_preview:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+            file_path = tmp.name
+            tmp.close()
+        else:
+            initial_dir = get_excel_path()
+            timestamped_filename = get_timestamped_filename(default_filename)
+            chosen = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[["Excel files", "*.xlsx"]],
+                initialdir=initial_dir,
+                initialfile=timestamped_filename,
+                title="생산처방 저장"
+            )
+            if not chosen:
+                return
+            file_path = chosen
+            save_excel_path(os.path.dirname(file_path))
+
+    # 스타일 정의
+    thin = Side(style='thin', color='2C3E50')
+    medium = Side(style='medium', color='2C3E50')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    medium_border = Border(left=medium, right=medium, top=medium, bottom=medium)
+    title_font = Font(name='맑은 고딕', size=20, bold=True, color='1F4E78')
+    header_font = Font(name='맑은 고딕', size=11, bold=True, color='2C3E50')
+    header_font_white = Font(name='맑은 고딕', size=11, bold=True, color='FFFFFF')
+    label_font = Font(name='맑은 고딕', size=10, bold=True, color='34495E')
+    default_font = Font(name='맑은 고딕', size=10, color='2C3E50')
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    left_top = Alignment(horizontal='left', vertical='top', wrap_text=True)
+    right = Alignment(horizontal='right', vertical='center')
+    header_fill = PatternFill(start_color="E8F4F8", end_color="E8F4F8", fill_type="solid")
+    label_fill = PatternFill(start_color="D5E8F0", end_color="D5E8F0", fill_type="solid")
+    table_header_fill = PatternFill(start_color="5B9BD5", end_color="5B9BD5", fill_type="solid")
+
+    # 결재란 이미지 생성 함수
+    def create_approval_image(canvas_width=None, scale=4/3):
+        base_w, base_h = 300, 117
+        width = int(canvas_width) if canvas_width else int(base_w * scale)
+        content_w = min(int(base_w * scale), width)
+        height = int(content_w * (base_h / base_w))
+        img = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(img)
+        try:
+            font_title = ImageFont.truetype("malgunbd.ttf", 15)
+            font_small = ImageFont.truetype("malgun.ttf", 10)
+        except Exception:
+            font_title = ImageFont.load_default(); font_small = font_title
+        margin_left = width - content_w
+        box_w = content_w // 3
+        header_h = int(height * 0.28)
+        for i in range(3):
+            x0 = margin_left + i * box_w
+            draw.rectangle([x0, 0, x0 + box_w, header_h], fill='#E8F4F8', outline='black', width=2)
+        draw.rectangle([margin_left, 0, margin_left + content_w - 1, height - 1], outline='#2C3E50', width=3)
+        draw.line([margin_left + box_w, 0, margin_left + box_w, height], fill='#2C3E50', width=2)
+        draw.line([margin_left + box_w*2, 0, margin_left + box_w*2, height], fill='#2C3E50', width=2)
+        draw.line([margin_left, header_h, margin_left + content_w, header_h], fill='#2C3E50', width=2)
+        for i, label in enumerate(["작성","검토","승인"]):
+            x0 = margin_left + i * box_w
+            xr = x0 + box_w - 10
+            draw.text((xr, header_h//2), label, fill='#2C3E50', font=font_title, anchor='rm')
+            sy = header_h + (height - header_h)//2 + 15
+            draw.text((xr, sy), "(인)", fill='#95A5A6', font=font_small, anchor='rm')
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+        img.save(tf.name, 'PNG'); tf.close()
+        return tf.name
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "생산처방"
+
+        # 제목 & 결재란
+        ws.merge_cells('A1:F2')
+        tc = ws['A1']
+        tc.value = "생산처방서\nProduction Formulation Sheet"
+        tc.font = title_font; tc.alignment = center
+        tc.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        try:
+            g_w = ws.column_dimensions['G'].width or 26.25
+            h_w = ws.column_dimensions['H'].width or 17.25
+            gh_px = int((float(g_w) + float(h_w)) * 7 + 4)
+        except Exception:
+            gh_px = 300
+        approval_img_path = create_approval_image(canvas_width=gh_px, scale=4/3)
+        img = XLImage(approval_img_path)
+        img.anchor = 'G1'
+        ws.add_image(img)
+        ws.row_dimensions[1].height = 70
+        ws.row_dimensions[2].height = 0
+        ws.row_dimensions[3].height = 10
+
+        # 기본정보
+        details = production_data.get('details', {})
+        left_pairs = [("제품명", details.get("제품명","")), ("LAB NO.", details.get("LAB NO.","")), ("거래처", details.get("거래처","")), ("적용일", details.get("적용일","")), ("승인자", details.get("승인자",""))]
+        right_pairs = [("생산코드", details.get("생산코드","")), ("차수", details.get("차수","")), ("생산량(kg)", details.get("생산량(kg)","")), ("상태", details.get("상태","")), ("출력일시", details.get("출력일시",""))]
+        r = 4
+        for i in range(max(len(left_pairs), len(right_pairs))):
+            ws.row_dimensions[r].height = 28
+            if i < len(left_pairs):
+                label, value = left_pairs[i]
+                lc = ws.cell(row=r, column=1, value=label)
+                lc.font = label_font; lc.fill = label_fill; lc.alignment = center; lc.border = thin_border
+                ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=5)
+                vc = ws.cell(row=r, column=2, value=value)
+                vc.font = default_font; vc.alignment = left; vc.border = thin_border
+                for c in range(2,6): ws.cell(row=r, column=c).border = thin_border
+            else:
+                for c in range(1,6): ws.cell(row=r, column=c).border = thin_border
+            if i < len(right_pairs):
+                label, value = right_pairs[i]
+                rc = ws.cell(row=r, column=7, value=label)
+                rc.font = label_font; rc.fill = label_fill; rc.alignment = center; rc.border = thin_border
+                rv = ws.cell(row=r, column=8, value=value)
+                rv.font = default_font; rv.alignment = left; rv.border = thin_border
+            else:
+                for c in range(7,9): ws.cell(row=r, column=c).border = thin_border
+            ws.cell(row=r, column=6).border = thin_border
+            r += 1
+
+        # 비고
+        if details.get('비고'):
+            ws.row_dimensions[r].height = 45
+            nl = ws.cell(row=r, column=1, value="비고\nNote")
+            nl.font = label_font; nl.fill = label_fill; nl.alignment = center; nl.border = thin_border
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=8)
+            nv = ws.cell(row=r, column=2, value=details.get('비고'))
+            nv.font = default_font; nv.alignment = left; nv.border = thin_border
+            for c in range(2,9): ws.cell(row=r, column=c).border = thin_border
+            r += 1
+
+        ws.row_dimensions[r].height = 8; r += 1
+
+        # 테이블 헤더
+        headers = ["Ph.", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "계량량(kg)", "제조공정", "공정검사"]
+        header_row = r
+        ws.row_dimensions[header_row].height = 32
+        for idx, h in enumerate(headers, 1):
+            hc = ws.cell(row=header_row, column=idx, value=h)
+            hc.font = header_font_white; hc.fill = table_header_fill; hc.alignment = center; hc.border = medium_border
+
+        # 데이터
+        current = header_row + 1
+        total_ratio = 0.0
+        phase_merge_info = []
+        current_phase = None
+        phase_start_row = None
+        phase_max_lines = 1
+        for item in production_data.get('items', []):
+            ph_val = str(item.get('Ph.', '')).strip()
+            proc_text = str(item.get('제조공정', '')).strip()
+            insp_text = str(item.get('공정검사', '')).strip()
+            proc_lines = proc_text.count('\n') + 1 if proc_text else 1
+            insp_lines = insp_text.count('\n') + 1 if insp_text else 1
+            max_lines_row = max(proc_lines, insp_lines)
+            if ph_val:
+                if current_phase is not None and phase_start_row is not None:
+                    phase_merge_info.append((current_phase, phase_start_row, current - 1, phase_max_lines))
+                current_phase = ph_val; phase_start_row = current; phase_max_lines = max_lines_row
+            else:
+                phase_max_lines = max(phase_max_lines, max_lines_row)
+
+            qty_kg = item.get('생산량(kg)')
+            if qty_kg in (None, ""):
+                try:
+                    g = float(item.get('기준중량(g)')); qty_kg = g/1000.0
+                except Exception:
+                    qty_kg = item.get('생산량(kg)')
+            weigh_kg = item.get('계량량(kg)')  # 수기 기입 전제(자동 채움 없음)
+
+            vals = [ph_val if ph_val else "", item.get('구분'), item.get('코드'), item.get('원료명'), item.get('함량(%)'), qty_kg, weigh_kg, item.get('제조공정'), item.get('공정검사')]
+            row_fill = PatternFill(start_color="F8FBFD", end_color="F8FBFD", fill_type="solid") if (current - header_row) % 2 == 0 else None
+            for c_idx, val in enumerate(vals, 1):
+                cell = ws.cell(row=current, column=c_idx, value=val)
+                cell.border = thin_border; cell.font = default_font
+                if row_fill and c_idx not in [1,8,9]: cell.fill = row_fill
+                if c_idx in (1,2,3):
+                    cell.alignment = center
+                elif c_idx == 4:
+                    cell.alignment = left
+                elif c_idx in (5,6,7):
+                    try:
+                        fval = float(val); cell.value = fval
+                        if c_idx == 5:
+                            cell.number_format = '0.0000'; total_ratio += fval
+                        else:
+                            cell.number_format = '#,##0.0'
+                    except Exception:
+                        pass
+                    cell.alignment = right
+                else:
+                    if val:
+                        cleaned = str(val).replace('"','').replace("'", '')
+                        cell.value = cleaned
+                    cell.alignment = left_top
+            ws.row_dimensions[current].height = 26
+            current += 1
+
+        if current_phase is not None and phase_start_row is not None:
+            phase_merge_info.append((current_phase, phase_start_row, current - 1, phase_max_lines))
+
+        for phase_val, start_row, end_row, max_lines in phase_merge_info:
+            num_rows = end_row - start_row + 1
+            total_h = max(24, max_lines * 18 + 6)
+            row_h = total_h / num_rows
+            for rr in range(start_row, end_row + 1): ws.row_dimensions[rr].height = row_h
+            if start_row < end_row:
+                ws.merge_cells(start_row=start_row, start_column=1, end_row=end_row, end_column=1)
+                mc = ws.cell(row=start_row, column=1); mc.value = phase_val; mc.alignment = center; mc.border = thin_border; mc.font = header_font
+                ws.merge_cells(start_row=start_row, start_column=8, end_row=end_row, end_column=8)
+                pc = ws.cell(row=start_row, column=8); pc.alignment = left_top; pc.border = thin_border
+                ws.merge_cells(start_row=start_row, start_column=9, end_row=end_row, end_column=9)
+                ic = ws.cell(row=start_row, column=9); ic.alignment = left_top; ic.border = thin_border
+            else:
+                ws.row_dimensions[start_row].height = total_h
+
+        # 합계 행
+        sum_row = current
+        ws.row_dimensions[sum_row].height = 32
+        ws.merge_cells(start_row=sum_row, start_column=1, end_row=sum_row, end_column=4)
+        sl = ws.cell(row=sum_row, column=1, value="합계 (Total)")
+        sl.font = header_font_white; sl.fill = table_header_fill; sl.alignment = center; sl.border = medium_border
+        sr = ws.cell(row=sum_row, column=5, value=total_ratio)
+        sr.font = header_font_white; sr.fill = table_header_fill; sr.number_format = '0.0000'; sr.alignment = right; sr.border = medium_border
+        for col in [1,2,3,4]: ws.cell(row=sum_row, column=col).border = medium_border
+        for col in [6,7,8]:
+            ec = ws.cell(row=sum_row, column=col); ec.fill = table_header_fill; ec.border = medium_border
+
+        # 필터/고정
+        ws.auto_filter.ref = f"A{header_row}:I{sum_row}"
+        ws.freeze_panes = f"A{header_row+1}"
+
+        # 컬럼 너비
+        for col_idx, col_letter in enumerate(['A','B','C','D','E','F','G','H','I'], 1):
+            max_w = 10
+            try:
+                hc = ws.cell(row=header_row, column=col_idx)
+                if hc.value: max_w = max(max_w, len(str(hc.value)) * 1.2)
+            except Exception: pass
+            for row_idx in range(header_row + 1, sum_row):
+                try:
+                    cv = ws.cell(row=row_idx, column=col_idx).value
+                    if cv:
+                        s = str(cv)
+                        if '\n' in s:
+                            cell_len = max(len(line) for line in s.split('\n')) * 1.1
+                        else:
+                            cell_len = len(s) * 1.1
+                        max_w = max(max_w, cell_len)
+                except Exception: pass
+            if col_letter == 'H':
+                max_w = 26.25
+            elif col_letter == 'I':
+                max_w = 17.25
+            elif col_letter == 'D':
+                max_w = min(max_w, 50); max_w = max(max_w, 30)
+            else:
+                max_w = min(max_w, 20)
+            ws.column_dimensions[col_letter].width = max_w
+
+        # 인쇄 설정
+        try:
+            ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+            ws.sheet_properties.pageSetUpPr.fitToPage = True
+            ws.print_options.horizontalCentered = True
+            ws.page_margins.left = 0.3; ws.page_margins.right = 0.3
+            ws.page_margins.top = 0.5; ws.page_margins.bottom = 0.5
+        except Exception:
+            pass
+
+        # 요청에 따라 엑셀 내보내기 시 추가 시트(제조공정, 원료 환산)는 생성하지 않습니다.
+
+        wb.save(file_path)
+        try:
+            if os.path.exists(approval_img_path): os.remove(approval_img_path)
+        except Exception:
+            pass
+
+        if open_print_preview:
+            try:
+                import win32com.client as win32  # type: ignore
+                excel = win32.Dispatch("Excel.Application"); excel.Visible = True
+                wb_com = excel.Workbooks.Open(os.path.abspath(file_path))
+                try:
+                    wb_com.ActiveSheet.PrintPreview()
+                finally:
+                    wb_com.Close(SaveChanges=False); excel.Quit()
+            except Exception:
+                try:
+                    os.startfile(os.path.abspath(file_path))
+                except Exception:
+                    pass
+        else:
+            messagebox.showinfo("성공", f"생산처방이 '{file_path}'에 저장되었습니다.")
+    except Exception as e:
+        messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+
+    
 
 def export_data_to_excel(headers, data_rows, default_filename="export.xlsx"):
     """헤더와 데이터 행들을 단일 시트 엑셀 파일로 내보냅니다."""
@@ -546,14 +1178,17 @@ def export_formulation_template(formulation_data, default_filename="formulation.
             total_ratio = 0.0; total_amount = 0.0 # noqa
             for item in sheet_items:
                 sheet.row_dimensions[current_item_row].height = 20
-                is_separator = item.get("코드") == "---"
+                code_value = item.get("코드", "")
+                # 줄내림 체크: 코드가 ---, -, --, ―, ㅡ 중 하나인지 확인
+                is_separator = isinstance(code_value, str) and code_value.strip() in ["---", "-", "--", "―", "ㅡ"]
 
                 if is_lab_journal:
                     item_values = [item.get(h) for h in item_headers]
                 else:
-                    item_values = [item.get("구분"), item.get("코드"), item.get("원료명"), 
-                                   try_convert_to_float(item.get("함량(%)")) if not is_separator else "---",
-                                   try_convert_to_float(item.get("실험량(g)")) if not is_separator else "---", ""] # 비고 칸 추가
+                    # 줄내림일 경우 함량과 실험량을 빈 문자열로 처리
+                    item_values = [item.get("구분"), code_value, item.get("원료명"), 
+                                   "" if is_separator else try_convert_to_float(item.get("함량(%)")),
+                                   "" if is_separator else try_convert_to_float(item.get("실험량(g)")), ""] # 비고 칸 추가
 
                 for col_idx, value in enumerate(item_values, 1):
                     cell = sheet.cell(row=current_item_row, column=col_idx, value=value)
@@ -701,9 +1336,14 @@ def export_formulation_template(formulation_data, default_filename="formulation.
         wb.save(file_path)
 
 def try_convert_to_float(value):
-    """값을 float으로 변환 시도, 실패 시 원래 값 반환"""
+    """값을 float으로 변환 시도, 실패 시 원래 값 반환. 줄내림(---) 체크"""
     if value is None:
         return None
+    # 줄내림 구분자 체크 (---, -, 등)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped in ["---", "-", "--", "―", "ㅡ"]:
+            return "---"  # 줄내림으로 명시적 반환
     try:
         return float(value)
     except (ValueError, TypeError):
@@ -765,10 +1405,21 @@ def import_formulation_template():
                 row_list = list(row)
                 item_data = dict(zip(item_headers, row_list))
 
-                if '함량(%)' in item_data:
-                    item_data['함량(%)'] = try_convert_to_float(item_data['함량(%)'])
-                if '실험량(g)' in item_data:
-                    item_data['실험량(g)'] = try_convert_to_float(item_data['실험량(g)'])
+                # 줄내림 체크: 코드가 줄내림이면 함량과 실험량을 빈 문자열로 처리
+                code_val = item_data.get('코드', '')
+                is_separator = isinstance(code_val, str) and code_val.strip() in ["---", "-", "--", "―", "ㅡ"]
+                
+                if is_separator:
+                    # 줄내림인 경우 함량과 실험량을 빈 문자열로
+                    item_data['함량(%)'] = ""
+                    item_data['실험량(g)'] = ""
+                else:
+                    # 일반 원료인 경우 숫자 변환
+                    if '함량(%)' in item_data:
+                        item_data['함량(%)'] = try_convert_to_float(item_data['함량(%)'])
+                    if '실험량(g)' in item_data:
+                        item_data['실험량(g)'] = try_convert_to_float(item_data['실험량(g)'])
+                
                 formulation_data["items"].append(item_data)
 
             elif reading_state == "results":
@@ -1434,3 +2085,26 @@ def export_functional_cosmetics_report_template(report_data=None):
         messagebox.showinfo("성공", f"보고서 파일이 '{file_path}'에 저장되었습니다.")
     except Exception as e:
         messagebox.showerror("내보내기 오류", f"보고서 파일 저장 중 오류가 발생했습니다: {e}")
+
+def export_production_formulation_to_excel(production_data, default_filename="production.xlsx", file_path: str | None = None, open_print_preview: bool = False, mode: str = "original"):
+    """생산처방 정보를 엑셀로 내보냅니다.
+    mode:
+      - "original": 원래 템플릿(제목+영문부제, 결재란 이미지, 병합 포함, 추가 시트 포함)
+      - "revised": 수정본 템플릿(결재란 텍스트 셀, 기본정보 병합 없음, 고정폭, 세로 인쇄, 단일 시트)
+    """
+    if (mode or "original").lower() == "revised":
+        return export_production_formulation_revised_to_excel(
+            production_data,
+            default_filename=default_filename,
+            file_path=file_path,
+            open_print_preview=open_print_preview,
+        )
+    else:
+        return export_production_formulation_original_to_excel(
+            production_data,
+            default_filename=default_filename,
+            file_path=file_path,
+            open_print_preview=open_print_preview,
+        )
+
+    
