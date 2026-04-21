@@ -255,8 +255,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.help_button.place(relx=0.98, y=10, anchor="ne")
 
         # '처방 관리'와 '문서' 탭을 추가합니다.
-        self.tab_view.add(self.texts["formulation_mgt"])
-        self.tab_view.add(self.texts["document_sub"])
+        self.tab_map = {
+            self.texts["formulation_mgt"]: "document/formulation_mgt",
+            self.texts["document_sub"]: "document/document_sub"
+        }
+        for tab_name in self.tab_map.keys():
+            self.tab_view.add(tab_name)
 
         # 탭 설정
         self.setup_formulation_tab(self.tab_view.tab(self.texts["formulation_mgt"]))
@@ -289,12 +293,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def on_tab_change(self):
         selected_tab = self.tab_view.get()
-        # 현재 선택된 탭의 활동을 기록합니다.
-        self.app.record_action(f"document/{selected_tab}")
+        # 탭 이름에 해당하는 고유 키를 찾아서 활동을 기록합니다.
+        static_key = self.tab_map.get(selected_tab)
+        if static_key:
+            self.app.record_action(static_key)
 
     def switch_to_tab(self, tab_name):
         if tab_name in self.tab_view._name_list: # pylint: disable=protected-access
             self.tab_view.set(tab_name)
+
+    def refresh_data(self):
+        """문서 관리 프레임의 데이터를 새로고침합니다."""
+        print("문서 관리 프레임 데이터 새로고침...")
+        try:
+            # 처방 목록 및 폴더 뷰를 새로고침합니다.
+            self.load_formulations()
+            # 클라이언트 필터 드롭다운을 새로고침합니다.
+            self.refresh_formulation_filters()
+            # 다른 탭들의 내용도 초기화/새로고침합니다.
+            self.reset_selection_and_tabs()
+        except Exception as e:
+            print(f"[오류] 문서 관리 프레임 새로고침 실패: {e}")
 
     def refresh_formulation_filters(self):
         print("처방 필터 새로고침...")
@@ -549,7 +568,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
             formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
             if not formulation: return
 
-            for item in formulation.items:
+            # item.order를 기준으로 처방 항목을 정렬합니다. None인 경우 마지막으로 보냅니다.
+            sorted_items = sorted(formulation.items, key=lambda i: i.order if i.order is not None else float('inf'))
+
+            for item in sorted_items:
                 if not item.material_code or item.material_code == "---": continue
                 
                 material = session.query(Material).filter_by(code=item.material_code).first()
@@ -560,6 +582,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 ))
             
             self.recalculate_quotation()
+            
+            # [추가] '구분' 열을 행 번호로 정규화하여 순서대로 표시합니다.
+            self.app.normalize_group_column_to_row_numbers(self.quotation_tree, header_name='구분', force=True)
 
         except Exception as e:
             messagebox.showerror(self.texts['quotation_creation_error'], f"{self.texts['quotation_creation_error_msg']}: {e}", parent=self)
@@ -907,6 +932,52 @@ class DocumentManagementFrame(ctk.CTkFrame):
             if self.current_user.is_admin:
                 self.delete_button.configure(state="normal" if selection_count > 0 else "disabled")
             self.reset_selection_button.configure(state="normal" if selection_count > 0 else "disabled")
+
+    def sort_treeview_column(self, tree, col, reverse):
+        """Treeview의 컬럼을 클릭하여 정렬하는 함수"""
+        try:
+            # 컬럼의 데이터와 아이템 ID를 리스트로 추출
+            l = [(tree.set(k, col), k) for k in tree.get_children('')]
+            
+            # 데이터 타입을 확인하여 정렬 (숫자 > 문자)
+            try:
+                # 숫자 변환 시도 (소수점, 콤마 등 처리)
+                l.sort(key=lambda t: float(str(t[0]).replace(',','')), reverse=reverse)
+            except (ValueError, TypeError):
+                # 숫자 변환 실패 시 문자열로 정렬
+                l.sort(key=lambda t: str(t[0]), reverse=reverse)
+
+            # 정렬된 순서대로 아이템을 다시 삽입
+            for index, (val, k) in enumerate(l):
+                tree.move(k, '', index)
+
+            # 정렬 방향을 다음 클릭을 위해 반대로 설정
+            tree.heading(col, command=lambda: self.sort_treeview_column(tree, col, not reverse))
+        except Exception as e:
+            print(f"Treeview 정렬 오류: {e}")
+
+    def sort_treeview_column(self, tree, col, reverse):
+        """Treeview의 컬럼을 클릭하여 정렬하는 함수"""
+        try:
+            # 컬럼의 데이터와 아이템 ID를 리스트로 추출
+            l = [(tree.set(k, col), k) for k in tree.get_children('')]
+            
+            # 데이터 타입을 확인하여 정렬 (숫자 > 문자)
+            try:
+                # 숫자 변환 시도 (소수점, 콤마 등 처리)
+                l.sort(key=lambda t: float(str(t[0]).replace(',','')), reverse=reverse)
+            except (ValueError, TypeError):
+                # 숫자 변환 실패 시 문자열로 정렬
+                l.sort(key=lambda t: str(t[0]), reverse=reverse)
+
+            # 정렬된 순서대로 아이템을 다시 삽입
+            for index, (val, k) in enumerate(l):
+                tree.move(k, '', index)
+
+            # 정렬 방향을 다음 클릭을 위해 반대로 설정
+            tree.heading(col, command=lambda: self.sort_treeview_column(tree, col, not reverse))
+        except Exception as e:
+            print(f"Treeview 정렬 오류: {e}")
 
     def create_folder_card(self, master, folder_name, count):
         """슬라이더 값에 따라 크기가 조절되는 폴더 카드 위젯을 생성합니다."""
@@ -2022,67 +2093,95 @@ class DocumentManagementFrame(ctk.CTkFrame):
         excel_handler.export_functional_cosmetics_report_template(report_data)
 
     def setup_functional_report_tab(self, tab_frame):
-        """기능성 보고/참고 자료 탭의 UI를 설정합니다."""
+        """기능성 보고/참고 자료 탭의 UI를 COA 반제품 템플릿과 유사하게 재구성합니다."""
         tab_frame.grid_columnconfigure(0, weight=1)
-        tab_frame.grid_rowconfigure(0, weight=1) # 스크롤 프레임
+        tab_frame.grid_rowconfigure(1, weight=1) # 스크롤 프레임
 
+        # --- 상단 버튼 프레임 ---
+        top_button_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
+        top_button_frame.grid(row=0, column=0, padx=10, pady=10, sticky="e")
+        ctk.CTkButton(top_button_frame, text=self.texts['export_report'], command=self.export_functional_report).pack(side="left", padx=5)
+        ctk.CTkButton(top_button_frame, text=self.texts['reset'], command=self.clear_functional_report_form, fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
+
+        # --- 스크롤 가능한 메인 프레임 ---
         scrollable_frame = ctk.CTkScrollableFrame(tab_frame, label_text=self.texts['functional_report_title'])
-        scrollable_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        scrollable_frame.grid_columnconfigure(1, weight=1)
+        scrollable_frame.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        scrollable_frame.grid_columnconfigure(0, weight=1)
 
         self.report_entries = {}
-        fields_info = [
-            ("제출유형", ["1호 (고시품목)", "2호 (심사품목)", "3호 (혼합)"], "combo"),
-            ("업체명", "", "entry"),
-            ("책임판매업자", "", "entry"),
-            ("제조원", "", "entry"),
-            ("제품명(국문)", "", "entry"),
-            ("제품명(영문)", "", "entry"),
-            ("제형", ["액제", "로션", "크림", "에센스", "쿠션", "에어로졸"], "combo"),
-            ("효능·효과", ["자외선차단", "미백", "주름개선", "탈모증상 완화", "여드름성 피부 완화"], "checkbox"),
-            ("자외선 관련 (SPF / PA)", "", "entry"),
-            ("pH (실측값)", "", "entry"),
-            ("이미 심사받은 품목", "", "entry"),
-            ("고시한 기준 및 시험방법", "", "entry"),
-            ("활성물질용량", "예시:\n총 에칠헥실트리아존으로서 4.00그램\n총 폴리실리콘-15로서 3.00그램", "textbox"),
-            ("용법·용량", "본품 적당량을 취해 피부에 골고루 펴 바른다.", "textbox"),
-            ("사용할 때의 주의사항", "1. 화장품 사용 시 또는 사용 후 직사광선에 의하여 사용부위가 붉은 반점, 부어오름 또는 가려움증 등의 이상 증상이나 부작용이 있는 경우에는 전문의 등과 상담할 것\n\n2. 상처가 있는 부위 등에는 사용을 자제할 것\n\n3. 보관 및 취급시의 주의 사항\n가. 어린이의 손이 닿지 않는 곳에 보관할 것\n나. 직사광선을 피해서 보관할 것", "textbox"),
-            ("원료성분 및 배합비율", "예시:\n나이아신아마이드: 2g\n아데노신: 0.04g", "textbox"),
+
+        # --- 기본 정보 섹션 ---
+        info_frame = ctk.CTkFrame(scrollable_frame)
+        info_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 20))
+        info_frame.grid_columnconfigure((1, 3), weight=1)
+
+        info_fields = [
+            ("제출유형", ["1호 (고시품목)", "2호 (심사품목)", "3호 (혼합)"], "combo", 0, 0),
+            ("업체명", "", "entry", 0, 2),
+            ("책임판매업자", "", "entry", 1, 0),
+            ("제조원", "", "entry", 1, 2),
+            ("제품명(국문)", "", "entry", 2, 0),
+            ("제품명(영문)", "", "entry", 2, 2),
+            ("제형", ["액제", "로션", "크림", "에센스", "쿠션", "에어로졸"], "combo", 3, 0),
+            ("자외선 관련 (SPF / PA)", "", "entry", 3, 2),
+            ("pH (실측값)", "", "entry", 4, 0),
+            ("이미 심사받은 품목", "", "entry", 4, 2),
+            ("고시한 기준 및 시험방법", "", "entry", 5, 0, 3), # 3칸 병합
         ]
 
-        for i, (label_text, options, widget_type) in enumerate(fields_info):
-            label = ctk.CTkLabel(scrollable_frame, text=label_text)
-            label.grid(row=i, column=0, padx=10, pady=10, sticky="w")
+        for field_info in info_fields:
+            label_text, options, widget_type, r, c = field_info[:5]
+            colspan = field_info[5] if len(field_info) > 5 else 1
 
+            label = ctk.CTkLabel(info_frame, text=label_text, font=ctk.CTkFont(weight="bold"))
+            label.grid(row=r, column=c, padx=10, pady=5, sticky="w")
+            
             if widget_type == "combo":
-                widget = ctk.CTkComboBox(scrollable_frame, values=options, width=250)
+                widget = ctk.CTkComboBox(info_frame, values=options)
                 widget.set(options[0])
-            elif widget_type == "checkbox":
-                checkbox_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
-                checkbox_frame.grid(row=i, column=1, padx=10, pady=5, sticky="ew")
-                widget = {} # 체크박스 변수들을 담을 딕셔너리
-                for idx, option_text in enumerate(options):
-                    var = ctk.BooleanVar()
-                    chk = ctk.CTkCheckBox(checkbox_frame, text=option_text, variable=var)
-                    chk.pack(side="left", padx=(0, 15))
-                    widget[option_text] = var
-                self.report_entries[label_text] = widget
-                continue # 아래 로직을 건너뛰고 다음 루프로
-            elif widget_type == "textbox":
-                widget = ctk.CTkTextbox(scrollable_frame, height=80)
-                widget.insert("1.0", options)
-            else: # entry
-                widget = ctk.CTkEntry(scrollable_frame)
+            else:
+                widget = ctk.CTkEntry(info_frame)
 
-            widget.grid(row=i, column=1, padx=10, pady=10, sticky="ew")
+            widget.grid(row=r, column=c + 1, columnspan=colspan, padx=10, pady=5, sticky="ew")
             self.report_entries[label_text] = widget
 
-        # --- 하단 버튼 프레임 ---
-        button_frame = ctk.CTkFrame(tab_frame)
-        button_frame.grid(row=1, column=0, padx=10, pady=10, sticky="e")
+        # --- 효능·효과 섹션 ---
+        effects_frame = ctk.CTkFrame(scrollable_frame)
+        effects_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        effects_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(effects_frame, text="효능·효과", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(5,0))
+        
+        effects_checkbox_frame = ctk.CTkFrame(effects_frame, fg_color="transparent")
+        effects_checkbox_frame.pack(fill="x", padx=10, pady=5)
+        
+        effects_options = ["자외선차단", "미백", "주름개선", "탈모증상 완화", "여드름성 피부 완화"]
+        effects_widget = {}
+        for option_text in effects_options:
+            var = ctk.BooleanVar()
+            chk = ctk.CTkCheckBox(effects_checkbox_frame, text=option_text, variable=var)
+            chk.pack(side="left", padx=(0, 15))
+            effects_widget[option_text] = var
+        self.report_entries["효능·효과"] = effects_widget
 
-        ctk.CTkButton(button_frame, text=self.texts['export_report'], command=self.export_functional_report).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text=self.texts['reset'], command=self.clear_functional_report_form, fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
+        # --- 상세 설명 섹션 ---
+        details_frame = ctk.CTkFrame(scrollable_frame)
+        details_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
+        details_frame.grid_columnconfigure(1, weight=1)
+
+        textbox_fields = [
+            ("활성물질용량", "예시:\n총 에칠헥실트리아존으로서 4.00그램\n총 폴리실리콘-15로서 3.00그램", 0),
+            ("용법·용량", self.texts['usage_default'], 1),
+            ("사용할 때의 주의사항", self.texts['precautions_default'], 2),
+            ("원료성분 및 배합비율", self.texts['ingredients_ratio_default'], 3),
+        ]
+
+        for label_text, default_value, r in textbox_fields:
+            label = ctk.CTkLabel(details_frame, text=label_text, font=ctk.CTkFont(weight="bold"))
+            label.grid(row=r, column=0, padx=10, pady=10, sticky="nw")
+            widget = ctk.CTkTextbox(details_frame, height=80)
+            widget.insert("1.0", default_value)
+            widget.grid(row=r, column=1, padx=10, pady=10, sticky="ew")
+            self.report_entries[label_text] = widget
 
     def setup_lab_journal_tab(self, tab_frame):
         """물성치 및 실험일지 탭의 UI를 설정합니다."""

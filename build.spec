@@ -1,4 +1,4 @@
- # -*- mode: python ; coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 
 import os
 import sys
@@ -11,6 +11,10 @@ project_root = os.path.dirname(os.path.abspath(sys.argv[0]))
 # --- 데이터 파일 수집 ---
 # customtkinter의 테마 파일들을 포함시킵니다.
 datas = collect_data_files('customtkinter')
+
+# icon.ico와 config.ini 파일을 데이터 파일에 추가합니다.
+# '.'는 빌드된 폴더의 루트를 의미합니다.
+datas += [('Icon.ico', '.'), ('config.ini', '.')]
 
 # --- 숨겨진 import 추가 ---
 # PyInstaller가 자동으로 찾지 못할 수 있는 모듈들을 명시적으로 추가합니다.
@@ -38,7 +42,7 @@ a = Analysis(
         os.path.join(project_root, 'utils')
     ],
     binaries=[],
-    datas=collect_data_files('customtkinter'),
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -71,5 +75,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico'
+    icon='Icon.ico'
 )

@@ -810,6 +810,85 @@ def import_formulation_template():
         ClipboardErrorDialog(None, title="가져오기 오류", error_message=f"파일을 읽는 중 오류가 발생했습니다:\n\n{e}")
         return None
 
+def export_ingredient_report(report_data):
+    """원료목록 보고서 데이터를 템플릿 형식의 엑셀 파일로 내보냅니다."""
+    default_filename = f"{report_data.get('제품명', '화장품')}_원료목록보고서.xlsx"
+    initial_dir = get_excel_path()
+    timestamped_filename = get_timestamped_filename(default_filename)
+    file_path = filedialog.asksaveasfilename(
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        initialdir=initial_dir,
+        initialfile=timestamped_filename,
+        title="원료목록 보고서 저장"
+    )
+    if not file_path:
+        return
+
+    save_excel_path(os.path.dirname(file_path))
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "원료목록보고서"
+
+        # --- 스타일 정의 ---
+        header_font = Font(name='맑은 고딕', size=11, bold=True)
+        default_font = Font(name='맑은 고딕', size=10)
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+        # --- 헤더 작성 ---
+        headers = [
+            "일련번호", "제품명", "유형표시", "기능성화장품유형", "기능성화장품품목코드",
+            "제조업자상호", "원료성분명", "용도(E:수출용)", "맞춤형내용물(C1:혼합용/C2:소분용)"
+        ]
+        for col_idx, header_text in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header_text)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+
+        # --- 데이터 작성 ---
+        items = report_data.get('items', [])
+        for row_idx, item in enumerate(items, 2):
+            row_data = [
+                item.get("일련번호"),
+                report_data.get("제품명"),
+                report_data.get("유형표시"),
+                report_data.get("기능성화장품유형"),
+                report_data.get("기능성화장품품목코드"),
+                report_data.get("제조업자상호"),
+                item.get("원료성분명"),
+                item.get("용도(E:수출용)"),
+                item.get("맞춤형내용물(C1:혼합용/C2:소분용)")
+            ]
+            for col_idx, cell_value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=cell_value)
+                cell.font = default_font
+                cell.alignment = left_align
+
+        # --- 컬럼 너비 자동 조절 ---
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if cell.value:
+                        length = _get_display_length(cell.value)
+                        if length > max_length:
+                            max_length = length
+                except:
+                    pass
+            adjusted_width = max_length + 2
+            ws.column_dimensions[column].width = adjusted_width
+
+        wb.save(file_path)
+        messagebox.showinfo("성공", f"원료목록 보고서가 '{file_path}'에 저장되었습니다.")
+    except Exception as e:
+        messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+
 def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx"):
     """견적서 데이터를 특정 템플릿 형식의 엑셀 파일로 내보냅니다."""
     initial_dir = get_excel_path()
