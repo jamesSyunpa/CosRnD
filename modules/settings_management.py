@@ -416,6 +416,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
             )
     
     def _handle_create_new_db(self, new_db_path, new_excel_path):
+        """새로운 비어있는 DB를 생성하고 설정을 저장한 후 DB를 다시 로드합니다."""
         # 1. DB 디렉토리 생성
         try:
             os.makedirs(os.path.dirname(new_db_path), exist_ok=True)
@@ -450,9 +451,31 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
                 conn.execute(text("DELETE FROM _schema_version"))
                 conn.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
-                
-            self._save_and_restart(new_db_path, new_excel_path, 
-                                 "비어있는 새 공유 DB 경로가 설정되었습니다. 프로그램을 재시작합니다.")
+                conn.commit()
+            
+            print(f"[DEBUG] 새 DB 생성 완료: {new_db_path}")
+            
+            # 4. 설정 저장
+            db_dir = os.path.dirname(new_db_path)
+            self._save_config('Paths', 'shared_db_path', db_dir)
+            self._save_config('Paths', 'excel_dir', new_excel_path)
+            print(f"[DEBUG] 설정 저장 완료: DB={db_dir}, Excel={new_excel_path}")
+            
+            # 5. 기존 DB 연결 해제
+            db_manager.dispose_engine()
+            print("[DEBUG] 기존 DB 연결 해제 완료")
+            
+            # 6. 새 DB로 다시 연결
+            db_manager.setup_database(self.application_path, self.config_path, self.app.on_initial_setup)
+            print("[DEBUG] 새 DB 연결 완료")
+            
+            # 7. 모든 프레임의 데이터 새로고침
+            self.app.refresh_data_in_all_frames()
+            
+            messagebox.showinfo("완료", 
+                              "새로운 비어있는 DB가 생성되고 로드되었습니다.\n"
+                              "이제 새 DB를 사용할 수 있습니다.",
+                              parent=self)
                 
         except Exception as e:
             # DB 생성 실패 시 파일 정리
@@ -473,6 +496,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 engine.dispose()
 
     def _handle_move_db(self, new_db_path, new_excel_path):
+        """현재 DB를 새 경로로 이동하고 설정을 저장한 후 DB를 다시 로드합니다."""
         # 1. 현재 DB 파일 확인
         local_db_path = db_manager.get_local_db_path()
         if not local_db_path or not os.path.exists(local_db_path):
@@ -504,28 +528,49 @@ class SettingsManagementFrame(ctk.CTkFrame):
         try:
             # DB 연결 해제
             db_manager.dispose_engine()
+            print(f"[DEBUG] DB 연결 해제 완료")
             
             # 백업 생성
             db_backup_path = f"{local_db_path}.backup"
             shutil.copy2(local_db_path, db_backup_path)
+            print(f"[DEBUG] 백업 생성 완료: {db_backup_path}")
             
             # 대상 디렉토리가 없으면 생성
             os.makedirs(os.path.dirname(new_db_path), exist_ok=True)
             
             # 파일 이동 (copy + delete 방식으로 변경하여 크로스 드라이브 이동 지원)
             shutil.copy2(local_db_path, new_db_path)
-            os.remove(local_db_path)
+            print(f"[DEBUG] DB 파일 복사 완료: {new_db_path}")
             
-            # 설정 저장 및 재시작
-            self._save_and_restart(new_db_path, new_excel_path, 
-                                 "기존 DB를 새 공유 경로로 이동했습니다. 프로그램을 재시작합니다.")
+            # 원본 파일 삭제
+            os.remove(local_db_path)
+            print(f"[DEBUG] 원본 DB 파일 삭제 완료")
+            
+            # 5. 설정 저장
+            db_dir = os.path.dirname(new_db_path)
+            self._save_config('Paths', 'shared_db_path', db_dir)
+            self._save_config('Paths', 'excel_dir', new_excel_path)
+            print(f"[DEBUG] 설정 저장 완료: DB={db_dir}, Excel={new_excel_path}")
+            
+            # 6. 새 DB로 다시 연결
+            db_manager.setup_database(self.application_path, self.config_path, self.app.on_initial_setup)
+            print("[DEBUG] 새 DB 연결 완료")
+            
+            # 7. 모든 프레임의 데이터 새로고침
+            self.app.refresh_data_in_all_frames()
             
             # 성공적으로 이동했다면 백업 삭제
             if os.path.exists(db_backup_path):
                 try:
                     os.remove(db_backup_path)
+                    print(f"[DEBUG] 백업 파일 삭제 완료")
                 except Exception:
                     pass  # 백업 삭제 실패는 무시
+            
+            messagebox.showinfo("완료", 
+                              f"DB가 새 경로로 이동되고 로드되었습니다.\n\n"
+                              f"새 경로: {new_db_path}",
+                              parent=self)
                     
         except Exception as e:
             # 이동 실패 시 복구 시도
@@ -533,6 +578,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 try:
                     shutil.copy2(db_backup_path, local_db_path)
                     os.remove(db_backup_path)
+                    print(f"[DEBUG] DB 복구 완료")
                 except Exception as restore_error:
                     self._show_error_with_clipboard(
                         "심각한 DB 이동 오류", 
@@ -548,11 +594,12 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 f"DB 파일 이동 중 오류가 발생했습니다:\n{str(e)}", 
                 f"소스: {local_db_path}\n대상: {new_db_path}"
             )
+            # 복구 후 다시 연결 시도
             self.app.after(100, lambda: db_manager.setup_database(
                 self.application_path, self.config_path, self.app.on_initial_setup))
 
     def _handle_use_existing_db(self, new_db_path, new_excel_path):
-        """공유 DB 경로 설정을 처리합니다. 지정된 경로의 DB 파일을 검증하고 사용합니다."""
+        """경로에 있는 기존 DB를 검증하고 설정을 저장한 후 DB를 다시 로드합니다."""
         
         # 1. DB 파일 존재 여부 확인
         if not os.path.exists(new_db_path):
@@ -608,10 +655,30 @@ class SettingsManagementFrame(ctk.CTkFrame):
                                    parent=self)
                 if engine: engine.dispose()
                 return
-                
-            # 3. 모든 검증을 통과하면 설정 저장 및 재시작
-            self._save_and_restart(new_db_path, new_excel_path, 
-                                 "새로운 공유 DB 경로가 설정되었습니다. 프로그램을 재시작합니다.")
+            
+            print(f"[DEBUG] 기존 DB 검증 완료: {new_db_path}")
+            
+            # 3. 설정 저장
+            db_dir = os.path.dirname(new_db_path)
+            self._save_config('Paths', 'shared_db_path', db_dir)
+            self._save_config('Paths', 'excel_dir', new_excel_path)
+            print(f"[DEBUG] 설정 저장 완료: DB={db_dir}, Excel={new_excel_path}")
+            
+            # 4. 기존 DB 연결 해제
+            db_manager.dispose_engine()
+            print("[DEBUG] 기존 DB 연결 해제 완료")
+            
+            # 5. 새 DB로 다시 연결
+            db_manager.setup_database(self.application_path, self.config_path, self.app.on_initial_setup)
+            print("[DEBUG] 새 DB 연결 완료")
+            
+            # 6. 모든 프레임의 데이터 새로고침
+            self.app.refresh_data_in_all_frames()
+            
+            messagebox.showinfo("완료", 
+                              f"기존 DB가 로드되었습니다.\n\n"
+                              f"경로: {new_db_path}",
+                              parent=self)
                                  
         except Exception as e:
             self._show_error_with_clipboard(

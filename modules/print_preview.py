@@ -422,7 +422,7 @@ class _PreviewWindow(ctk.CTkToplevel):
     def __init__(self, master, pages: List[Image.Image]):
         super().__init__(master)
         self.title("인쇄 미리보기 (A4)")
-        self.geometry("980x720")
+        self.geometry("980x720")  # 메인 창보다 작음
         self.pages = pages
         self.page_index = 0
         # 최초 표시를 최소 배율로 설정

@@ -158,6 +158,11 @@ hiddenimports = [
     'cryptography.hazmat',
     'cryptography.hazmat.primitives',
     'cryptography.hazmat.backends',
+    # Windows API (단일 인스턴스 체크용)
+    'win32event',
+    'win32api',
+    'winerror',
+    'pywintypes',
     # 설정 관리
     'configparser',
     # Pillow 관련

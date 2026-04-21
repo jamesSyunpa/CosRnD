@@ -31,7 +31,16 @@ def _ps_json(cmd: str, timeout: float = 3.0):
             "-Command",
             cmd,
         ]
-        out = subprocess.check_output(full, stderr=subprocess.STDOUT, timeout=timeout)
+        # Windows에서 콘솔 창 숨기기
+        import sys
+        startupinfo = None
+        if sys.platform == 'win32':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+        
+        out = subprocess.check_output(full, stderr=subprocess.STDOUT, timeout=timeout, 
+                                      startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
         s = out.decode("utf-8", errors="ignore").strip()
         if not s:
             return None

@@ -2,6 +2,7 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from sqlalchemy import func, desc, or_, and_
+from sqlalchemy.orm import joinedload
 import sys
 import os
 import shutil
@@ -490,6 +491,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.export_single_button.pack(side="right", padx=5)
         self.delete_button = ctk.CTkButton(bottom_button_frame, text=self.texts['delete'], width=100, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation)
         self.delete_button.pack(side="right", padx=5) # 오른쪽에 여백 추가
+        self.copy_button = ctk.CTkButton(bottom_button_frame, text="처방 복사", width=100, fg_color="#2B7A3B", hover_color="#236030", command=self.copy_formulation)
+        self.copy_button.pack(side="right", padx=5)
         self.edit_button = ctk.CTkButton(bottom_button_frame, text=self.texts['edit'], width=100, command=lambda: self.open_formulation_popup(edit_mode=True))
         self.edit_button.pack(side="right", padx=5)
         self.new_button = ctk.CTkButton(bottom_button_frame, text=self.texts['new'], width=100, command=lambda: self.open_formulation_popup(edit_mode=False))
@@ -1261,7 +1264,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         def calc_specific_gravity():
             calc_win = ctk.CTkToplevel(dlg)
             calc_win.title('비중 계산')
-            calc_win.geometry('350x200')
+            calc_win.geometry('350x250')
             calc_win.transient(dlg)
             calc_win.grab_set()
             
@@ -1269,27 +1272,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
             calc_frm.pack(padx=20, pady=20, fill='both', expand=True)
             calc_frm.grid_columnconfigure(1, weight=1)
             
-            ctk.CTkLabel(calc_frm, text='빈 비중병 무게 (g)').grid(row=0, column=0, sticky='w', pady=4)
+            ctk.CTkLabel(calc_frm, text='총무게 (g)').grid(row=0, column=0, sticky='w', pady=4)
+            total_e = ctk.CTkEntry(calc_frm)
+            total_e.grid(row=0, column=1, sticky='ew', pady=4)
+            
+            ctk.CTkLabel(calc_frm, text='빈비중컵 무게 (g)').grid(row=1, column=0, sticky='w', pady=4)
             empty_e = ctk.CTkEntry(calc_frm)
-            empty_e.grid(row=0, column=1, sticky='ew', pady=4)
+            empty_e.grid(row=1, column=1, sticky='ew', pady=4)
             
-            ctk.CTkLabel(calc_frm, text='물 채운 무게 (g)').grid(row=1, column=0, sticky='w', pady=4)
-            water_e = ctk.CTkEntry(calc_frm)
-            water_e.grid(row=1, column=1, sticky='ew', pady=4)
-            
-            ctk.CTkLabel(calc_frm, text='시료 채운 무게 (g)').grid(row=2, column=0, sticky='w', pady=4)
-            sample_e = ctk.CTkEntry(calc_frm)
-            sample_e.grid(row=2, column=1, sticky='ew', pady=4)
+            ctk.CTkLabel(calc_frm, text='비중컵 용량 (mL)').grid(row=2, column=0, sticky='w', pady=4)
+            volume_e = ctk.CTkEntry(calc_frm)
+            volume_e.grid(row=2, column=1, sticky='ew', pady=4)
             
             result_label = ctk.CTkLabel(calc_frm, text='', font=ctk.CTkFont(weight='bold'))
             result_label.grid(row=3, column=0, columnspan=2, pady=(10,0))
             
             def calculate():
                 try:
-                    empty = float(empty_e.get().replace(',',''))
-                    water = float(water_e.get().replace(',',''))
-                    sample = float(sample_e.get().replace(',',''))
-                    sg = (sample - empty) / (water - empty)
+                    total_weight = float(total_e.get().replace(',',''))
+                    empty_cup = float(empty_e.get().replace(',',''))
+                    cup_volume = float(volume_e.get().replace(',',''))
+                    sg = (total_weight - empty_cup) / cup_volume
                     sg_e.delete(0, 'end')
                     sg_e.insert(0, f'{sg:.4f}')
                     result_label.configure(text=f'비중: {sg:.4f}', text_color='green')
@@ -1429,7 +1432,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             def calc_specific_gravity():
                 calc_win = ctk.CTkToplevel(dlg)
                 calc_win.title('비중 계산')
-                calc_win.geometry('350x200')
+                calc_win.geometry('350x250')
                 calc_win.transient(dlg)
                 calc_win.grab_set()
                 
@@ -1437,27 +1440,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 calc_frm.pack(padx=20, pady=20, fill='both', expand=True)
                 calc_frm.grid_columnconfigure(1, weight=1)
                 
-                ctk.CTkLabel(calc_frm, text='빈 비중병 무게 (g)').grid(row=0, column=0, sticky='w', pady=4)
+                ctk.CTkLabel(calc_frm, text='총무게 (g)').grid(row=0, column=0, sticky='w', pady=4)
+                total_e = ctk.CTkEntry(calc_frm)
+                total_e.grid(row=0, column=1, sticky='ew', pady=4)
+                
+                ctk.CTkLabel(calc_frm, text='빈비중컵 무게 (g)').grid(row=1, column=0, sticky='w', pady=4)
                 empty_e = ctk.CTkEntry(calc_frm)
-                empty_e.grid(row=0, column=1, sticky='ew', pady=4)
+                empty_e.grid(row=1, column=1, sticky='ew', pady=4)
                 
-                ctk.CTkLabel(calc_frm, text='물 채운 무게 (g)').grid(row=1, column=0, sticky='w', pady=4)
-                water_e = ctk.CTkEntry(calc_frm)
-                water_e.grid(row=1, column=1, sticky='ew', pady=4)
-                
-                ctk.CTkLabel(calc_frm, text='시료 채운 무게 (g)').grid(row=2, column=0, sticky='w', pady=4)
-                sample_e = ctk.CTkEntry(calc_frm)
-                sample_e.grid(row=2, column=1, sticky='ew', pady=4)
+                ctk.CTkLabel(calc_frm, text='비중컵 용량 (mL)').grid(row=2, column=0, sticky='w', pady=4)
+                volume_e = ctk.CTkEntry(calc_frm)
+                volume_e.grid(row=2, column=1, sticky='ew', pady=4)
                 
                 result_label = ctk.CTkLabel(calc_frm, text='', font=ctk.CTkFont(weight='bold'))
                 result_label.grid(row=3, column=0, columnspan=2, pady=(10,0))
                 
                 def calculate():
                     try:
-                        empty = float(empty_e.get().replace(',',''))
-                        water = float(water_e.get().replace(',',''))
-                        sample = float(sample_e.get().replace(',',''))
-                        sg = (sample - empty) / (water - empty)
+                        total_weight = float(total_e.get().replace(',',''))
+                        empty_cup = float(empty_e.get().replace(',',''))
+                        cup_volume = float(volume_e.get().replace(',',''))
+                        sg = (total_weight - empty_cup) / cup_volume
                         sg_e.delete(0, 'end')
                         sg_e.insert(0, f'{sg:.4f}')
                         result_label.configure(text=f'비중: {sg:.4f}', text_color='green')
@@ -1591,9 +1594,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             win = ctk.CTkToplevel(self)
             win.title(f"생산처방 편집 - {prod.product_name or ''} ({prod.revision or ''})")
-            win.geometry("1400x750")
-            win.transient(self)
+            win.geometry("700x500")  # 933 * 3/4 = 700 (너비를 1/4 더 축소)
+            win.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
+            win.minsize(600, 400)  # 최소 크기만 제한
+            # win.transient(self)  # 최대화 버튼을 활성화하기 위해 transient 제거
             win.grab_set()
+            win.after(100, lambda: print(f"[WINDOW SIZE] 생산처방 편집 | geometry: {win.winfo_width()}x{win.winfo_height()} | requested: 700x500"))
 
             # 상단 정보 + 버튼
             top = ctk.CTkFrame(win, fg_color="transparent")
@@ -1692,7 +1698,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             recipe_tree.configure(yscrollcommand=rscroll.set)
             rscroll.grid(row=0, column=1, sticky="ns")
 
-            # split_instruction과 compose_instruction 함수 정의 (먼저 정의해야 함)
+            # === 함수 정의를 먼저 해야 함 (populate_recipe_items에서 사용) ===
             def split_instruction(instr_text: str):
                 """
                 제조공정과 공정검사를 분리합니다.
@@ -1833,6 +1839,23 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             populate_recipe_items()
             
+            # UI 생성 후 창 크기 강제 설정 및 메인 창 중앙 배치
+            win.update_idletasks()
+            win.geometry("700x500")
+            win.update()
+            
+            # 메인 창 중앙에 배치
+            parent = self
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = win.winfo_width()
+            win_h = win.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            win.geometry(f"+{x}+{y}")
+            
             # 레시피에서 제조공정/공정검사 더블클릭 편집
             def on_recipe_double_click(event):
                 item = recipe_tree.identify_row(event.y)
@@ -1895,9 +1918,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 # 편집 다이얼로그
                 edit_win = ctk.CTkToplevel(win)
                 edit_win.title(f"Phase {phase} - {'제조공정' if edit_type == 'process' else '공정검사'} 편집")
-                edit_win.geometry("700x600")
-                edit_win.transient(win)
+                edit_win.geometry("525x600")  # 700 * 3/4 = 525
+                edit_win.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
+                edit_win.minsize(400, 400)  # 최소 크기만 제한
+                # edit_win.transient(win)  # 최대화 버튼을 활성화하기 위해 transient 제거
                 edit_win.grab_set()
+                edit_win.after(100, lambda: print(f"[WINDOW SIZE] 공정 편집 | geometry: {edit_win.winfo_width()}x{edit_win.winfo_height()} | requested: 525x600"))
                 
                 ctk.CTkLabel(edit_win, text=f"Phase {phase} {'제조공정' if edit_type == 'process' else '공정검사'}", 
                             font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(15,10), padx=20)
@@ -1999,14 +2025,20 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 btn_frame.pack(pady=(0,15))
                 ctk.CTkButton(btn_frame, text="저장", width=100, command=save_phase_process).pack(side="left", padx=5)
                 ctk.CTkButton(btn_frame, text="취소", width=100, fg_color="gray", command=edit_win.destroy).pack(side="left", padx=5)
+                
+                # 공정 편집 창을 부모(생산처방 편집) 창 중앙에 배치
+                edit_win.update_idletasks()
+                parent_x = win.winfo_rootx()
+                parent_y = win.winfo_rooty()
+                parent_w = win.winfo_width()
+                parent_h = win.winfo_height()
+                edit_w = edit_win.winfo_width()
+                edit_h = edit_win.winfo_height()
+                x = parent_x + (parent_w - edit_w) // 2
+                y = parent_y + (parent_h - edit_h) // 2
+                edit_win.geometry(f"+{x}+{y}")
             
             recipe_tree.bind("<Double-1>", on_recipe_double_click)
-            
-            # 창 위치 조정
-            try:
-                center_window_on_mouse_display(win)
-            except Exception:
-                pass
 
         finally:
             session.close()
@@ -2489,9 +2521,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             win = ctk.CTkToplevel(self)
             win.title(f"생산처방 미리보기 - {prod.product_name or ''} ({prod.revision or ''})")
-            win.geometry("1000x680")
-            win.transient(self)
+            win.geometry("750x680")  # 1000 * 3/4 = 750
+            win.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
+            win.minsize(600, 500)  # 최소 크기만 제한
+            # win.transient(self)  # 최대화 버튼을 활성화하기 위해 transient 제거
             win.grab_set()
+            win.after(100, lambda: print(f"[WINDOW SIZE] 생산처방 미리보기 | geometry: {win.winfo_width()}x{win.winfo_height()} | requested: 750x680"))
 
             # 상단 메타 정보
             top = ctk.CTkFrame(win)
@@ -2520,10 +2555,18 @@ class DocumentManagementFrame(ctk.CTkFrame):
             )
             pane.pack(fill="both", expand=True)
 
-            try:
-                center_window_on_mouse_display(win)
-            except Exception:
-                pass
+            # 메인 창 중앙에 배치
+            win.update_idletasks()
+            parent = self
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = win.winfo_width()
+            win_h = win.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            win.geometry(f"+{x}+{y}")
 
             self.wait_window(win)
         finally:
@@ -2754,9 +2797,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             win = ctk.CTkToplevel(self)
             win.title(f"패키지 상세 - {pkg.name}")
-            win.geometry("900x600")
-            win.transient(self)
+            win.geometry("675x600")  # 900 * 3/4 = 675
+            win.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
+            win.minsize(600, 500)  # 최소 크기만 제한
+            # win.transient(self)  # 최대화 버튼을 활성화하기 위해 transient 제거
             win.grab_set()
+            win.after(100, lambda: print(f"[WINDOW SIZE] 패키지 상세 | geometry: {win.winfo_width()}x{win.winfo_height()} | requested: 675x600"))
 
             top = ctk.CTkFrame(win)
             top.pack(fill="x", padx=10, pady=(10,5))
@@ -2879,10 +2925,18 @@ class DocumentManagementFrame(ctk.CTkFrame):
             except Exception:
                 pass
 
-            try:
-                center_window_on_mouse_display(win)
-            except Exception:
-                pass
+            # 메인 창 중앙에 배치
+            win.update_idletasks()
+            parent = self
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = win.winfo_width()
+            win_h = win.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            win.geometry(f"+{x}+{y}")
 
             self.wait_window(win)
         finally:
@@ -5236,6 +5290,91 @@ class DocumentManagementFrame(ctk.CTkFrame):
         except Exception as e:
             session.rollback()
             messagebox.showerror(self.texts['db_error'], f"{self.texts['delete_error_msg']}: {e}", parent=self)
+        finally:
+            session.close()
+    
+    def copy_formulation(self):
+        """선택된 처방을 복사하여 새로운 처방으로 생성합니다."""
+        if not self._selected_formulation_id:
+            messagebox.showwarning("선택 필요", "복사할 처방을 선택하세요.", parent=self)
+            return
+        
+        session = db_manager.get_session()
+        try:
+            # 원본 처방 조회
+            original = session.query(Formulation).options(joinedload(Formulation.items)).filter_by(id=self._selected_formulation_id).first()
+            if not original:
+                messagebox.showerror("오류", "선택된 처방을 찾을 수 없습니다.", parent=self)
+                return
+            
+            # 새 LAB NO 입력 받기
+            from tkinter import simpledialog
+            new_lab_no = simpledialog.askstring("처방 복사", 
+                                                f"새로운 LAB NO를 입력하세요:\n(원본: {original.lab_no or 'N/A'})",
+                                                parent=self)
+            if not new_lab_no:
+                return  # 취소
+            
+            new_lab_no = new_lab_no.strip().upper()
+            
+            # 중복 확인
+            existing = session.query(Formulation).filter_by(
+                experiment_name=original.experiment_name,
+                lab_no=new_lab_no
+            ).first()
+            if existing:
+                messagebox.showerror("오류", f"동일한 실험품명과 LAB NO({new_lab_no})가 이미 존재합니다.", parent=self)
+                return
+            
+            # 새 처방 생성
+            new_form = Formulation(
+                experiment_name=original.experiment_name,
+                lab_no=new_lab_no,
+                revision=original.revision,
+                manager_name=original.manager_name,
+                manager_code=original.manager_code,
+                experiment_date=original.experiment_date,
+                experiment_ph_initial=original.experiment_ph_initial,
+                experiment_ph_next_day=original.experiment_ph_next_day,
+                experiment_viscosity_initial=original.experiment_viscosity_initial,
+                experiment_viscosity_next_day=original.experiment_viscosity_next_day,
+                experiment_machine=original.experiment_machine,
+                experiment_comment=original.experiment_comment,
+                oem_odm_client_id=original.oem_odm_client_id,
+                has_target_info=original.has_target_info,
+                target_sample_name=original.target_sample_name,
+                target_ph_initial=original.target_ph_initial,
+                target_ph_next_day=original.target_ph_next_day,
+                target_viscosity_initial=original.target_viscosity_initial,
+                target_viscosity_next_day=original.target_viscosity_next_day,
+                target_machine=original.target_machine,
+                target_client_id=original.target_client_id,
+                sample_sent_count=0,  # 샘플 발송 횟수는 0으로 초기화
+                change_log=f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {original.lab_no}에서 복사됨"
+            )
+            session.add(new_form)
+            session.flush()  # ID 생성
+            
+            # 아이템 복사
+            for item in original.items:
+                new_item = FormulationItem(
+                    formulation_id=new_form.id,
+                    order=item.order,
+                    phase=item.phase,
+                    material_code=item.material_code,
+                    material_name=item.material_name,
+                    ratio=item.ratio,
+                    amount=item.amount
+                )
+                session.add(new_item)
+            
+            session.commit()
+            messagebox.showinfo("완료", f"처방이 복사되었습니다.\n새 LAB NO: {new_lab_no}", parent=self)
+            self.load_formulations()
+            
+        except Exception as e:
+            session.rollback()
+            messagebox.showerror("오류", f"처방 복사 실패: {e}", parent=self)
         finally:
             session.close()
 

@@ -129,6 +129,47 @@ def import_data():
         messagebox.showerror("오류", f"파일을 읽는 중 오류가 발생했습니다: {e}")
         return None
 
+def create_approval_image_v2(canvas_width: int) -> tuple[str, int]:
+    """결재란 이미지 생성 (v2): 결재방만 표시, 높이 2/3로 축소"""
+    # 1행: 기존 높이, 2행: 1행의 4.5배(=1+3.5)로 분할 (전체 1.5배에서 2/3 = 1.0배)
+    base_h1 = int(70 * 1.0)  # 기존 70 유지
+    base_h2 = int(base_h1 * 4.5)
+    base_h = base_h1 + base_h2
+    img = Image.new('RGB', (canvas_width, base_h), 'white')
+    drw = ImageDraw.Draw(img)
+    col_left_w = max(28, int(canvas_width * 0.12))
+    rest_w = canvas_width - col_left_w
+    col_w = rest_w // 3
+    # 바깥 테두리
+    drw.rectangle([0, 0, canvas_width-1, base_h-1], outline='#2C3E50', width=2)
+    # 세로 구분선 (왼쪽 라벨/3분할)
+    drw.line([col_left_w, 0, col_left_w, base_h], fill='#2C3E50', width=1)
+    drw.line([col_left_w + col_w, 0, col_left_w + col_w, base_h], fill='#2C3E50', width=1)
+    drw.line([col_left_w + col_w*2, 0, col_left_w + col_w*2, base_h], fill='#2C3E50', width=1)
+    # 1행/2행 구분선
+    drw.line([0, base_h1, canvas_width, base_h1], fill='#2C3E50', width=1)
+    # 헤더 배경 제거(흰색 유지)
+    try:
+        f_bold = ImageFont.truetype("malgunbd.ttf", 24)  # 폰트 크기 24
+    except Exception:
+        f_bold = ImageFont.load_default()
+    # 왼쪽에는 아무것도 표시하지 않음 (결재방만 표시)
+    # 헤더 텍스트 (1행)
+    heads = ['작성','검토','승인']
+    for i, txt in enumerate(heads):
+        x0 = col_left_w + i*col_w
+        tw, th = drw.textbbox((0,0), txt, font=f_bold)[2:4]
+        drw.text((x0 + (col_w - tw)//2, (base_h1 - th)//2), txt, fill='#2C3E50', font=f_bold)
+    # 서명란 (2행) - (인) 제거, 빈 공간만
+    # (아무 텍스트도 넣지 않음)
+    # tempfile 대신 프로젝트 폴더 사용
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_img_path = os.path.join(temp_dir, f'approval_{timestamp}.png')
+    img.save(temp_img_path, 'PNG')
+    return temp_img_path, base_h
+
 def export_multisheet_template(sheets_with_headers, default_filename="template.xlsx"):
     """여러 시트를 가진 엑셀 템플릿을 내보냅니다."""
     initial_dir = get_excel_path()
@@ -229,53 +270,6 @@ def export_production_formulation_revised_to_excel(
 
         # 2) 결재란: G1:H2 영역에 승인 스탬프 이미지를 삽입(오른쪽 정렬 폭에 맞춤)
         #    - 왼쪽에 '결' '재' 세로 라벨, 상단에 '작성/검토/승인', 하단 서명칸
-        from openpyxl.drawing.image import Image as XLImage  # type: ignore
-        def create_approval_image_v2(canvas_width: int) -> str:
-            base_h = 140  # 기본 높이(여유 확보, 잘림 방지)
-            img = Image.new('RGB', (canvas_width, base_h), 'white')
-            drw = ImageDraw.Draw(img)
-            col_left_w = max(28, int(canvas_width * 0.12))
-            rest_w = canvas_width - col_left_w
-            col_w = rest_w // 3
-            header_h = int(base_h * 0.45)
-            # 바깥 테두리
-            drw.rectangle([0, 0, canvas_width-1, base_h-1], outline='#2C3E50', width=2)
-            # 세로 구분선 (왼쪽 라벨/3분할)
-            drw.line([col_left_w, 0, col_left_w, base_h], fill='#2C3E50', width=1)
-            drw.line([col_left_w + col_w, 0, col_left_w + col_w, base_h], fill='#2C3E50', width=1)
-            drw.line([col_left_w + col_w*2, 0, col_left_w + col_w*2, base_h], fill='#2C3E50', width=1)
-            # 가로 구분선(헤더/서명칸): 왼쪽 라벨 칸은 위 칸과 병합되도록 선을 비켜감
-            drw.line([col_left_w, header_h, canvas_width, header_h], fill='#2C3E50', width=1)
-            # 헤더 배경 제거(흰색 유지)
-            try:
-                f_bold = ImageFont.truetype("malgunbd.ttf", 16)
-            except Exception:
-                f_bold = ImageFont.load_default()
-            # 왼쪽 세로 '결' '재' 배치
-            # - '결'은 헤더 영역과 바로 아래 칸을 병합한 상단 블록 중앙
-            # - '재'는 하단 블록 중앙 (상단/하단을 내부 구분선으로 나눔)
-            w_g, h_g = drw.textbbox((0,0), '결', font=f_bold)[2:4]
-            w_j, h_j = drw.textbbox((0,0), '재', font=f_bold)[2:4]
-            # 내부 구분선 없이, 전체 높이를 반으로 나누어 각 절반의 가운데에 배치
-            y_k = int(base_h * 0.25) - h_g//2
-            y_j = int(base_h * 0.75) - h_j//2
-            drw.text((max(2, (col_left_w - w_g)//2), max(2, y_k)), '결', fill='#2C3E50', font=f_bold)
-            drw.text((max(2, (col_left_w - w_j)//2), max(2, y_j)), '재', fill='#2C3E50', font=f_bold)
-            # 헤더 텍스트
-            heads = ['작성','검토','승인']
-            for i, txt in enumerate(heads):
-                x0 = col_left_w + i*col_w
-                x1 = x0 + col_w
-                tw, th = drw.textbbox((0,0), txt, font=f_bold)[2:4]
-                drw.text((x0 + (col_w - tw)//2, (header_h - th)//2), txt, fill='#2C3E50', font=f_bold)
-            # tempfile 대신 프로젝트 폴더 사용
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
-            os.makedirs(temp_dir, exist_ok=True)
-            temp_img_path = os.path.join(temp_dir, f'approval_{timestamp}.png')
-            img.save(temp_img_path, 'PNG')
-            return temp_img_path
-
         # 결재 이미지는 컬럼 폭이 확정된 뒤 추가해야 정확히 맞출 수 있으므로 여기서는 생성 함수만 정의합니다.
 
         # 3) 기본정보 (ui.py 배치 준용)
@@ -358,17 +352,16 @@ def export_production_formulation_revised_to_excel(
                 if raw:
                     return raw, raw
                 return (last_non_empty or ''), last_non_empty
+            
+            last_ph = None
+            for idx, item in enumerate(items):
+                curr_ph, last_ph = eff_phase(idx, last_ph)
+                if not groups or groups[-1][0] != curr_ph:
+                    groups.append([curr_ph, idx, idx])
+                else:
+                    groups[-1][2] = idx
 
-            start = 0
-            last_non_empty = None
-            cur_ph, last_non_empty = eff_phase(0, last_non_empty)
-            for idx in range(1, len(items)):
-                ph, last_non_empty = eff_phase(idx, last_non_empty)
-                if ph != cur_ph:
-                    groups.append((cur_ph, start, idx-1))
-                    start = idx; cur_ph = ph
-            groups.append((cur_ph, start, len(items)-1))
-
+        # Ph 구간별로 행 추가 + 병합
         for ph, s_idx, e_idx in groups:
             group_len = e_idx - s_idx + 1
             # 그룹 내 최대 텍스트를 기준으로 폭 기반 줄바꿈 적용 후 줄 수 산정
@@ -553,14 +546,14 @@ def export_production_formulation_revised_to_excel(
                 col_w = ws.column_dimensions[col_letter].width or 8
                 total_width_px += col_w * 7
             approval_img_width = int(total_width_px)
-            ap_img_path = create_approval_image_v2(approval_img_width)
+            ap_img_path, approval_img_height = create_approval_image_v2(approval_img_width)
             if not use_com_header:
                 ap_img = XLImage(ap_img_path)
                 ap_img.anchor = "A1"
                 ws.add_image(ap_img)
                 # 상단 영역 높이 확보(이미지 높이 ≈ 140px)
                 ws.row_dimensions[1].height = 90
-                ws.row_dimensions[2].height = 50
+                ws.row_dimensions[2].height = 150
         except Exception:
             pass
 
@@ -572,7 +565,10 @@ def export_production_formulation_revised_to_excel(
             ws.sheet_properties.pageSetUpPr.fitToPage = True
             ws.print_options.horizontalCentered = True
             ws.page_margins.left = 0.3; ws.page_margins.right = 0.3
-            ws.page_margins.top = 0.4; ws.page_margins.bottom = 0.4
+            # 위쪽 여백: 1.5cm, 겹치면 2cm로 자동 조정 (approval_img_height는 px)
+            px_per_cm = 96 / 2.54
+            margin_top = 2.0 / 2.54 if approval_img_height > 1.5 * px_per_cm else 1.5 / 2.54
+            ws.page_margins.top = margin_top; ws.page_margins.bottom = 0.4  # cm -> inch
             # 머리글/바닥글: 날짜/시간, 문서명, 페이지 번호
             try:
                 ws.header_footer.left_header = "&D &T"
@@ -628,7 +624,7 @@ def export_production_formulation_revised_to_excel(
                 messagebox.showerror("저장 오류", f"파일 저장 중 오류 발생:\n{e}")
                 return
 
-        # 저장 후, COM 헤더 이미지 삽입 시도 (머리글 중앙)
+        # 저장 후, COM 헤더 이미지 삽입 시도 (머리글 오른쪽)
         if use_com_header and ap_img_path and os.path.exists(ap_img_path):
             try:
                 import win32com.client as win32  # type: ignore
@@ -636,18 +632,16 @@ def export_production_formulation_revised_to_excel(
                 excel.Visible = bool(open_print_preview)
                 wb_com = excel.Workbooks.Open(os.path.abspath(file_path))
                 ws_com = wb_com.ActiveSheet
-                # 헤더 중앙 그림 지정
-                ws_com.PageSetup.CenterHeader = "&G"
-                ws_com.PageSetup.CenterHeaderPicture.Filename = os.path.abspath(ap_img_path)
+                # 헤더 오른쪽 그림 지정
+                ws_com.PageSetup.RightHeader = "&G"
+                ws_com.PageSetup.RightHeaderPicture.Filename = os.path.abspath(ap_img_path)
                 # 폭을 대략 px->pt(0.75배)로 변환하여 지정
                 try:
                     if approval_img_width:
-                        ws_com.PageSetup.CenterHeaderPicture.Width = int(approval_img_width * 0.75)
+                        ws_com.PageSetup.RightHeaderPicture.Width = int((approval_img_width // 4) * 0.75)
                 except Exception:
                     pass
-                # 저장(미리보기여도 반영을 위해 저장)
                 wb_com.Save()
-                # 미리보기 요청 시 프린트 미리보기 실행
                 if open_print_preview:
                     try:
                         ws_com.PrintPreview()
@@ -656,7 +650,6 @@ def export_production_formulation_revised_to_excel(
                 wb_com.Close(SaveChanges=False)
                 excel.Quit()
             except Exception:
-                # 실패 시 워크시트에 직접 삽입으로 폴백 (이미 저장은 완료되었으므로, 다음 번 내보내기에서 반영됨)
                 pass
             finally:
                 try:
@@ -983,7 +976,7 @@ def export_production_formulation_original_to_excel(
                 max_w = min(max_w, 20)
             ws.column_dimensions[col_letter].width = max_w
 
-        # 결재 이미지: 기본은 페이지 머리글 오른쪽(Excel COM), COM 불가 시 워크시트 G1 폴백
+        # 결재 이미지: 기본은 페이지 머리글 '중앙'(Excel COM), COM 불가 시 워크시트 A1 폴백
         approval_img_path = None
         full_px = None
         use_com_header = False
@@ -993,22 +986,23 @@ def export_production_formulation_original_to_excel(
         except Exception:
             use_com_header = False
         try:
-            g_w = float(ws.column_dimensions['G'].width or 12)
-            h_w = float(ws.column_dimensions['H'].width or 26)
-            i_w = float(ws.column_dimensions['I'].width or 17.25)
-            full_px = int((g_w + h_w + i_w) * 7)
-            approval_img_path = create_approval_image(canvas_width=full_px, scale=4/3)
+            # 전체 열(A..I) 폭 기준으로 생성하여 헤더 중앙에 넣는다
+            total_width_px = 0
+            for col_idx in range(1, 10):
+                col_letter = get_column_letter(col_idx)
+                col_w = ws.column_dimensions[col_letter].width or 8
+                total_width_px += col_w * 7
+            full_px = int(total_width_px)
+            # create_approval_image_v2 사용 시 approval_img_height 반환
+            approval_img_path, approval_img_height = create_approval_image_v2(full_px)
             if not use_com_header:
                 img = XLImage(approval_img_path)
-                img.anchor = 'G1'
+                img.anchor = 'A1'
                 ws.add_image(img)
-                ws.row_dimensions[1].height = 70
-                ws.row_dimensions[2].height = 0
-                ws.row_dimensions[3].height = 10
+                ws.row_dimensions[1].height = 90
+                ws.row_dimensions[2].height = 150
         except Exception:
             pass
-
-        # 인쇄 설정
         try:
             ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
             ws.page_setup.fitToWidth = 1
@@ -1016,7 +1010,13 @@ def export_production_formulation_original_to_excel(
             ws.sheet_properties.pageSetUpPr.fitToPage = True
             ws.print_options.horizontalCentered = True
             ws.page_margins.left = 0.3; ws.page_margins.right = 0.3
-            ws.page_margins.top = 0.5; ws.page_margins.bottom = 0.5
+            # 위쪽 여백: 1.5cm, 겹치면 2cm로 자동 조정
+            px_per_cm = 96 / 2.54
+            margin_top = 2.0 / 2.54 if approval_img_height > 1.5 * px_per_cm else 1.5 / 2.54
+            ws.page_margins.top = margin_top; ws.page_margins.bottom = 0.5  # cm -> inch
+        except Exception:
+            pass
+            ws.page_margins.top = margin_top; ws.page_margins.bottom = 0.5  # cm -> inch
         except Exception:
             pass
 
@@ -1024,7 +1024,7 @@ def export_production_formulation_original_to_excel(
 
         wb.save(file_path)
 
-        # 저장 후, COM 헤더 이미지 삽입 시도
+        # 저장 후, COM 헤더 이미지 삽입 시도 (머리글 중앙)
         if use_com_header and approval_img_path and os.path.exists(approval_img_path):
             try:
                 import win32com.client as win32  # type: ignore
@@ -1032,11 +1032,11 @@ def export_production_formulation_original_to_excel(
                 excel.Visible = bool(open_print_preview)
                 wb_com = excel.Workbooks.Open(os.path.abspath(file_path))
                 ws_com = wb_com.ActiveSheet
-                ws_com.PageSetup.RightHeader = "&G"
-                ws_com.PageSetup.RightHeaderPicture.Filename = os.path.abspath(approval_img_path)
+                ws_com.PageSetup.CenterHeader = "&G"
+                ws_com.PageSetup.CenterHeaderPicture.Filename = os.path.abspath(approval_img_path)
                 try:
                     if full_px:
-                        ws_com.PageSetup.RightHeaderPicture.Width = int(full_px * 0.75)
+                        ws_com.PageSetup.CenterHeaderPicture.Width = int(full_px * 0.75)
                 except Exception:
                     pass
                 wb_com.Save()
