@@ -1,9 +1,9 @@
 import os
 import sys
 import bcrypt
-from sqlalchemy import create_engine, text, event, inspect
+from sqlalchemy import create_engine, text, event, inspect, or_
 import configparser
-from sqlalchemy.orm import sessionmaker, joinedload
+from sqlalchemy.orm import sessionmaker, joinedload, subqueryload
 from datetime import datetime
 
 from database.models import Base, User, Client, Material, Ingredient, Formulation
@@ -252,26 +252,61 @@ class DBManager:
         finally:
             session.close()
 
-    def search_materials(self, search_term: str):
+    def search_materials(self, search_term: str, load_ingredients: bool = False, search_ingredients: bool = False):
         """원료명, 코드, 한글/영문 전성분으로 원료를 검색합니다."""
         session = self.get_session()
         try:
-            # is_active가 True인 원료만 검색하도록 기본 필터 설정
+            # 기본 쿼리 설정
             query = session.query(Material).filter(Material.is_active == True)
+
+            # Eager loading 옵션 설정
+            options = [joinedload(Material.client)]
+            if load_ingredients:
+                options.append(subqueryload(Material.ingredients))
             
+            query = query.options(*options)
+
             if search_term:
                 search_pattern = f"%{search_term}%"
-                # 거래처(Client) 테이블과 조인하고, 검색 조건에 거래처명 추가
-                query = query.join(Material.client, isouter=True).filter(
-                    (Material.name.like(search_pattern)) |
-                    (Material.code.like(search_pattern)) |
-                    (Client.name.like(search_pattern)) |
-                    (Material.ingredients.any(Ingredient.name_ko.like(search_pattern))) |
-                    (Material.ingredients.any(Ingredient.name_en.like(search_pattern))) |
-                    (Material.ingredients.any(Ingredient.cas_no.like(search_pattern)))
-                )
+                
+                # 모든 필터 조건을 리스트에 추가
+                filters = [
+                    Material.name.like(search_pattern),
+                    Material.code.like(search_pattern),
+                    Client.name.like(search_pattern)
+                ]
+
+                # 전성분 검색이 필요할 경우, JOIN 및 필터 조건 추가
+                if search_ingredients:
+                    query = query.outerjoin(Material.ingredients)
+                    filters.extend([
+                        Ingredient.name_ko.like(search_pattern),
+                        Ingredient.name_en.like(search_pattern)
+                    ])
+
+                query = query.outerjoin(Material.client).filter(or_(*filters)) # or_ 함수로 모든 조건을 묶음
             
-            return query.options(joinedload(Material.ingredients)).distinct().order_by(Material.code).all()
+            results = query.distinct().order_by(Material.code).all()
+            return results
+        finally:
+            session.close()
+
+    def search_clients(self, search_term: str):
+        """거래처명, 코드, 대표자명, 담당자명으로 거래처를 검색합니다."""
+        session = self.get_session()
+        try:
+            query = session.query(Client)
+            if search_term:
+                search_pattern = f"%{search_term}%"
+                query = query.filter(
+                    or_(
+                        Client.name.like(search_pattern),
+                        Client.business_number.like(search_pattern),
+                        Client.ceo_name.like(search_pattern),
+                        Client.manager_name.like(search_pattern)
+                    )
+                )
+            return query.order_by(Client.name).all()
         finally:
             session.close()
 

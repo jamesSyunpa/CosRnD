@@ -6,6 +6,7 @@ from database.db_manager import db_manager
 from database.models import Material, Ingredient, Client
 import modules.excel_handler as excel_handler
 from datetime import datetime
+from sqlalchemy.orm import joinedload
 from modules.history_popup import HistoryPopup
 from utils.autocomplete import AutocompleteEntry
 
@@ -595,29 +596,35 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
     def load_materials(self):
         """DB에서 원료 목록을 검색하여 Treeview에 표시합니다."""
-        for item in self.material_tree.get_children(): self.material_tree.delete(item)
-        
         search_term = self.material_search_entry.get().strip()
-        materials = db_manager.search_materials(search_term)
+        # 검색 시에는 전성분도 함께 검색하도록 search_ingredients=True로 변경합니다.
+        # 목록 표시에는 전성분 내용이 필요 없으므로 load_ingredients=False는 유지합니다.
+        materials = db_manager.search_materials(search_term, load_ingredients=False, search_ingredients=True)
         
-        session = db_manager.get_session() # client_name을 가져오기 위해 세션 사용
-        for i, mat in enumerate(materials):
-            client_name = session.query(Client.name).filter_by(id=mat.client_id).scalar() or ""
-            tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-            self.material_tree.insert("", "end", tags=(tag,), values=(
-                mat.id, 
-                mat.code,
-                mat.name,
-                f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
-                mat.package_unit, 
-                client_name, 
-                mat.manufacturer, 
-                mat.hs_code, 
-                mat.origin,
-                mat.name_en or "",
-                mat.nmpa_reg_num or "",
-            ))
-        session.close()
+        # 1. UI 렌더링 성능 최적화: 데이터를 먼저 메모리에 리스트로 준비
+        material_data_list = []
+        try:
+            for i, mat in enumerate(materials):
+                client_name = mat.client.name if mat.client else ""
+                tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+                values = (
+                    mat.id, mat.code, mat.name,
+                    f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
+                    mat.package_unit, client_name, mat.manufacturer, mat.hs_code,
+                    mat.origin, mat.name_en or "", mat.nmpa_reg_num or "",
+                )
+                material_data_list.append((values, tag))
+
+            # 2. Treeview를 한 번에 업데이트
+            # 기존 항목 모두 삭제
+            for item in self.material_tree.get_children():
+                self.material_tree.delete(item)
+            # 메모리에 준비된 데이터로 Treeview 채우기
+            for values, tag in material_data_list:
+                self.material_tree.insert("", "end", tags=(tag,), values=values)
+
+        except Exception as e:
+            print(f"원료 목록 로드 중 오류 발생: {e}")
 
     def load_clients_to_combobox(self):
         """거래처 정보를 콤보박스와 자동완성에 로드합니다. - 개선된 버전"""
@@ -668,16 +675,15 @@ class MaterialManagementFrame(ctk.CTkFrame):
         mat_id = self.material_tree.item(selected_item[0], "values")[0]
         self._selected_material_id = mat_id
 
+        # db_manager.search_materials에서 이미 client와 ingredients를 로드했으므로,
+        # 여기서는 DB에 다시 접근할 필요 없이 트리뷰의 값을 사용합니다.
+        # 단, 트리뷰에 모든 정보가 없을 수 있으므로, 상세 정보는 DB에서 다시 가져옵니다.
         session = db_manager.get_session()
         try:
-            # SQLAlchemy의 joinedload를 사용하여 한 번의 쿼리로 재료와 모든 전성분을 함께 로드
-            from sqlalchemy.orm import joinedload
-            
             material = session.query(Material).options(
                 joinedload(Material.ingredients),
                 joinedload(Material.client)
             ).filter_by(id=mat_id).first()
-            
             if not material:
                 print(f"재료 ID {mat_id}를 찾을 수 없습니다.")
                 return
@@ -688,7 +694,6 @@ class MaterialManagementFrame(ctk.CTkFrame):
                     entry.configure(state="normal")
                 for entry in self.ingredient_entries.values():
                     entry.configure(state="normal")
-
 
             print(f"선택된 재료: {material.name} (코드: {material.code})")
 
@@ -713,23 +718,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
             # 거래처 정보 처리 (개선된 버전)
             client_name = ""
-            if material.client_id:
-                # 1순위: 조인된 client 객체에서 가져오기
-                if material.client and hasattr(material.client, 'name'):
-                    client_name = material.client.name
-                    print(f"거래처 이름 (join): {client_name}")
-                # 2순위: client_id_map에서 가져오기
-                elif hasattr(self, 'client_id_map') and material.client_id in self.client_id_map:
-                    client_name = self.client_id_map[material.client_id]
-                    print(f"거래처 이름 (map): {client_name}")
-                # 3순위: 직접 DB에서 조회
-                else:
-                    client = session.query(Client).filter_by(id=material.client_id).first()
-                    if client:
-                        client_name = client.name
-                        print(f"거래처 이름 (direct query): {client_name}")
-                    else:
-                        print(f"거래처 ID {material.client_id}에 해당하는 거래처를 찾을 수 없음")
+            if material.client:
+                client_name = material.client.name
+            elif hasattr(self, 'client_id_map') and material.client_id in self.client_id_map:
+                client_name = self.client_id_map.get(material.client_id, "")
             
             # 거래처 입력 필드에 설정
             self.client_entry.delete(0, "end")
@@ -787,7 +779,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
             messagebox.showerror("UI 오류", f"화면 업데이트 중 오류 발생: {e}")
 
     def refresh_ingredient_tree(self):
-        """전성분 트리뷰를 새로고침합니다."""
+        """
+        전성분 트리뷰를 새로고침합니다.
+        - 수정: 기존 항목을 먼저 삭제하여 UI 불일치 문제를 해결합니다.
+        """
         try:
             # 기존 항목들 모두 삭제
             for item in self.ingredient_tree.get_children(): 
@@ -1023,27 +1018,26 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
         log_entries = []
         log_action = ""
-        new_is_active = self.material_active_var.get() == "on" # 변수를 미리 선언
+        new_is_active = self.material_active_var.get() == "on"
         session = db_manager.get_session()
         try:
-            # 수정 모드: 선택된 ID가 있고, 폼의 코드와 선택된 코드의 DB 정보가 일치할 때
+            material = None
             if self._selected_material_id:
                 material = session.query(Material).filter_by(id=self._selected_material_id).first()
-                if not material:
-                    messagebox.showerror("오류", "선택된 원료를 찾을 수 없습니다.")
+
+            # 코드 중복 검사 (신규 또는 코드 변경 시)
+            # 1. 신규 저장 시 (material is None)
+            # 2. 수정 시 코드가 변경된 경우 (material.code != code)
+            if material is None or material.code != code:
+                existing = session.query(Material).filter_by(code=code).first()
+                if existing:
+                    messagebox.showerror("저장 오류", f"코드 '{code}'는 이미 존재하는 원료 코드입니다.")
                     return
-                # 코드가 변경되었는지 확인
-                if material.code != code:
-                    # 코드를 변경하려고 하면 중복 체크
-                    if session.query(Material).filter_by(code=code).first():
-                        messagebox.showerror("저장 오류", "변경하려는 코드가 이미 존재합니다.")
-                        return
-            # 신규 등록 모드
-            else:
-                # 코드 중복 체크
-                if session.query(Material).filter_by(code=code).first():
-                    messagebox.showerror("저장 오류", "이미 존재하는 코드입니다.")
-                    return
+
+            if material: # 수정 모드
+                log_action = "정보 수정"
+            else: # 신규 생성 모드
+                log_action = "신규 생성"
                 material = Material()
                 session.add(material)
 
@@ -1051,7 +1045,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
             new_client_id = self.client_map.get(client_name_input)
 
             # --- 변경 사항 로깅 ---
-            if not material.id: # 신규 생성
+            if log_action == "신규 생성":
                 log_action = "신규 생성"
                 log_entries.append(f"코드: '{code}'")
                 log_entries.append(f"원료명: '{name}'")

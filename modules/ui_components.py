@@ -243,15 +243,20 @@ class AddMaterialDialog(ctk.CTkToplevel):
         for item in self.material_tree.get_children():
             self.material_tree.delete(item)
 
-        materials = db_manager.search_materials(search_term)
+        # `load_ingredients=True`를 전달하여 전성분 정보를 함께 로드합니다.
+        materials = db_manager.search_materials(search_term, load_ingredients=True)
 
-        for mat in materials:
-            # 전성분 목록을 문자열로 만듭니다 (최대 3개).
-            ing_names = [ing.name_en for ing in mat.ingredients[:3]]
-            ing_str = ", ".join(ing_names)
-            if len(mat.ingredients) > 3:
-                ing_str += "..."
-            self.material_tree.insert("", "end", iid=mat.id, values=(mat.code, mat.name, ing_str))
+        try:
+            for mat in materials:
+                # 전성분 목록을 문자열로 만듭니다 (최대 3개).
+                # 이제 mat.ingredients에 접근해도 DetachedInstanceError가 발생하지 않습니다.
+                ing_names = [ing.name_en for ing in mat.ingredients[:3]]
+                ing_str = ", ".join(ing_names)
+                if len(mat.ingredients) > 3:
+                    ing_str += "..."
+                self.material_tree.insert("", "end", iid=mat.id, values=(mat.code, mat.name, ing_str))
+        except Exception as e:
+            print(f"원료 목록 표시 중 오류 발생: {e}")
 
     def on_material_select(self, event=None):
         """트리뷰에서 원료 선택 시 전성분 목록을 표시합니다."""

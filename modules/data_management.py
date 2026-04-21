@@ -18,6 +18,7 @@ class DataManagementFrame(ctk.CTkFrame):
         self.current_user = current_user
         self.app = app
         self.language = language
+        self.client_search_timer = None # 거래처 검색 디바운싱 타이머
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -193,23 +194,6 @@ class DataManagementFrame(ctk.CTkFrame):
         form_label = ctk.CTkLabel(form_frame, text=self.texts['client_info'], font=ctk.CTkFont(size=14, weight="bold"))
         form_label.grid(row=2, column=0, columnspan=2, pady=(20, 10))
 
-        # --- 거래처 검색 섹션 ---
-        search_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
-        search_frame.grid(row=0, column=0, columnspan=2, pady=10, sticky="ew")
-        search_frame.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(search_frame, text=self.texts['client_search'], font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=2, pady=(0, 5))
-        
-        self.client_search_type_combo = CustomDropdown(search_frame, values=self.texts['client_type_filter_values'], command=self.update_client_name_combo)
-        self.client_search_type_combo.grid(row=1, column=0, padx=(0, 5), pady=5, sticky="ew")
-
-        self.client_search_name_combo = CustomDropdown(search_frame, values=[self.texts['select_client']], command=self.load_selected_client_from_combo)
-        self.client_search_name_combo.grid(row=1, column=1, padx=(5, 0), pady=5, sticky="ew")
-
-        # 구분선
-        separator = ttk.Separator(form_frame, orient='horizontal')
-        separator.grid(row=1, column=0, columnspan=2, sticky='ew', pady=10)
-
         # 거래처 유형 필드 추가
         ctk.CTkLabel(form_frame, text=self.texts['client_type']).grid(row=3, column=0, padx=10, pady=5, sticky="w")
         self.client_type_combobox = ctk.CTkComboBox(form_frame, values=self.texts['client_type_values'], width=200)
@@ -241,21 +225,33 @@ class DataManagementFrame(ctk.CTkFrame):
         self.client_delete_button = ctk.CTkButton(button_frame, text=self.texts['delete'], command=self.delete_client, fg_color="#D32F2F", hover_color="#B71C1C")
         self.client_delete_button.pack(side="left", padx=5)
 
+        # --- 우측: 거래처 목록 ---
         list_frame = ctk.CTkFrame(tab_frame)
         list_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
-
+        
+        # --- 거래처 목록 헤더 (검색 및 버튼 포함) ---
         client_list_header_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
-        client_list_header_frame.grid(row=0, column=0, pady=10, sticky="ew")
-        client_list_header_frame.grid_columnconfigure(2, weight=1) # 오른쪽 정렬을 위한 빈 공간
+        client_list_header_frame.grid(row=0, column=0, columnspan=2, pady=(10, 5), padx=10, sticky="ew")
+        client_list_header_frame.grid_columnconfigure(1, weight=1) # 가변 공간
 
         ctk.CTkLabel(client_list_header_frame, text=self.texts['client_list'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(client_list_header_frame, text=self.texts['view_all_history'], command=self.show_all_client_history).grid(row=0, column=1, padx=(20, 0), sticky="w")
+        
+        # --- 우측 컨트롤 (검색, 초기화, 엑셀 버튼) ---
+        right_header_frame = ctk.CTkFrame(client_list_header_frame, fg_color="transparent")
+        right_header_frame.grid(row=0, column=2, sticky="e")
 
-        # pack 대신 grid를 사용하여 오른쪽 정렬
-        client_excel_frame = ctk.CTkFrame(client_list_header_frame, fg_color="transparent")
-        client_excel_frame.grid(row=0, column=3, sticky="e")
+        ctk.CTkLabel(right_header_frame, text=f"{self.texts['search']}:").pack(side="left", padx=(0, 5))
+        self.client_search_entry = ctk.CTkEntry(right_header_frame, width=150)
+        self.client_search_entry.pack(side="left", padx=5)
+        self.client_search_entry.bind("<KeyRelease>", self.on_client_search)
+        ctk.CTkButton(right_header_frame, text=self.texts['reset'], width=60, command=self.reset_client_search).pack(side="left", padx=5)
+
+        # 엑셀 버튼 프레임
+        client_excel_frame = ctk.CTkFrame(right_header_frame, fg_color="transparent")
+        client_excel_frame.pack(side="left", padx=(10, 0))
+
         ctk.CTkButton(client_excel_frame, text=self.texts['export_data'], command=self.export_client_data).pack(side="left", padx=5)
         self.client_import_button = ctk.CTkButton(client_excel_frame, text=self.texts['import_data'], command=self.import_client_data)
         self.client_import_button.pack(side="left", padx=5)
@@ -595,50 +591,22 @@ class DataManagementFrame(ctk.CTkFrame):
         reverse_map = {v: k for k, v in user_labels.items()}
         return reverse_map.get(key, key)
 
-    def update_client_name_combo(self, selected_type: str):
-        """선택된 유형에 따라 거래처명 콤보박스를 업데이트합니다."""
-        self.client_search_name_combo.set("- 업체 선택 -")
-        if selected_type == "- 유형 선택 -":
-            self.client_search_name_combo.configure(values=["- 업체 선택 -"])
-            return
+    def on_client_search(self, event=None):
+        """거래처 검색창 입력 시 디바운싱을 적용하여 검색을 실행합니다."""
+        if self.client_search_timer:
+            self.after_cancel(self.client_search_timer)
+        self.client_search_timer = self.after(500, self.load_clients)
 
-        session = db_manager.get_session()
-        try:
-            clients = session.query(Client).filter_by(client_type=selected_type, is_active=True).order_by(Client.name).all()
-            client_names = [client.name for client in clients]
-            self.filtered_client_map = {client.name: client.id for client in clients}
-
-            if not client_names:
-                self.client_search_name_combo.configure(values=["- 해당 업체 없음 -"])
-            else:
-                self.client_search_name_combo.configure(values=["- 업체 선택 -"] + client_names)
-        except Exception as e:
-            print(f"거래처명 콤보박스 업데이트 중 오류: {e}")
-        finally:
-            session.close()
-
-    def load_selected_client_from_combo(self, selected_name: str):
-        """콤보박스에서 선택된 거래처 정보를 폼에 로드합니다."""
-        if selected_name in ["- 업체 선택 -", "- 해당 업체 없음 -"]:
-            self.clear_client_form()
-            return
-
-        client_id = self.filtered_client_map.get(selected_name)
-        if not client_id:
-            return
-
-        # Treeview에서 해당 항목을 찾아 선택 이벤트를 발생시킴
-        for item in self.client_tree.get_children():
-            if item == str(client_id):
-                self.client_tree.selection_set(item)
-                self.client_tree.focus(item)
-                return
+    def reset_client_search(self):
+        """거래처 검색창을 초기화하고 전체 목록을 다시 불러옵니다."""
+        self.client_search_entry.delete(0, "end")
+        self.load_clients()
 
     def load_clients(self):
+        search_term = self.client_search_entry.get().strip()
         for item in self.client_tree.get_children(): self.client_tree.delete(item)
-        session = db_manager.get_session()
-        clients = session.query(Client).all()
-        session.close()
+        clients = db_manager.search_clients(search_term)
+
         for i, client in enumerate(clients):
             active_status = "Y" if client.is_active else "N"
             tag = 'oddrow' if i % 2 == 0 else 'evenrow'
@@ -673,23 +641,23 @@ class DataManagementFrame(ctk.CTkFrame):
                 entry.insert(0, value or "")
 
             self.client_type_combobox.set(client.client_type or "기타")
-            set_entry_value("거래처코드(사업자번호)", client.business_number)
-            set_entry_value("거래처명", client.name)
-            set_entry_value("대표자명", getattr(client, 'ceo_name', ""))
-            set_entry_value("담당자명", client.manager_name)
-            set_entry_value("연락처", client.phone)
-            set_entry_value("팩스", getattr(client, 'fax', ""))
-            set_entry_value("이메일", client.email)
-            set_entry_value("우편번호", getattr(client, 'zip_code', ""))
-            set_entry_value("주소", client.address)
+            set_entry_value("code", client.business_number)
+            set_entry_value("name", client.name)
+            set_entry_value("ceo", getattr(client, 'ceo_name', ""))
+            set_entry_value("manager", client.manager_name)
+            set_entry_value("contact", client.phone)
+            set_entry_value("fax", getattr(client, 'fax', ""))
+            set_entry_value("email", client.email)
+            set_entry_value("zip", getattr(client, 'zip_code', ""))
+            set_entry_value("address", client.address)
 
             self.is_active_var.set("on" if client.is_active else "off")
             self._selected_client_id = client.id 
             self.client_history_button.configure(state="normal")
     
     def save_client(self):
-        code = self.client_entries["거래처코드(사업자번호)"].get()
-        name = self.client_entries["거래처명"].get()
+        code = self.client_entries["code"].get()
+        name = self.client_entries["name"].get()
         if not code or not name:
             messagebox.showwarning("입력 오류", "거래처코드와 거래처명은 필수 항목입니다.")
             return
@@ -718,13 +686,13 @@ class DataManagementFrame(ctk.CTkFrame):
                 "거래처 유형": self.client_type_combobox.get(),
                 "거래처코드": code,
                 "거래처명": name,
-                "대표자명": self.client_entries["대표자명"].get(),
-                "담당자명": self.client_entries["담당자명"].get(),
-                "연락처": self.client_entries["연락처"].get(),
-                "팩스": self.client_entries["팩스"].get(),
-                "이메일": self.client_entries["이메일"].get(),
-                "우편번호": self.client_entries["우편번호"].get(),
-                "주소": self.client_entries["주소"].get(),
+                "대표자명": self.client_entries["ceo"].get(),
+                "담당자명": self.client_entries["manager"].get(),
+                "연락처": self.client_entries["contact"].get(),
+                "팩스": self.client_entries["fax"].get(),
+                "이메일": self.client_entries["email"].get(),
+                "우편번호": self.client_entries["zip"].get(),
+                "주소": self.client_entries["address"].get(),
                 "사용 여부": self.is_active_var.get() == "on"
             }
 
@@ -779,11 +747,6 @@ class DataManagementFrame(ctk.CTkFrame):
             self.clear_client_form()
             self.load_clients()
 
-            # 저장 후 검색 콤보박스도 최신 상태로 업데이트
-            current_type = self.client_search_type_combo.get()
-            if current_type != "- 유형 선택 -":
-                self.update_client_name_combo(current_type)
-
     def delete_client(self):
         if not hasattr(self, '_selected_client_id') or not self._selected_client_id:
             messagebox.showwarning("선택 오류", "삭제할 거래처를 목록에서 선택하세요.")
@@ -807,16 +770,9 @@ class DataManagementFrame(ctk.CTkFrame):
             self.clear_client_form()
             self.load_clients()
 
-            # 삭제 후 검색 콤보박스도 최신 상태로 업데이트
-            current_type = self.client_search_type_combo.get()
-            if current_type != "- 유형 선택 -":
-                self.update_client_name_combo(current_type)
-
     def clear_client_form(self):
-        # 검색 콤보박스 초기화
-        self.client_search_type_combo.set("- 유형 선택 -")
-        self.client_search_name_combo.configure(values=["- 업체 선택 -"])
-        self.client_search_name_combo.set("- 업체 선택 -")
+        # 검색창 초기화
+        self.client_search_entry.delete(0, "end")
 
         # 폼 필드 초기화
         for entry in self.client_entries.values():

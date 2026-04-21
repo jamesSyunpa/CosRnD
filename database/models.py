@@ -134,9 +134,8 @@ class Formulation(Base):
     target_machine = Column(String(255))
 
     # 타겟 거래처 정보
-    # target_client_id는 텍스트로 변경되었으므로, 아래 관계는 주석 처리하거나 삭제해야 합니다.
-    target_client_id = Column(Integer, ForeignKey('clients.id'))
-    target_client = relationship("Client", foreign_keys=[target_client_id])
+    # 2024-07-29: 타겟 거래처는 ID가 아닌 텍스트로 저장되므로 String으로 변경하고 외래 키 제약 제거
+    target_client_id = Column(String(255))
     
     # OEM/ODM 정보
     oem_odm_client_id = Column(Integer, ForeignKey('clients.id'))
