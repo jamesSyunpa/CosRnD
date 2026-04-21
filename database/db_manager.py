@@ -79,6 +79,16 @@ class DBManager:
             if os.path.exists(db_path):
                 file_size = os.path.getsize(db_path)
                 print(f"  * 새 DB 파일 생성됨 ({file_size} bytes)")
+                
+                # Windows에서 숨김 속성 설정
+                try:
+                    import ctypes
+                    FILE_ATTRIBUTE_HIDDEN = 0x02
+                    ctypes.windll.kernel32.SetFileAttributesW(db_path, FILE_ATTRIBUTE_HIDDEN)
+                    print(f"  * DB 파일 숨김 속성 설정 완료")
+                except Exception as e:
+                    print(f"  * DB 파일 숨김 속성 설정 실패 (무시): {e}")
+                
                 return True
             else:
                 print("  * DB 파일이 생성되지 않았음")
@@ -92,6 +102,7 @@ class DBManager:
         if not hasattr(self, 'initialized'):
             self.engine = None
             self.Session = None
+            self.db_path = None
             self.initialized = True
             self.application_path = None
             self.config_path = None
@@ -194,9 +205,10 @@ class DBManager:
         config = configparser.ConfigParser(interpolation=None)
         config.read(self.config_path, encoding='utf-8')
         
-        # 1. 기본 경로 설정
-        local_db_path = os.path.join(application_path, self.get_db_relative_path(), "cosmetic.db")
-        os.makedirs(os.path.dirname(local_db_path), exist_ok=True)
+        # 1. 기본 경로 설정 - AppData 폴더 사용 (하드웨어 바인딩용)
+        appdata_path = os.path.join(os.environ.get('APPDATA', application_path), 'CoRQD')
+        os.makedirs(appdata_path, exist_ok=True)
+        
         shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
         # Normalize shared_db_path: config stores only the folder. If a full file
@@ -207,30 +219,31 @@ class DBManager:
             # 따옴표로 감싸진 값 방지 및 공백 제거
             path = path.strip().strip('"').strip("'")
             # if user or older code stored full file path, accept it
-            if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
+            if path.lower().endswith('.db'):
                 return path
-            # otherwise treat stored value as a directory
+            # otherwise treat stored value as a directory - cosmetic.db 사용
             return os.path.join(path, 'cosmetic.db')
 
         shared_db_file = resolve_shared_file(shared_db_path)
-        print(f"[INFO] 로컬 DB 경로: {local_db_path}")
+        print(f"[INFO] 하드웨어 바인딩 폴더: {appdata_path}")
         print(f"[INFO] 공유 DB (설정) 폴더/파일: {shared_db_path} -> {shared_db_file}")
         
         # 2. 공유 DB 경로 설정 (첫 실행시)
-        # If nothing is configured and there's no local DB, set the default to the
-        # local DB's directory (store folder only).
-        if not shared_db_path and not os.path.exists(local_db_path):
+        # 설정이 없으면 기본 경로(AppData)로 설정
+        if not shared_db_path:
+            default_db_file = os.path.join(appdata_path, 'cosmetic.db')
             if not config.has_section('Paths'):
                 config.add_section('Paths')
             try:
-                config.set('Paths', 'shared_db_path', os.path.dirname(local_db_path))
+                config.set('Paths', 'shared_db_path', appdata_path)
                 with open(config_path, 'w', encoding='utf-8') as configfile:
                     config.write(configfile)
-                print(f"[INFO] 초기 DB 폴더 경로 설정: {os.path.dirname(local_db_path)}")
-                shared_db_path = os.path.dirname(local_db_path)
-                shared_db_file = local_db_path
+                print(f"[INFO] 초기 DB 폴더 경로 설정: {appdata_path}")
+                shared_db_path = appdata_path
+                shared_db_file = default_db_file
             except Exception as e:
                 print(f"[경고] 초기 DB 경로 저장 실패: {e}")
+                shared_db_file = default_db_file
         
         # 3. 공유 DB 사용 시도
         # Try using shared DB file if it exists (shared_db_file resolves folder->file)
@@ -285,7 +298,7 @@ class DBManager:
                     except Exception:
                         pass
         
-        # 4. 로컬 DB 사용
+        # 4. 로컬 DB 사용 (공유 DB가 없을 경우)
         print("\n=== 로컬 DB 설정 시작 ===")
         try:
             # 1. 초기화
@@ -293,7 +306,11 @@ class DBManager:
                 print("  * 기존 DB 엔진 정리")
                 self.dispose_engine()
             
-            self.db_path = local_db_path
+            # shared_db_file이 없으면 기본 경로 사용
+            if not shared_db_file:
+                shared_db_file = os.path.join(appdata_path, 'cosmetic.db')
+            
+            self.db_path = shared_db_file
             print(f"  * DB 경로: {self.db_path}")
             
             # 2. DB 파일 처리
@@ -883,6 +900,74 @@ class DBManager:
         session.query(Material).delete(synchronize_session=False)
         print("원료 데이터가 리셋되었습니다.")
 
+    def has_admin_users(self):
+        """시스템에 관리자 권한 사용자가 이미 존재하는지 확인합니다."""
+        session = self.get_session()
+        try:
+            admin_count = session.query(User).filter(User.is_admin == True).count()
+            return admin_count > 0
+        except Exception:
+            return False
+        finally:
+            session.close()
+    
+    def backup_database(self, backup_folder=None):
+        """데이터베이스를 백업합니다."""
+        if not self.db_path or not os.path.exists(self.db_path):
+            print("[백업] DB 파일이 존재하지 않습니다.")
+            return False
+        
+        try:
+            # 백업 폴더 설정
+            if not backup_folder:
+                appdata_path = os.path.join(os.environ.get('APPDATA', ''), 'CoRQD', 'backups')
+            else:
+                appdata_path = backup_folder
+            
+            os.makedirs(appdata_path, exist_ok=True)
+            
+            # 백업 파일명: .cosdb_backup_YYYYMMDD_HHMMSS
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_file = os.path.join(appdata_path, f".cosdb_backup_{timestamp}")
+            
+            # 파일 복사
+            shutil.copy2(self.db_path, backup_file)
+            
+            # 백업 파일도 숨김 처리
+            try:
+                import ctypes
+                FILE_ATTRIBUTE_HIDDEN = 0x02
+                ctypes.windll.kernel32.SetFileAttributesW(backup_file, FILE_ATTRIBUTE_HIDDEN)
+            except Exception:
+                pass
+            
+            print(f"[백업] 성공: {backup_file}")
+            
+            # 오래된 백업 파일 정리 (최근 10개만 유지)
+            self._cleanup_old_backups(appdata_path, keep_count=10)
+            
+            return True
+        except Exception as e:
+            print(f"[백업] 실패: {e}")
+            return False
+    
+    def _cleanup_old_backups(self, backup_folder, keep_count=10):
+        """오래된 백업 파일을 삭제합니다."""
+        try:
+            import glob
+            backup_files = glob.glob(os.path.join(backup_folder, ".cosdb_backup_*"))
+            backup_files.sort(reverse=True)  # 최신순 정렬
+            
+            # keep_count개 초과하는 백업 파일 삭제
+            for old_backup in backup_files[keep_count:]:
+                try:
+                    os.remove(old_backup)
+                    print(f"[백업 정리] 삭제: {old_backup}")
+                except Exception as e:
+                    print(f"[백업 정리] 삭제 실패: {old_backup} - {e}")
+        except Exception as e:
+            print(f"[백업 정리] 오류: {e}")
+    
     def has_admin_users(self):
         """시스템에 관리자 권한 사용자가 이미 존재하는지 확인합니다."""
         session = self.get_session()

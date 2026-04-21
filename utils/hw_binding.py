@@ -144,20 +144,10 @@ def _sign_binding(payload: str) -> str:
     return mac
 
 
-def _get_db_path(config_file_path: str) -> str:
-    """config.ini에서 DB 경로를 읽어옵니다."""
-    try:
-        import configparser
-        cfg = configparser.ConfigParser()
-        cfg.read(config_file_path, encoding="utf-8")
-        db_path = cfg.get("Database", "db_path", fallback="").strip()
-        if db_path and os.path.exists(db_path):
-            return db_path
-    except Exception:
-        pass
-    # 기본값: config.ini와 같은 폴더의 platform.db
-    base_dir = os.path.dirname(config_file_path)
-    return os.path.join(base_dir, "platform.db")
+def _get_db_path(config_file_path: str = None) -> str:
+    """메인 데이터베이스 경로를 반환합니다 (AppData/.cosdb)."""
+    appdata_path = os.path.join(os.environ.get('APPDATA', ''), 'CoRQD')
+    return os.path.join(appdata_path, ".cosdb")
 
 
 def _load_mode_from_config(config_file_path: str) -> str:
@@ -171,7 +161,7 @@ def _load_mode_from_config(config_file_path: str) -> str:
         return "flex"
 
 
-def save_binding(config_file_path: str, mode: str = "flex") -> dict:
+def save_binding(config_file_path: str = None, mode: str = "flex") -> dict:
     """하드웨어 바인딩 정보를 DB에 암호화하여 저장합니다."""
     hw = _canonical_components(get_hw_components())
     record = {
@@ -188,9 +178,13 @@ def save_binding(config_file_path: str, mode: str = "flex") -> dict:
     encrypted_data = fernet.encrypt(json.dumps(record).encode('utf-8'))
     
     # DB에 저장
-    db_path = _get_db_path(config_file_path)
+    db_path = _get_db_path()
     try:
         import sqlite3
+        
+        # DB 디렉토리 생성
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
@@ -212,63 +206,23 @@ def save_binding(config_file_path: str, mode: str = "flex") -> dict:
         conn.commit()
         conn.close()
         
-        # 기존 JSON 파일이 있으면 삭제
-        try:
-            legacy_json = os.path.join(os.path.dirname(config_file_path), "hw_binding.json")
-            if os.path.exists(legacy_json):
-                os.remove(legacy_json)
-                print(f"[HW-BIND] 기존 JSON 파일 삭제: {legacy_json}")
-        except Exception:
-            pass
-        
         return record
     except Exception as e:
         print(f"[HW-BIND] DB 저장 실패: {e}")
         raise
 
 
-def load_binding(config_file_path: str) -> dict | None:
+def load_binding(config_file_path: str = None) -> dict | None:
     """DB에서 암호화된 하드웨어 바인딩 정보를 복호화하여 로드합니다."""
-    db_path = _get_db_path(config_file_path)
-    
-    # 레거시: JSON 파일이 있으면 DB로 마이그레이션
-    legacy_json = os.path.join(os.path.dirname(config_file_path), "hw_binding.json")
-    if os.path.exists(legacy_json):
-        try:
-            print("[HW-BIND] 기존 JSON 파일을 DB로 마이그레이션 중...")
-            with open(legacy_json, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            # DB에 저장
-            fernet = Fernet(_get_encryption_key())
-            encrypted_data = fernet.encrypt(json.dumps(data).encode('utf-8'))
-            
-            import sqlite3
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute(f'''
-                CREATE TABLE IF NOT EXISTS {_BINDING_TABLE} (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    encrypted_data BLOB NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-            ''')
-            cursor.execute(f'''
-                REPLACE INTO {_BINDING_TABLE} (id, encrypted_data, updated_at)
-                VALUES (1, ?, ?)
-            ''', (encrypted_data, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            conn.commit()
-            conn.close()
-            
-            # 마이그레이션 후 JSON 파일 삭제
-            os.remove(legacy_json)
-            print("[HW-BIND] JSON 파일 마이그레이션 완료 및 삭제")
-        except Exception as e:
-            print(f"[HW-BIND] JSON 마이그레이션 실패: {e}")
+    db_path = _get_db_path()
     
     # DB에서 로드
     try:
         import sqlite3
+        
+        if not os.path.exists(db_path):
+            return None
+        
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
@@ -328,11 +282,11 @@ def meets_threshold(count: int, mode: str) -> bool:
     return count >= 3
 
 
-def ensure_machine_binding(config_file_path: str):
-    """Ensure the machine is bound. If no binding exists, prompt to create it.
+def ensure_machine_binding(config_file_path: str = None):
+    """Ensure the machine is bound. If no binding exists, it will be created on first admin signup.
     If binding exists, verify signature and compare against current HW; block on failure.
     """
-    mode = _load_mode_from_config(config_file_path)
+    mode = "flex"  # 기본 모드
 
     def _show_error(msg: str):
         try:
@@ -344,29 +298,10 @@ def ensure_machine_binding(config_file_path: str):
         except Exception:
             pass
 
-    def _ask_yesno(title: str, msg: str) -> bool:
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk(); root.withdraw()
-            res = messagebox.askyesno(title, msg)
-            root.destroy()
-            return bool(res)
-        except Exception:
-            return False
-
-    record = load_binding(config_file_path)
+    record = load_binding()
     if record is None:
-        # First run activation
-        if _ask_yesno("PC 활성화", "이 PC에 프로그램을 활성화하시겠습니까?\n하드웨어 바인딩 정보를 생성/저장합니다."):
-            try:
-                save_binding(config_file_path, mode)
-            except Exception as e:
-                _show_error(f"바인딩 생성 실패: {e}")
-                raise SystemExit(1)
-        else:
-            _show_error("활성화가 취소되어 프로그램을 종료합니다.")
-            raise SystemExit(1)
+        # 첫 실행 - 하드웨어 바인딩 없음 (회원가입 시 생성됨)
+        print("[HW-BIND] 하드웨어 바인딩 없음 - 첫 관리자 계정 생성 시 등록됩니다.")
         return
 
     if record.get("_invalid_signature"):

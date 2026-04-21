@@ -121,6 +121,22 @@ class HomeFrame(ctk.CTkFrame):
             except Exception:
                 pass
 
+        # 초기 DB 설정 중인 경우 성분 변경 이력 표시하지 않음
+        if getattr(self.app, 'db_initial_setup_complete', False):
+            empty = ctk.CTkLabel(self.changes_panel, 
+                               text="초기 DB 설정 완료 - 이후 변경사항부터 표시됩니다.", 
+                               text_color="gray")
+            empty.grid(row=0, column=0, padx=6, pady=6, sticky="w")
+            return
+
+        # 데이터 관리 접근 권한이 없는 경우 표시하지 않음
+        if not self.current_user.can_access_data_management():
+            empty = ctk.CTkLabel(self.changes_panel, 
+                               text="이 기능은 데이터 관리 권한이 필요합니다.", 
+                               text_color="gray")
+            empty.grid(row=0, column=0, padx=6, pady=6, sticky="w")
+            return
+
         session = db_manager.get_session()
         try:
             # 최신 항목을 넉넉히 가져와서(예: 50개) 실제 '변경'이 있는 것만 골라 10개 표시
@@ -208,6 +224,15 @@ class HomeFrame(ctk.CTkFrame):
     def _open_material(self, material_id: int):
         """해당 원료 ID로 데이터 관리/성분 관리 탭을 열고 선택합니다."""
         try:
+            # 데이터 관리 접근 권한 체크
+            if not self.current_user.can_access_data_management():
+                from tkinter import messagebox
+                messagebox.showwarning("권한 없음", 
+                                     "데이터 관리 기능에 접근할 수 없습니다.\n"
+                                     "관리자에게 문의하세요.",
+                                     parent=self.app)
+                return
+            
             if hasattr(self.app, 'open_material_by_id'):
                 self.app.open_material_by_id(material_id)
             else:
@@ -338,7 +363,8 @@ class HomeFrame(ctk.CTkFrame):
     def _bind_click_open(self, widgets, material_id: int):
         for w in widgets:
             try:
-                w.bind("<Button-1>", lambda e, mid=material_id: self._open_material(mid))
+                # 이벤트 인자 e는 받지만 사용하지 않음 (tkinter 바인딩 규칙)
+                w.bind("<Button-1>", lambda e=None, mid=material_id: self._open_material(mid))
             except Exception:
                 pass
 

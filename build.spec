@@ -329,5 +329,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='Icon.ico'
+    icon='Icon.ico',
+    manifest='CoRQD.manifest'  # 관리자 권한 매니페스트 추가
 )
