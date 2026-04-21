@@ -11,7 +11,7 @@ from modules import excel_handler
 from modules.ui_components import CustomErrorDialog
 
 # document_management.py에서 클래스들을 가져옵니다.
-from modules.document_management import CustomDropdown, AddMaterialDialog
+from modules.ui_components import CustomDropdown, AddMaterialDialog
 from modules.ui_components import try_convert_to_float, HelpPopup
 from utils import center_window_on_mouse_display
 from modules.translation import get_texts
@@ -1355,12 +1355,14 @@ class FormulationEditPopup(ctk.CTkToplevel):
         if not selected_item: return
         next_item = self.formulation_item_tree.next(selected_item)
         if next_item:
-            self.formulation_item_tree.move(selected_item, "", self.formulation_item_tree.index(next_item) + 1)
+            # next_item 다음 위치로 이동 (한 칸만 이동)
+            next_next_item = self.formulation_item_tree.next(next_item)
+            if next_next_item:
+                self.formulation_item_tree.move(selected_item, "", self.formulation_item_tree.index(next_next_item))
+            else:
+                self.formulation_item_tree.move(selected_item, "", "end")
             self.formulation_item_tree.focus(selected_item)
             self.formulation_item_tree.selection_set(selected_item)
-            self.update_phase_numbers()
-        else:
-            self.formulation_item_tree.move(selected_item, "", "end")
             self.update_phase_numbers()
 
     def on_drag_start(self, event):

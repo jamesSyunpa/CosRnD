@@ -1694,29 +1694,40 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             # split_instruction과 compose_instruction 함수 정의 (먼저 정의해야 함)
             def split_instruction(instr_text: str):
+                """
+                제조공정과 공정검사를 분리합니다.
+                구분자: "---" 또는 "===", 없으면 전체를 제조공정으로 간주
+                형식: "제조공정내용\n---\n공정검사내용" 또는 "제조공정내용\n===\n공정검사내용"
+                """
                 instr_text = (instr_text or "").strip()
                 if not instr_text:
                     return ("", "")
-                lines = instr_text.splitlines()
-                process_lines = []
-                inspection_lines = []
-                prefixes = ("시간", "온도", "HE/M", "H/M", "P/M", "HE/M:", "H/M:", "P/M:")
-                for ln in lines:
-                    lt = ln.strip()
-                    if not lt:
-                        continue
-                    if lt.startswith(prefixes):
-                        inspection_lines.append(lt)
-                    else:
-                        process_lines.append(lt)
-                return ("\n".join(process_lines), "\n".join(inspection_lines))
+                
+                # 구분자로 분리
+                if "\n---\n" in instr_text:
+                    parts = instr_text.split("\n---\n", 1)
+                    return (parts[0].strip(), parts[1].strip() if len(parts) > 1 else "")
+                elif "\n===\n" in instr_text:
+                    parts = instr_text.split("\n===\n", 1)
+                    return (parts[0].strip(), parts[1].strip() if len(parts) > 1 else "")
+                else:
+                    # 구분자가 없으면 전체를 제조공정으로 간주
+                    return (instr_text, "")
 
             def compose_instruction(process_text: str, inspection_text: str):
+                """
+                제조공정과 공정검사를 결합합니다.
+                형식: "제조공정\n---\n공정검사"
+                """
                 p = (process_text or "").strip()
                 q = (inspection_text or "").strip()
                 if p and q:
-                    return p + "\n" + q
-                return p or q
+                    return p + "\n---\n" + q
+                elif p:
+                    return p
+                elif q:
+                    return "---\n" + q  # 제조공정이 없으면 구분자만 붙임
+                return ""
 
             def populate_recipe_items():
                 # 아이템 스냅샷 표시 + 기준중량으로 환산값 계산 + Phase별 제조공정/공정검사 표시
@@ -1884,12 +1895,62 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 # 편집 다이얼로그
                 edit_win = ctk.CTkToplevel(win)
                 edit_win.title(f"Phase {phase} - {'제조공정' if edit_type == 'process' else '공정검사'} 편집")
-                edit_win.geometry("600x450")
+                edit_win.geometry("700x600")
                 edit_win.transient(win)
                 edit_win.grab_set()
                 
                 ctk.CTkLabel(edit_win, text=f"Phase {phase} {'제조공정' if edit_type == 'process' else '공정검사'}", 
                             font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(15,10), padx=20)
+                
+                # 공정검사인 경우 체크박스 추가
+                if edit_type == "inspection":
+                    checkbox_frame = ctk.CTkFrame(edit_win, fg_color="transparent")
+                    checkbox_frame.pack(fill="x", padx=20, pady=(0,10))
+                    
+                    ctk.CTkLabel(checkbox_frame, text="표준 검사 항목:", 
+                                font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", pady=(0,5))
+                    
+                    # 표준 검사 항목 템플릿
+                    inspection_items = [
+                        ("시간", "시간 :"),
+                        ("온도", "온도 :              ℃"),
+                        ("H/M", "H/M :              rpm"),
+                        ("P/M", "P/M :              rpm"),
+                        ("HE/M", "HE/M:              rpm"),
+                        ("전체 템플릿", "시간 :\n온도 :              ℃\nH/M :              rpm\nP/M :              rpm\nHE/M:              rpm")
+                    ]
+                    
+                    inspection_vars = {}
+                    items_grid = ctk.CTkFrame(checkbox_frame, fg_color="transparent")
+                    items_grid.pack(fill="x")
+                    
+                    for idx, (label, content) in enumerate(inspection_items):
+                        var = ctk.BooleanVar()
+                        inspection_vars[label] = content  # 라벨을 키로, 실제 내용을 값으로 저장
+                        chk = ctk.CTkCheckBox(items_grid, text=label, variable=var, width=120)
+                        # var를 체크박스 위젯에 저장
+                        chk._var = var
+                        chk._label = label
+                        row = idx // 3  # 3열 배치
+                        col = idx % 3
+                        chk.grid(row=row, column=col, sticky="w", padx=5, pady=2)
+                    
+                    def add_selected_items():
+                        selected_contents = []
+                        for widget in items_grid.winfo_children():
+                            if isinstance(widget, ctk.CTkCheckBox) and widget._var.get():
+                                selected_contents.append(inspection_vars[widget._label])
+                        
+                        if selected_contents:
+                            current = text_box.get("1.0", "end-1c").strip()
+                            new_items = "\n".join(selected_contents)
+                            if current:
+                                text_box.insert("end", "\n" + new_items)
+                            else:
+                                text_box.insert("1.0", new_items)
+                    
+                    ctk.CTkButton(checkbox_frame, text="선택 항목 추가", 
+                                 command=add_selected_items, width=120).pack(pady=(10,0))
                 
                 text_box = ctk.CTkTextbox(edit_win, wrap="word", fg_color="#404040", text_color="white")
                 text_box.pack(fill="both", expand=True, padx=20, pady=(0,15))

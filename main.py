@@ -105,16 +105,12 @@ def create_fallback_icon(base_path):
     """아이콘 파일이 없는 경우 임시 아이콘을 생성합니다"""
     try:
         from PIL import Image, ImageDraw
-        import tempfile
         
-        # 안전한 임시 디렉토리 사용
-        if not os.path.exists(base_path) or not os.access(base_path, os.W_OK):
-            # base_path가 쓰기 불가능하면 시스템 임시 디렉토리 사용
-            temp_dir = tempfile.gettempdir()
-            temp_icon_path = os.path.join(temp_dir, 'rnd_platform_temp_icon.ico')
-            print(f"[RESOURCE] base_path 쓰기 불가, 시스템 임시 폴더 사용: {temp_dir}")
-        else:
-            temp_icon_path = os.path.join(base_path, 'temp_icon.ico')
+        # base_path 내 data/temp 폴더 사용 (AppData 사용 금지)
+        temp_dir = os.path.join(base_path, 'data', 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_icon_path = os.path.join(temp_dir, 'rnd_platform_temp_icon.ico')
+        print(f"[RESOURCE] 프로젝트 폴더 사용: {temp_dir}")
         
         # 간단한 임시 아이콘 생성
         size = (64, 64)
@@ -176,30 +172,29 @@ else:
     application_path = os.path.dirname(os.path.abspath(__file__))
 
 def get_persistent_config_path(app_dir_name: str = 'RnD_플랫폼') -> str:
-    """사용자 쓰기 가능한 위치(LOCALAPPDATA)에 영속 config.ini 경로를 제공합니다.
-
-    - 최초 실행 시 exe 옆의 config.ini가 있다면 사용자 폴더로 1회 마이그레이션합니다.
-    - PyInstaller 임시 폴더(_MEIPASS)와 무관하게 항상 동일 경로를 사용합니다.
+    """프로젝트 폴더 내 config.ini 경로를 제공합니다.
+    
+    - AppData 폴더 사용을 완전히 중단하고 프로젝트 폴더만 사용합니다.
+    - 프로젝트 실행 경로(application_path) 내에 config.ini를 저장합니다.
     """
     try:
-        base_dir = os.getenv('LOCALAPPDATA')
-        if not base_dir:
-            # Windows가 아닐 수 있는 극히 예외적인 상황 대비
-            base_dir = os.path.expanduser('~')
-        appdata_dir = os.path.join(base_dir, app_dir_name)
-        os.makedirs(appdata_dir, exist_ok=True)
-
-        target_config = os.path.join(appdata_dir, 'config.ini')
-        legacy_config = os.path.join(application_path, 'config.ini')
-
-        # 마이그레이션: 사용자 영역에 파일이 없고, exe 폴더에 기존 파일이 있으면 복사
-        if not os.path.exists(target_config) and os.path.exists(legacy_config):
+        # 프로젝트 폴더를 직접 사용 (AppData 사용 금지)
+        target_config = os.path.join(application_path, 'config.ini')
+        
+        # config.ini가 없으면 기본 템플릿 생성
+        if not os.path.exists(target_config):
             try:
-                import shutil
-                shutil.copy2(legacy_config, target_config)
-                print(f"[CONFIG] exe 폴더의 기존 설정을 사용자 폴더로 마이그레이션: {target_config}")
-            except Exception as mig_e:
-                print(f"[CONFIG] 설정 마이그레이션 실패(무시): {mig_e}")
+                default_content = """[Paths]
+excel_dir = 
+
+[Database]
+db_path = 
+"""
+                with open(target_config, 'w', encoding='utf-8') as f:
+                    f.write(default_content)
+                print(f"[CONFIG] 기본 config.ini 생성: {target_config}")
+            except Exception as create_error:
+                print(f"[CONFIG] config.ini 생성 실패: {create_error}")
 
         return target_config
     except Exception as e:
@@ -207,9 +202,9 @@ def get_persistent_config_path(app_dir_name: str = 'RnD_플랫폼') -> str:
         print(f"[CONFIG] 사용자 설정 경로 확보 실패, exe 폴더 사용: {e}")
         return os.path.join(application_path, 'config.ini')
 
-# config.ini는 사용자 폴더의 고정 경로를 사용 (임시 폴더 _MEIPASS와 분리)
+# config.ini는 프로젝트 폴더의 고정 경로를 사용 (AppData 사용 금지)
 CONFIG_FILE_PATH = get_persistent_config_path()
-print(f"[CONFIG] 설정 파일 경로: {CONFIG_FILE_PATH}")
+print(f"[CONFIG] 최종 설정 파일 경로: {CONFIG_FILE_PATH}")
 
 
 from sqlalchemy import text
@@ -1810,34 +1805,34 @@ class App(ctk.CTk):
                 mon_w = max(100, work.right - work.left)
                 mon_h = max(100, work.bottom - work.top)
 
-                width = int(mon_w * 0.85)
-                height = int(mon_h * 0.8)
+                width = int(mon_w * 0.70)
+                height = int(mon_h * 0.75)
 
                 # 마우스가 위치한 모니터 정중앙 배치
                 center_window_on_mouse_display(self, width=width, height=height)
                 # 최소 크기도 해당 모니터 기준으로 설정
-                self.minsize(int(mon_w * 0.6), int(mon_h * 0.7))
+                self.minsize(int(mon_w * 0.5), int(mon_h * 0.6))
                 return
 
             # 기타 OS: 단일 스크린 기준 폴백
             self.update_idletasks()
             sw = self.winfo_screenwidth()
             sh = self.winfo_screenheight()
-            width = int(sw * 0.85)
-            height = int(sh * 0.8)
+            width = int(sw * 0.70)
+            height = int(sh * 0.75)
             center_window_on_mouse_display(self, width=width, height=height)
-            self.minsize(int(sw * 0.6), int(sh * 0.7))
+            self.minsize(int(sw * 0.5), int(sh * 0.6))
         except Exception:
             # 최후 폴백: 기존 중앙 배치 로직
             self.update_idletasks()
             sw = self.winfo_screenwidth()
             sh = self.winfo_screenheight()
-            width = int(sw * 0.85)
-            height = int(sh * 0.8)
+            width = int(sw * 0.70)
+            height = int(sh * 0.75)
             x = (sw // 2) - (width // 2)
             y = (sh // 2) - (height // 2)
             self.geometry(f"{width}x{height}+{x}+{y}")
-            self.minsize(int(sw * 0.6), int(sh * 0.7))
+            self.minsize(int(sw * 0.5), int(sh * 0.6))
 
     def recreate_main_ui(self):
         """메인 UI를 재생성하여 언어 변경 등을 반영합니다."""
@@ -2431,6 +2426,26 @@ if __name__ == "__main__":
         except Exception as fallback_error:
             print(f"[WARNING] 기본 테마도 실패: {fallback_error}")
             # 테마 없이 진행
+
+    # 실행 PC 하드웨어 바인딩 검증 (최초 실행 시 생성)
+    try:
+        from utils.hw_binding import ensure_machine_binding
+        ensure_machine_binding(CONFIG_FILE_PATH)
+        print("[STARTUP] 하드웨어 바인딩 검증 완료")
+    except SystemExit:
+        # ensure_machine_binding에서 차단 시 종료
+        raise
+    except Exception as bind_e:
+        # 바인딩 로직 실패 시 안전을 위해 실행 차단 (요구사항: 불일치 시 실행 차단)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk(); root.withdraw()
+            messagebox.showerror("실행 차단", f"하드웨어 바인딩 처리 중 오류가 발생했습니다.\n{bind_e}")
+            root.destroy()
+        except Exception:
+            pass
+        raise SystemExit(1)
     
     app = App()
     app.mainloop()

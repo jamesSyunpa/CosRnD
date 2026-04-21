@@ -8,7 +8,7 @@ import configparser
 from datetime import datetime
 import os
 from PIL import Image, ImageDraw, ImageFont
-import tempfile
+import time
 
 # --- 경로 설정을 읽기 위한 설정 ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -173,9 +173,12 @@ def export_production_formulation_revised_to_excel(
     # 파일 경로 결정
     if file_path is None:
         if open_print_preview:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            file_path = tmp.name
-            tmp.close()
+            # tempfile 대신 프로젝트 폴더의 data 디렉토리 사용
+            import time
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
+            os.makedirs(temp_dir, exist_ok=True)
+            file_path = os.path.join(temp_dir, f'preview_revised_{timestamp}.xlsx')
         else:
             initial_dir = get_excel_path()
             timestamped_filename = get_timestamped_filename(default_filename)
@@ -265,9 +268,14 @@ def export_production_formulation_revised_to_excel(
                 x1 = x0 + col_w
                 tw, th = drw.textbbox((0,0), txt, font=f_bold)[2:4]
                 drw.text((x0 + (col_w - tw)//2, (header_h - th)//2), txt, fill='#2C3E50', font=f_bold)
-            tf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            img.save(tf.name, 'PNG'); tf.close()
-            return tf.name
+            # tempfile 대신 프로젝트 폴더 사용
+            import time
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_img_path = os.path.join(temp_dir, f'approval_{timestamp}.png')
+            img.save(temp_img_path, 'PNG')
+            return temp_img_path
 
         # G/H 폭을 기준으로 이미지 너비 산정 (엑셀 폭 단위를 픽셀로 근사: *7)
         gh_px = int((26 + 22) * 7)  # G=26, H=22 (fixed widths). 여백 없이 정확히 맞춤
@@ -309,7 +317,13 @@ def export_production_formulation_revised_to_excel(
 
         # Row 4: 지시일/제조일/생산량/수득량
         ws['A4'].value = '지시일'; ws['A4'].font = label_font; ws['A4'].fill = label_fill; ws['A4'].alignment = center; ws['A4'].border = thin_border
-        ws['B4'].value = details.get('지시일', details.get('출력일시','')); ws['B4'].font = default_font; ws['B4'].alignment = left; ws['B4'].border = thin_border
+        # 지시일에서 날짜만 추출 (시간 제거)
+        instruction_date_raw = details.get('지시일', details.get('출력일시',''))
+        if instruction_date_raw and ' ' in str(instruction_date_raw):
+            instruction_date = str(instruction_date_raw).split(' ')[0]  # 날짜 부분만
+        else:
+            instruction_date = instruction_date_raw
+        ws['B4'].value = instruction_date; ws['B4'].font = default_font; ws['B4'].alignment = left; ws['B4'].border = thin_border
         ws['C4'].value = '제조일'; ws['C4'].font = label_font; ws['C4'].fill = label_fill; ws['C4'].alignment = center; ws['C4'].border = thin_border
         ws['D4'].value = details.get('제조일',''); ws['D4'].font = default_font; ws['D4'].alignment = left; ws['D4'].border = thin_border
         ws['E4'].value = '생산량(kg)'; ws['E4'].font = label_font; ws['E4'].fill = label_fill; ws['E4'].alignment = center; ws['E4'].border = thin_border
@@ -607,9 +621,11 @@ def export_production_formulation_original_to_excel(
     # 파일 경로 결정
     if file_path is None:
         if open_print_preview:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-            file_path = tmp.name
-            tmp.close()
+            # tempfile 대신 프로젝트 폴더의 data 디렉토리 사용
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
+            os.makedirs(temp_dir, exist_ok=True)
+            file_path = os.path.join(temp_dir, f'preview_production_{timestamp}.xlsx')
         else:
             initial_dir = get_excel_path()
             timestamped_filename = get_timestamped_filename(default_filename)
@@ -673,9 +689,14 @@ def export_production_formulation_original_to_excel(
             draw.text((xr, header_h//2), label, fill='#2C3E50', font=font_title, anchor='rm')
             sy = header_h + (height - header_h)//2 + 15
             draw.text((xr, sy), "(인)", fill='#95A5A6', font=font_small, anchor='rm')
-        tf = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-        img.save(tf.name, 'PNG'); tf.close()
-        return tf.name
+        # tempfile 대신 프로젝트 폴더 사용
+        import time
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_img_path = os.path.join(temp_dir, f'approval_orig_{timestamp}.png')
+        img.save(temp_img_path, 'PNG')
+        return temp_img_path
 
     try:
         wb = Workbook()
@@ -1440,6 +1461,63 @@ def try_convert_to_float(value):
         return float(value)
     except (ValueError, TypeError):
         return value
+
+def import_multisheet_data():
+    """여러 시트를 가진 엑셀 파일에서 데이터를 가져옵니다."""
+    initial_dir = get_excel_path()
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Excel files", "*.xlsx")],
+        initialdir=initial_dir,
+        title="가져올 엑셀 파일 선택"
+    )
+    if not file_path:
+        return None
+
+    save_excel_path(os.path.dirname(file_path))
+
+    def clean_cell(cell):
+        """
+        셀 값 정리:
+        - None 또는 '-' → 빈 문자열
+        - 문자열이면 앞뒤 공백 제거
+        """
+        if cell is None:
+            return ""
+        if isinstance(cell, str):
+            cell = cell.strip()
+            if cell == "-":
+                return ""
+        return cell
+
+    try:
+        workbook = openpyxl.load_workbook(file_path, data_only=True)
+        result = {}
+        
+        for sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
+            
+            # 헤더 행 읽기
+            headers = [cell.value for cell in sheet[1]]
+            
+            # 데이터 행 읽기
+            data_list = []
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                # 전부 비어있으면 건너뜀
+                if all(cell is None or str(cell).strip() in ("", "-") for cell in row):
+                    continue
+                # 헤더 개수에 맞춰 길이 조정
+                row = list(row) + [None] * (len(headers) - len(row))
+                # 각 셀 값 정리
+                row = [clean_cell(cell) for cell in row]
+                row_data = dict(zip(headers, row))
+                data_list.append(row_data)
+            
+            result[sheet_name] = data_list
+        
+        return result
+    except Exception as e:
+        messagebox.showerror("오류", f"파일을 읽는 중 오류가 발생했습니다: {e}")
+        return None
 def import_formulation_template():
     """(최종 수정) 특정 템플릿 형식의 엑셀 파일에서 처방 정보를 안정적으로 읽어옵니다."""
     initial_dir = get_excel_path()
