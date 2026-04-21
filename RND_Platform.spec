@@ -22,6 +22,7 @@ a = Analysis(
         'tkcalendar',
         'openpyxl',
         'bcrypt',
+        'pdfplumber',
         # 프로젝트 모듈
         'modules',
         'modules.login',

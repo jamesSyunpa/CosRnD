@@ -145,6 +145,29 @@ TRANSLATIONS = {
         - 제조관리기록서: 제품의 제조 이력을 관리합니다.
         (모든 기능은 현재 개발 예정입니다.)
         """,
+        "semi_finished_product_report": "반제품 시험성적서",
+        "semi_finished_product_report_title": "반제품 시험성적서 정보 입력",
+        "semi_product_coa_fields": {
+            "제품명": "제품명",
+            "제품코드명": "제품코드명",
+            "LOT": "LOT 번호",
+            "제조일자": "제조일자",
+            "시험일자": "시험일자",
+            "성상": "성상",
+            "향취": "향취",
+            "사용감": "사용감",
+            "pH(30℃)": "pH (30℃)",
+            "점도(30℃)": "점도 (30℃)",
+            "비중(25℃)": "비중 (25℃)",
+            "일반세균": "일반세균",
+            "효모/곰팡이": "효모/곰팡이",
+            "대장균": "대장균",
+            "판정": "판정",
+            "시험자": "시험자",
+            "일자": "판정일자",
+        },
+        "create_excel_report": "엑셀 보고서 생성", "form_cleared": "입력 양식이 초기화되었습니다.", "required_fields_missing": "필수 항목(제품명, LOT, 판정)을 모두 입력해주세요.",
+        "save_report_as": "보고서 다른 이름으로 저장", "report_saved_success": "보고서가 성공적으로 저장되었습니다", "report_generation_error": "보고서 생성 중 오류 발생",
 
         # Formulation Popup
         "formulation_popup_title": "처방 생성/수정", "formulation_details": "처방 상세 정보", "use_target_info": "타겟 정보 사용",
@@ -290,6 +313,29 @@ TRANSLATIONS = {
         - MFG Record: Manage manufacturing history for products.
         (All features are currently under development.)
         """,
+        "semi_finished_product_report": "Semi-finished Product Report",
+        "semi_finished_product_report_title": "Semi-finished Product Report Information",
+        "semi_product_coa_fields": {
+            "제품명": "Product Name",
+            "제품코드명": "Product Code",
+            "LOT": "Lot No.",
+            "제조일자": "Manufacturing Date",
+            "시험일자": "Testing Date",
+            "성상": "Appearance",
+            "향취": "Odor",
+            "사용감": "Texture",
+            "pH(30℃)": "pH (30℃)",
+            "점도(30℃)": "Viscosity (30℃)",
+            "비중(25℃)": "Relative Density (25℃)",
+            "일반세균": "Total Bacteria",
+            "효모/곰팡이": "Yeast/Mold",
+            "대장균": "E.Coli",
+            "판정": "Conclusion",
+            "시험자": "Analyst",
+            "일자": "Conclusion Date",
+        },
+        "create_excel_report": "Create Excel Report", "form_cleared": "The input form has been cleared.", "required_fields_missing": "Please fill in all required fields (Product Name, LOT, Conclusion).",
+        "save_report_as": "Save Report As", "report_saved_success": "Report saved successfully", "report_generation_error": "An error occurred while generating the report",
 
         # Formulation Popup
         "formulation_popup_title": "Create/Edit Formulation", "formulation_details": "Formulation Details", "use_target_info": "Use Target Info",
