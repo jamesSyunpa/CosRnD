@@ -6,6 +6,7 @@ from tkcalendar import DateEntry
 from database.db_manager import db_manager
 from database.models import Client, Formulation, FormulationItem, Material, User
 from datetime import datetime
+import time
 from modules import excel_handler
 from modules.ui_components import CustomErrorDialog
 
@@ -121,6 +122,11 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.edit_entry = None
         self.language = app.language
         self.texts = get_texts(self.language)
+        
+        # 세션 만료 방지를 위한 새로고침 타이머
+        self.refresh_timer = None
+        self.last_activity_time = time.time()
+        self.data_loading = False  # 데이터 로딩 중 플래그
 
         self.title(self.texts['formulation_popup_title'])
         # self.geometry("1200x800") # 크기 고정 해제
@@ -129,11 +135,18 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.minsize(1000, 700) # 최소 크기 설정
         self.grab_set()
 
+        # UI 구성
         self.setup_ui()
+        
+        # 데이터 로딩 (UI 구성 완료 후 지연 실행)
         if formulation_id:
-            self.load_formulation_details(formulation_id)
+            self.after(100, lambda: self.load_formulation_details(formulation_id))
         else:
+            # 신규 처방 생성시 즉시 폼 초기화 (지연 없이)
             self.clear_form()
+            
+        # 주기적 데이터 새로고침 시작 (5분마다)
+        self.start_refresh_timer()
 
     def setup_ui(self):
         """팝업 창의 UI를 구성합니다."""
@@ -396,6 +409,31 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
         # 초기 상태 설정
         self.toggle_target_info()
+        
+        # 사용자 활동 감지를 위한 이벤트 바인딩
+        self.bind_activity_events()
+
+    def bind_activity_events(self):
+        """사용자 활동 감지를 위한 이벤트를 바인딩합니다"""
+        try:
+            # 마우스 및 키보드 활동 감지
+            self.bind("<Button-1>", self.on_user_activity)
+            self.bind("<Key>", self.on_user_activity)
+            self.bind("<Motion>", self.on_user_activity)
+            
+            # 주요 입력 위젯들에 개별적으로 이벤트 바인딩
+            widgets_to_bind = [
+                self.exp_name_entry, self.exp_manager_entry, self.exp_code_entry,
+                self.target_sample_name_entry, self.target_client_entry
+            ]
+            
+            for widget in widgets_to_bind:
+                if hasattr(widget, 'bind'):
+                    widget.bind("<KeyPress>", self.on_user_activity)
+                    widget.bind("<Button-1>", self.on_user_activity)
+                    
+        except Exception as e:
+            print(f"이벤트 바인딩 중 오류: {e}")
 
     def update_lab_no(self, event=None):
         """고유번호, 실험일, 차수가 모두 있을 때만 LAB NO.를 자동으로 생성합니다."""
@@ -445,7 +483,9 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.exp_manager_entry.insert(0, self.current_user.username)
         self.exp_code_entry.delete(0, "end")
         self.revision_entry.delete(0, "end")
-        self.exp_code_entry.insert(0, self.current_user.manager_code or "") # 현재 사용자의 담당번호 자동 입력
+        # 현재 사용자의 담당번호 자동 입력 (속성이 없을 수 있으므로 안전하게 접근)
+        manager_code = getattr(self.current_user, 'manager_code', "")
+        self.exp_code_entry.insert(0, manager_code)
 
         # 본 실험 결과 정보
         self.exp_ph_initial_entry.delete(0, "end")
@@ -473,130 +513,265 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
     def load_formulation_details(self, formulation_id):
         """특정 처방의 상세 정보를 불러와 폼에 채웁니다."""
+        if self.data_loading:
+            print("이미 데이터 로딩 중입니다.")
+            return
+            
+        self.data_loading = True
         self.formulation_id = formulation_id
         session = db_manager.get_session()
+        
         try:
             form = session.query(Formulation).options(
-                joinedload(Formulation.items)
+                joinedload(Formulation.items),
+                joinedload(Formulation.oem_odm_client)
             ).filter_by(id=formulation_id).first()
-            if not form: return
+            
+            if not form: 
+                print(f"처방 ID {formulation_id}를 찾을 수 없습니다.")
+                self.data_loading = False
+                return
 
+            print(f"처방 데이터 로딩 시작: {form.experiment_name}")
+
+            # 먼저 모든 기본 필드들을 클리어
+            self.clear_form_fields()
+            
             # 샘플 발송 횟수 로드
             self.sample_sent_count = form.sample_sent_count or 0
 
-            # 타겟 정보
-            self.target_info_var.set(form.has_target_info)
-            self.toggle_target_info()            
-            self.target_sample_name_entry.delete(0, "end"); self.target_sample_name_entry.insert(0, form.target_sample_name or "")
-            self.target_ph_initial_entry.delete(0, "end"); self.target_ph_initial_entry.insert(0, form.target_ph_initial or "")
-            self.target_ph_next_day_entry.delete(0, "end"); self.target_ph_next_day_entry.insert(0, form.target_ph_next_day or "")
-            self.target_viscosity_initial_entry.delete(0, "end"); self.target_viscosity_initial_entry.insert(0, form.target_viscosity_initial or "")
-            self.target_viscosity_next_day_entry.delete(0, "end"); self.target_viscosity_next_day_entry.insert(0, form.target_viscosity_next_day or "")
-            self.target_machine_entry.delete(0, "end"); self.target_machine_entry.insert(0, form.target_machine or "")
-            self.target_client_entry.delete(0, "end"); self.target_client_entry.insert(0, form.target_client_id or "")
+            # 타겟 정보 로드
+            has_target = form.has_target_info if form.has_target_info is not None else False
+            self.target_info_var.set(has_target)
+            self.toggle_target_info()
+            
+            # 타겟 정보 필드들 설정
+            if form.target_sample_name:
+                self.target_sample_name_entry.insert(0, str(form.target_sample_name))
+            if form.target_ph_initial:
+                self.target_ph_initial_entry.insert(0, str(form.target_ph_initial))
+            if form.target_ph_next_day:
+                self.target_ph_next_day_entry.insert(0, str(form.target_ph_next_day))
+            if form.target_viscosity_initial:
+                self.target_viscosity_initial_entry.insert(0, str(form.target_viscosity_initial))
+            if form.target_viscosity_next_day:
+                self.target_viscosity_next_day_entry.insert(0, str(form.target_viscosity_next_day))
+            if form.target_machine:
+                self.target_machine_entry.insert(0, str(form.target_machine))
+            if form.target_client_id:
+                self.target_client_entry.insert(0, str(form.target_client_id))
 
-            # 본 실험 정보
-            self.exp_name_entry.delete(0, "end"); self.exp_name_entry.insert(0, form.experiment_name or "")            
-            if form.experiment_date: self.exp_date_entry.set_date(form.experiment_date)
-            # 담당자명/담당번호 표시
-            self.exp_manager_entry.delete(0, "end"); self.exp_manager_entry.insert(0, form.manager_name or "")
-            self.exp_code_entry.delete(0, "end")
-            # 우선 DB에 저장된 manager_code를 표시
-            if form.manager_code:
-                self.exp_code_entry.insert(0, form.manager_code)
+            # 본 실험 정보 로드
+            if form.experiment_name:
+                self.exp_name_entry.insert(0, str(form.experiment_name))
+                
+            if form.experiment_date:
+                self.exp_date_entry.set_date(form.experiment_date)
+                
+            # 담당자명 로드
+            if form.manager_name:
+                self.exp_manager_entry.insert(0, str(form.manager_name))
             else:
-                # DB에 manager_code가 없으면 LAB NO.에서 접두부(영문) 추출 시도
-                lab = (form.lab_no or "").strip()
-                if lab:
-                    import re
-                    m = re.match(r'^([A-Za-z]+)', lab)
-                    if m:
-                        parsed_code = m.group(1).upper()
-                        self.exp_code_entry.insert(0, parsed_code)
-                        # 사용자 테이블에서 해당 담당번호가 등록되어 있으면 담당자명으로 채움
-                        try:
-                            user = session.query(User).filter_by(manager_code=parsed_code).first()
-                            if user and not (form.manager_name):
-                                self.exp_manager_entry.delete(0, "end")
-                                # User에는 full name 필드가 없을 수 있어서 username을 기본으로 표시
-                                self.exp_manager_entry.insert(0, user.username or "")
-                        except Exception:
-                            pass
-            # 만약 form에는 manager_code가 있지만 manager_name이 비어있고, 등록된 사용자가 있다면 이름 보완
-            if form.manager_code and not form.manager_name:
-                try:
-                    user = session.query(User).filter_by(manager_code=form.manager_code).first()
-                    if user:
-                        self.exp_manager_entry.delete(0, "end")
-                        self.exp_manager_entry.insert(0, user.username or "")
-                except Exception:
-                    pass
+                self.exp_manager_entry.insert(0, self.current_user.username)
+                
+            # 담당번호 로드 및 처리
+            manager_code = self.get_manager_code_from_form(form, session)
+            if manager_code:
+                self.exp_code_entry.insert(0, str(manager_code))
+                
+            # 차수 로드
+            if form.revision:
+                self.revision_entry.insert(0, str(form.revision))
 
-            self.revision_entry.delete(0, "end"); self.revision_entry.insert(0, form.revision or "")
-
-            # 본 실험 결과 정보
-            self.exp_ph_initial_entry.delete(0, "end"); self.exp_ph_initial_entry.insert(0, form.experiment_ph_initial or "")            
-            self.exp_ph_next_day_entry.delete(0, "end"); self.exp_ph_next_day_entry.insert(0, form.experiment_ph_next_day or "")
-            self.exp_viscosity_initial_entry.delete(0, "end"); self.exp_viscosity_initial_entry.insert(0, form.experiment_viscosity_initial or "")
-            self.exp_viscosity_next_day_entry.delete(0, "end"); self.exp_viscosity_next_day_entry.insert(0, form.experiment_viscosity_next_day or "")
-            self.exp_machine_entry.delete(0, "end"); self.exp_machine_entry.insert(0, form.experiment_machine or "")
-            self.exp_comment_textbox.delete("1.0", "end"); self.exp_comment_textbox.insert("1.0", form.experiment_comment or "")
+            # 본 실험 결과 정보 로드
+            if form.experiment_ph_initial:
+                self.exp_ph_initial_entry.insert(0, str(form.experiment_ph_initial))
+            if form.experiment_ph_next_day:
+                self.exp_ph_next_day_entry.insert(0, str(form.experiment_ph_next_day))
+            if form.experiment_viscosity_initial:
+                self.exp_viscosity_initial_entry.insert(0, str(form.experiment_viscosity_initial))
+            if form.experiment_viscosity_next_day:
+                self.exp_viscosity_next_day_entry.insert(0, str(form.experiment_viscosity_next_day))
+            if form.experiment_machine:
+                self.exp_machine_entry.insert(0, str(form.experiment_machine))
+            if form.experiment_comment:
+                self.exp_comment_textbox.insert("1.0", str(form.experiment_comment))
 
             # 변경 이력 로드
-            self.change_log_textbox.configure(state="normal")
-            self.change_log_textbox.delete("1.0", "end")
-            self.change_log_textbox.insert("1.0", form.change_log or "저장된 변경 이력이 없습니다.")
-            self.change_log_textbox.configure(state="disabled")
+            self.load_change_log(form)
 
-            # 거래처 정보
+            # 거래처 정보 로드 (즉시 처리, 지연 없이)
             if form.oem_odm_client:
-                client = form.oem_odm_client
-                self.formulation_client_type_combo.set(client.client_type)
-                self.update_formulation_client_combo(client.client_type)
-                self.formulation_client_name_combo.set(client.name)
-                self.on_client_select(client.name)
+                self.load_client_info(form.oem_odm_client)
             else:
                 self.formulation_client_type_combo.set(self.texts['select_type'])
                 self.update_formulation_client_combo(self.texts['select_type'])
 
             # 처방 내용 로드
-            for item in self.formulation_item_tree.get_children():
-                self.formulation_item_tree.delete(item)
-            
-            total_amount = Decimal('0')
-            # 정렬할 때 order가 None인 항목이 섞여 있어 TypeError가 발생할 수 있음
-            # None은 마지막에 오도록 튜플 키로 안전하게 정렬합니다.
-            for item in sorted(form.items, key=lambda x: (x.order is None, x.order if x.order is not None else 0)):
-                self.formulation_item_tree.insert("", "end", values=(
-                    item.phase or "",
-                    item.material_code or "---",
-                    item.material_name or "---",
-                    decimal_to_str_full(to_decimal(item.ratio)) if item.ratio is not None else "---",
-                    decimal_to_str_full(to_decimal(item.amount)) if item.amount is not None else "---"
-                ))
-                if item.amount is not None:
-                    total_amount += to_decimal(item.amount)
-            
-            # 총 실험량 필드 업데이트
-            self.main_total_amount_entry.delete(0, "end")
-            self.main_total_amount_entry.insert(0, decimal_to_str_full(total_amount))
+            self.load_formulation_items(form)
 
-            self.update_formulation_summary()
-            # DB에 저장된 lab_no가 있으면 그것을 우선 표시합니다.
-            if form.lab_no:
-                try:
-                    self.lab_no_entry.configure(state="normal")
-                    self.lab_no_entry.delete(0, "end")
-                    self.lab_no_entry.insert(0, form.lab_no)
-                    self.lab_no_entry.configure(state="disabled")
-                except Exception:
-                    # 실패 시 기존 동작(생성)으로 폴백
-                    self.update_lab_no()
-            else:
-                # 저장된 값이 없으면 기존 로직대로 자동 생성
-                self.update_lab_no()
+            # LAB NO. 설정
+            self.set_lab_no(form)
+                
+            print("처방 데이터 로딩 완료")
+            
+        except Exception as e:
+            print(f"처방 데이터 로딩 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             session.close()
+            self.data_loading = False
+            # UI 업데이트 강제
+            self.update_idletasks()
+            
+    def clear_form_fields(self):
+        """폼의 모든 필드를 클리어합니다 (clear_form과 달리 기본값 설정 안함)"""
+        # 타겟 정보 클리어
+        self.target_sample_name_entry.delete(0, "end")
+        self.target_ph_initial_entry.delete(0, "end")
+        self.target_ph_next_day_entry.delete(0, "end")
+        self.target_viscosity_initial_entry.delete(0, "end")
+        self.target_viscosity_next_day_entry.delete(0, "end")
+        self.target_machine_entry.delete(0, "end")
+        self.target_client_entry.delete(0, "end")
+        
+        # 본 실험 정보 클리어
+        self.exp_name_entry.delete(0, "end")
+        self.exp_manager_entry.delete(0, "end")
+        self.exp_code_entry.delete(0, "end")
+        self.revision_entry.delete(0, "end")
+        
+        # 실험 결과 클리어
+        self.exp_ph_initial_entry.delete(0, "end")
+        self.exp_ph_next_day_entry.delete(0, "end")
+        self.exp_viscosity_initial_entry.delete(0, "end")
+        self.exp_viscosity_next_day_entry.delete(0, "end")
+        self.exp_machine_entry.delete(0, "end")
+        self.exp_comment_textbox.delete("1.0", "end")
+        
+        # 총 실험량 클리어
+        self.main_total_amount_entry.delete(0, "end")
+            
+    def get_manager_code_from_form(self, form, session):
+        """폼에서 담당번호를 추출합니다"""
+        if form.manager_code:
+            return form.manager_code
+        else:
+            # DB에 manager_code가 없으면 LAB NO.에서 접두부(영문) 추출 시도
+            lab = (form.lab_no or "").strip()
+            if lab:
+                import re
+                m = re.match(r'^([A-Za-z]+)', lab)
+                if m:
+                    parsed_code = m.group(1).upper()
+                    # 사용자 테이블에서 해당 담당번호가 등록되어 있으면 담당자명도 업데이트
+                    try:
+                        user = session.query(User).filter_by(manager_code=parsed_code).first()
+                        if user and not form.manager_name:
+                            # 담당자명이 없으면 업데이트
+                            self.exp_manager_entry.delete(0, "end")
+                            self.exp_manager_entry.insert(0, user.username or "")
+                    except Exception as e:
+                        print(f"사용자 정보 조회 오류: {e}")
+                    return parsed_code
+            else:
+                # LAB NO.도 없으면 현재 사용자의 manager_code 사용
+                if hasattr(self.current_user, 'manager_code') and self.current_user.manager_code:
+                    return self.current_user.manager_code
+        return None
+        
+    def load_change_log(self, form):
+        """변경 이력을 로드합니다"""
+        self.change_log_textbox.configure(state="normal")
+        self.change_log_textbox.delete("1.0", "end")
+        if form.change_log:
+            self.change_log_textbox.insert("1.0", str(form.change_log))
+        else:
+            self.change_log_textbox.insert("1.0", "저장된 변경 이력이 없습니다.")
+        self.change_log_textbox.configure(state="disabled")
+        
+    def load_client_info(self, client):
+        """거래처 정보를 로드합니다"""
+        try:
+            # 거래처 타입 설정
+            self.formulation_client_type_combo.set(client.client_type)
+            # 거래처 목록 업데이트
+            self.update_formulation_client_combo(client.client_type)
+            # UI 업데이트 적용
+            self.update_idletasks()
+            # 거래처명 설정
+            self.formulation_client_name_combo.set(client.name)
+            self.on_client_select(client.name)
+            print(f"거래처 정보 로드 완료: {client.name}")
+        except Exception as e:
+            print(f"거래처 정보 로드 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    def load_formulation_items(self, form):
+        """처방 아이템들을 로드합니다"""
+        # 기존 아이템들 삭제
+        for item in self.formulation_item_tree.get_children():
+            self.formulation_item_tree.delete(item)
+        
+        if form.items:
+            print(f"처방 아이템 {len(form.items)}개 로딩 중...")
+            total_amount = Decimal('0')
+            
+            # 정렬할 때 order가 None인 항목이 섞여 있어 TypeError가 발생할 수 있음
+            # None은 마지막에 오도록 튜플 키로 안전하게 정렬합니다.
+            sorted_items = sorted(form.items, key=lambda x: (x.order is None, x.order if x.order is not None else 0))
+            
+            for item in sorted_items:
+                phase = str(item.phase) if item.phase else ""
+                material_code = str(item.material_code) if item.material_code else "---"
+                material_name = str(item.material_name) if item.material_name else "---"
+                
+                # 비율과 양 처리 - None 값 체크 개선
+                if item.ratio is not None:
+                    ratio_str = decimal_to_str_full(to_decimal(item.ratio))
+                else:
+                    ratio_str = "0"
+                    
+                if item.amount is not None:
+                    amount_str = decimal_to_str_full(to_decimal(item.amount))
+                    total_amount += to_decimal(item.amount)
+                else:
+                    amount_str = "0"
+                
+                self.formulation_item_tree.insert("", "end", values=(
+                    phase, material_code, material_name, ratio_str, amount_str
+                ))
+                
+            print(f"처방 아이템 로딩 완료. 총량: {total_amount}")
+            
+            # 총 실험량 필드 업데이트
+            if total_amount > 0:
+                self.main_total_amount_entry.insert(0, decimal_to_str_full(total_amount))
+        else:
+            print("처방 아이템이 없습니다.")
+            
+        # 요약 정보 업데이트
+        self.update_formulation_summary()
+        
+    def set_lab_no(self, form):
+        """LAB NO.를 설정합니다"""
+        if form.lab_no:
+            try:
+                self.lab_no_entry.configure(state="normal")
+                self.lab_no_entry.delete(0, "end")
+                self.lab_no_entry.insert(0, str(form.lab_no))
+                self.lab_no_entry.configure(state="disabled")
+                print(f"LAB NO. 설정 완료: {form.lab_no}")
+            except Exception as e:
+                print(f"LAB NO. 설정 오류: {e}")
+                self.update_lab_no()
+        else:
+            # 저장된 값이 없으면 기존 로직대로 자동 생성
+            self.update_lab_no()
+            
+
 
     def save_formulation(self):
         """폼 데이터를 DB에 저장 (신규/수정)"""
@@ -734,9 +909,9 @@ class FormulationEditPopup(ctk.CTkToplevel):
             for i, item_id in enumerate(self.formulation_item_tree.get_children()):
                 values = self.formulation_item_tree.item(item_id, "values")
                 try:
-                    ratio = float(values[3]) if values[3] != "---" else None
-                    amount = float(values[4]) if values[4] != "---" else None
-                except (ValueError, TypeError):
+                    ratio = to_decimal(values[3]) if values[3] not in ("---", "") else None
+                    amount = to_decimal(values[4]) if values[4] not in ("---", "") else None
+                except (InvalidOperation, ValueError, TypeError):
                     ratio, amount = None, None
 
                 new_item = FormulationItem(
@@ -1174,3 +1349,195 @@ class FormulationEditPopup(ctk.CTkToplevel):
         formulation_data = excel_handler.import_formulation_template()
         if formulation_data:
             self._apply_imported_data_to_ui(formulation_data)
+
+    def start_refresh_timer(self):
+        """데이터 새로고침 타이머를 시작합니다 (5분마다)"""
+        self.refresh_timer = self.after(300000, self.refresh_data_periodically)  # 5분 = 300,000ms
+        
+    def refresh_data_periodically(self):
+        """주기적으로 데이터를 새로고침합니다"""
+        try:
+            # 데이터 로딩 중이거나 편집 중인 경우 새로고침 건너뛰기
+            if self.data_loading:
+                print("데이터 로딩 중이므로 새로고침을 건너뜁니다.")
+                self.start_refresh_timer()
+                return
+                
+            # 활동이 있었던 경우에만 새로고침 (마지막 활동 후 10분 이내)
+            current_time = time.time()
+            if current_time - self.last_activity_time < 600:  # 10분
+                print("사용자 활동이 최근에 있었으므로 데이터 새로고침을 수행합니다.")
+                self.refresh_formulation_data()
+            else:
+                print("사용자 활동이 없어 새로고침을 건너뜁니다.")
+            
+            # 다음 새로고침 스케줄
+            self.start_refresh_timer()
+            
+        except Exception as e:
+            print(f"데이터 새로고침 중 오류: {e}")
+            # 오류가 발생해도 타이머는 계속 실행
+            self.start_refresh_timer()
+    
+    def refresh_formulation_data(self):
+        """처방 데이터를 새로고침합니다"""
+        try:
+            # 현재 편집 중인 경우에는 새로고침하지 않음
+            if self.edit_entry and self.edit_entry.winfo_exists():
+                print("편집 중이므로 새로고침을 건너뜁니다.")
+                return
+                
+            print("처방 데이터 새로고침 중...")
+            
+            # 현재 처방 ID가 있는 경우에만 새로고침
+            if self.formulation_id:
+                # 현재 사용자 입력값들을 저장
+                current_values = self.get_current_form_values()
+                print(f"현재 입력값 저장: {current_values}")
+                
+                # 데이터베이스에서 최신 데이터 로드
+                session = db_manager.get_session()
+                try:
+                    form = session.query(Formulation).filter_by(id=self.formulation_id).first()
+                    if form:
+                        # 기본 정보만 새로고침 (사용자 입력 필드는 유지)
+                        self.load_essential_data_only(form)
+                        print("필수 데이터만 새로고침 완료")
+                    else:
+                        print(f"처방 ID {self.formulation_id}를 찾을 수 없습니다.")
+                finally:
+                    session.close()
+                    
+                # 중요한 사용자 입력값들은 다시 복원
+                self.restore_user_inputs(current_values)
+                print("사용자 입력값 복원 완료")
+            else:
+                print("신규 처방이므로 새로고침을 건너뜁니다.")
+                
+        except Exception as e:
+            print(f"처방 데이터 새로고침 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def load_essential_data_only(self, form):
+        """필수 데이터만 로드합니다 (사용자 입력 필드는 건드리지 않음)"""
+        try:
+            # 변경 이력만 업데이트 (사용자가 직접 수정하지 않는 필드)
+            self.change_log_textbox.configure(state="normal")
+            self.change_log_textbox.delete("1.0", "end")
+            if form.change_log:
+                self.change_log_textbox.insert("1.0", str(form.change_log))
+            else:
+                self.change_log_textbox.insert("1.0", "저장된 변경 이력이 없습니다.")
+            self.change_log_textbox.configure(state="disabled")
+            
+            # 샘플 발송 횟수 업데이트
+            self.sample_sent_count = form.sample_sent_count or 0
+            
+            print("필수 데이터 로드 완료")
+            
+        except Exception as e:
+            print(f"필수 데이터 로드 중 오류: {e}")
+    
+    def get_current_form_values(self):
+        """현재 폼의 입력값들을 저장합니다"""
+        try:
+            return {
+                'exp_name': self.exp_name_entry.get(),
+                'exp_manager': self.exp_manager_entry.get(),
+                'exp_code': self.exp_code_entry.get(),
+                'revision': self.revision_entry.get(),
+                'target_info_checked': self.target_info_var.get(),
+                'target_sample_name': self.target_sample_name_entry.get(),
+                'target_client': self.target_client_entry.get(),
+                'target_ph_initial': self.target_ph_initial_entry.get(),
+                'target_ph_next_day': self.target_ph_next_day_entry.get(),
+                'target_viscosity_initial': self.target_viscosity_initial_entry.get(),
+                'target_viscosity_next_day': self.target_viscosity_next_day_entry.get(),
+                'target_machine': self.target_machine_entry.get(),
+                'exp_ph_initial': self.exp_ph_initial_entry.get(),
+                'exp_ph_next_day': self.exp_ph_next_day_entry.get(),
+                'exp_viscosity_initial': self.exp_viscosity_initial_entry.get(),
+                'exp_viscosity_next_day': self.exp_viscosity_next_day_entry.get(),
+                'exp_machine': self.exp_machine_entry.get(),
+                'exp_comment': self.exp_comment_textbox.get("1.0", "end-1c"),
+                'main_total_amount': self.main_total_amount_entry.get(),
+                'client_type': self.formulation_client_type_combo.get(),
+                'client_name': self.formulation_client_name_combo.get(),
+            }
+        except Exception as e:
+            print(f"현재 폼 값 저장 중 오류: {e}")
+            return {}
+    
+    def restore_user_inputs(self, values):
+        """사용자 입력값들을 복원합니다"""
+        try:
+            if not values:
+                return
+                
+            # 실험명이 사용자가 수정한 것이라면 복원
+            if 'exp_name' in values and values['exp_name'].strip():
+                current_name = self.exp_name_entry.get().strip()
+                if current_name != values['exp_name']:
+                    self.exp_name_entry.delete(0, "end")
+                    self.exp_name_entry.insert(0, values['exp_name'])
+            
+            # 담당자명 복원
+            if 'exp_manager' in values and values['exp_manager'].strip():
+                current_manager = self.exp_manager_entry.get().strip()
+                if current_manager != values['exp_manager']:
+                    self.exp_manager_entry.delete(0, "end")
+                    self.exp_manager_entry.insert(0, values['exp_manager'])
+            
+            # 담당번호 복원
+            if 'exp_code' in values and values['exp_code'].strip():
+                current_code = self.exp_code_entry.get().strip()
+                if current_code != values['exp_code']:
+                    self.exp_code_entry.delete(0, "end")
+                    self.exp_code_entry.insert(0, values['exp_code'])
+                    
+            # 차수 복원
+            if 'revision' in values and values['revision'].strip():
+                current_revision = self.revision_entry.get().strip()
+                if current_revision != values['revision']:
+                    self.revision_entry.delete(0, "end")
+                    self.revision_entry.insert(0, values['revision'])
+            
+            # 타겟 정보 체크박스 상태 복원
+            if 'target_info_checked' in values:
+                self.target_info_var.set(values['target_info_checked'])
+                self.toggle_target_info()
+            
+            # 총 실험량 복원
+            if 'main_total_amount' in values and values['main_total_amount'].strip():
+                current_amount = self.main_total_amount_entry.get().strip()
+                if current_amount != values['main_total_amount']:
+                    self.main_total_amount_entry.delete(0, "end")
+                    self.main_total_amount_entry.insert(0, values['main_total_amount'])
+            
+            # 거래처 정보 복원
+            if 'client_type' in values and values['client_type'] != self.texts['select_type']:
+                self.formulation_client_type_combo.set(values['client_type'])
+                self.update_formulation_client_combo(values['client_type'])
+                
+                if 'client_name' in values and values['client_name'] != self.texts['select_client']:
+                    # 잠깐 대기 후 거래처명 설정
+                    self.after(50, lambda: self.formulation_client_name_combo.set(values['client_name']))
+            
+            print("사용자 입력값 복원 완료")
+            
+        except Exception as e:
+            print(f"사용자 입력값 복원 중 오류: {e}")
+    
+    def on_user_activity(self, event=None):
+        """사용자 활동 시간을 업데이트합니다"""
+        self.last_activity_time = time.time()
+        # print(f"사용자 활동 감지: {datetime.fromtimestamp(self.last_activity_time).strftime('%H:%M:%S')}")
+        
+    def destroy(self):
+        """창 종료 시 타이머 정리"""
+        if self.refresh_timer:
+            self.after_cancel(self.refresh_timer)
+            self.refresh_timer = None
+        print("처방 편집 창이 종료되었습니다.")
+        super().destroy()

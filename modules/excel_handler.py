@@ -810,6 +810,171 @@ def import_formulation_template():
         ClipboardErrorDialog(None, title="가져오기 오류", error_message=f"파일을 읽는 중 오류가 발생했습니다:\n\n{e}")
         return None
 
+def export_ingredient_report_multiple(products_data):
+    """여러 제품의 원료목록 보고서 데이터를 템플릿 형식의 엑셀 파일로 내보냅니다."""
+    if not products_data:
+        messagebox.showwarning("데이터 없음", "내보낼 제품 데이터가 없습니다.")
+        return
+    
+    default_filename = f"원료목록보고서_{len(products_data)}개제품.xlsx"
+    initial_dir = get_excel_path()
+    timestamped_filename = get_timestamped_filename(default_filename)
+    file_path = filedialog.asksaveasfilename(
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        initialdir=initial_dir,
+        initialfile=timestamped_filename,
+        title="원료목록 보고서 저장"
+    )
+    if not file_path:
+        return
+
+    save_excel_path(os.path.dirname(file_path))
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "원료목록보고서"
+
+        # --- 스타일 정의 ---
+        header_font = Font(name='맑은 고딕', size=11, bold=True)
+        default_font = Font(name='맑은 고딕', size=10)
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+        # --- 헤더 작성 ---
+        headers = [
+            "일련번호", "제품명", "유형표시", "기능성화장품유형", "기능성화장품품목코드",
+            "제조업자상호", "원료성분명", "용도(E:수출용)", "맞춤형내용물(C1:혼합용/C2:소분용)"
+        ]
+        for col_idx, header_text in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header_text)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+
+        # --- 여러 제품의 데이터 작성 ---
+        current_row = 2
+        for product_data in products_data:
+            items = product_data.get('items', [])
+            for item in items:
+                row_data = [
+                    item.get("일련번호"),
+                    product_data.get("제품명"),
+                    product_data.get("유형표시"),
+                    product_data.get("기능성화장품유형"),
+                    product_data.get("기능성화장품품목코드"),
+                    product_data.get("제조업자상호"),
+                    item.get("원료성분명"),
+                    item.get("용도(E:수출용)"),
+                    item.get("맞춤형내용물(C1:혼합용/C2:소분용)")
+                ]
+                for col_idx, cell_value in enumerate(row_data, 1):
+                    cell = ws.cell(row=current_row, column=col_idx, value=cell_value)
+                    cell.font = default_font
+                    cell.alignment = left_align
+                current_row += 1
+
+        # --- 컬럼 너비 자동 조절 ---
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if cell.value:
+                        length = _get_display_length(cell.value)
+                        if length > max_length:
+                            max_length = length
+                except:
+                    pass
+            adjusted_width = max_length + 2
+            ws.column_dimensions[column].width = adjusted_width
+
+        wb.save(file_path)
+        messagebox.showinfo("성공", f"원료목록 보고서가 '{file_path}'에 저장되었습니다.\n총 {len(products_data)}개 제품, {current_row-2}개 원료성분")
+    except Exception as e:
+        messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+
+def export_ingredient_report(report_data):
+    """원료목록 보고서 데이터를 템플릿 형식의 엑셀 파일로 내보냅니다."""
+    default_filename = f"{report_data.get('제품명', '화장품')}_원료목록보고서.xlsx"
+    initial_dir = get_excel_path()
+    timestamped_filename = get_timestamped_filename(default_filename)
+    file_path = filedialog.asksaveasfilename(
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        initialdir=initial_dir,
+        initialfile=timestamped_filename,
+        title="원료목록 보고서 저장"
+    )
+    if not file_path:
+        return
+
+    save_excel_path(os.path.dirname(file_path))
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "원료목록보고서"
+
+        # --- 스타일 정의 ---
+        header_font = Font(name='맑은 고딕', size=11, bold=True)
+        default_font = Font(name='맑은 고딕', size=10)
+        center_align = Alignment(horizontal='center', vertical='center')
+        left_align = Alignment(horizontal='left', vertical='center')
+        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+
+        # --- 헤더 작성 ---
+        headers = [
+            "일련번호", "제품명", "유형표시", "기능성화장품유형", "기능성화장품품목코드",
+            "제조업자상호", "원료성분명", "용도(E:수출용)", "맞춤형내용물(C1:혼합용/C2:소분용)"
+        ]
+        for col_idx, header_text in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header_text)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+
+        # --- 데이터 작성 ---
+        items = report_data.get('items', [])
+        for row_idx, item in enumerate(items, 2):
+            row_data = [
+                item.get("일련번호"),
+                report_data.get("제품명"),
+                report_data.get("유형표시"),
+                report_data.get("기능성화장품유형"),
+                report_data.get("기능성화장품품목코드"),
+                report_data.get("제조업자상호"),
+                item.get("원료성분명"),
+                item.get("용도(E:수출용)"),
+                item.get("맞춤형내용물(C1:혼합용/C2:소분용)")
+            ]
+            for col_idx, cell_value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=cell_value)
+                cell.font = default_font
+                cell.alignment = left_align
+
+        # --- 컬럼 너비 자동 조절 ---
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if cell.value:
+                        length = _get_display_length(cell.value)
+                        if length > max_length:
+                            max_length = length
+                except:
+                    pass
+            adjusted_width = max_length + 2
+            ws.column_dimensions[column].width = adjusted_width
+
+        wb.save(file_path)
+        messagebox.showinfo("성공", f"원료목록 보고서가 '{file_path}'에 저장되었습니다.")
+    except Exception as e:
+        messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+
 def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx"):
     """견적서 데이터를 특정 템플릿 형식의 엑셀 파일로 내보냅니다."""
     initial_dir = get_excel_path()
@@ -1148,45 +1313,51 @@ def export_functional_cosmetics_report_template(report_data=None):
         ws = wb.active
         ws.title = "기능성심사제외보고서"
 
-        # --- Styles from generate_semi_product_report ---
-        title_font = Font(name='맑은 고딕', size=18, bold=True)
-        header_font = Font(name='맑은 고딕', size=11, bold=True, color="FFFFFF")
-        label_font = Font(name='맑은 고딕', size=10, bold=True)
-        cell_font = Font(name='맑은 고딕', size=10)
+        # --- Styles ---
+        title_font = Font(name='맑은 고딕', size=16, bold=True)
+        header_font = Font(name='맑은 고딕', size=11, bold=True)
+        default_font = Font(name='맑은 고딕', size=10)
         
-        center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        left_align = Alignment(horizontal="left", vertical="center", indent=1, wrap_text=True)
+        center_align = Alignment(horizontal='center', vertical='center')
         left_align_top_wrap = Alignment(horizontal='left', vertical='top', wrap_text=True)
-
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-        label_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-
-        def apply_style_to_range(ws, cell_range, font=None, border=None, fill=None, alignment=None):
-            rows = ws[cell_range]
-            if not isinstance(rows, tuple):
-                rows = ((rows,),)
-            for row in rows:
-                for cell in row:
-                    if font: cell.font = font
-                    if border: cell.border = border
-                    if fill: cell.fill = fill
-                    if alignment: cell.alignment = alignment
         
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
         # --- Column widths ---
-        ws.column_dimensions['A'].width = 25
-        ws.column_dimensions['B'].width = 25
-        ws.column_dimensions['C'].width = 60
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 45
+        ws.column_dimensions['C'].width = 50
 
         # --- Title ---
-        ws.merge_cells("A1:C2")
+        ws.merge_cells("A1:C1")
         title_cell = ws['A1']
         title_cell.value = "기능성화장품 심사제외품목 보고서"
         title_cell.font = title_font
         title_cell.alignment = center_align
         ws.row_dimensions[1].height = 30
 
-        row_idx = 4
+        row_idx = 3
+
+        def write_row_and_style(r_idx, values, is_header=False):
+            """Helper to write a row and apply styles"""
+            cells = []
+            for c_idx, value in enumerate(values, 1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
+                cells.append(cell)
+            
+            for cell in cells:
+                cell.border = thin_border
+                cell.font = default_font
+                cell.alignment = left_align_top_wrap
+            
+            if is_header and cells:
+                cells[0].font = header_font
+            
+            # Auto row height for multiline content in the last cell
+            if len(values) > 2 and values[2] and isinstance(values[2], str):
+                num_lines = values[2].count('\n') + 1
+                if num_lines > 1:
+                    ws.row_dimensions[r_idx].height = 15 * num_lines
 
         # --- Data Parsing ---
         spf_pa_text = report_data.get("자외선 관련 (SPF / PA)", "")
@@ -1202,45 +1373,62 @@ def export_functional_cosmetics_report_template(report_data=None):
 
         # --- Report Layout ---
         layout = [
-            ("제출유형", report_data.get("제출유형")),
-            ("업체명", report_data.get("업체명")),
-            ("책임판매업자", report_data.get("책임판매업자")),
-            ("제조원", report_data.get("제조원")),
-            ("제품명(국문)", report_data.get("제품명(국문)")),
-            ("제품명(영문)", report_data.get("제품명(영문)")),
-            ("제형", report_data.get("제형")),
-            ("효능·효과", effects),
-            ("자외선 관련 (SPF / PA)", spf_pa_text),
-            ("pH (실측값)", report_data.get("pH (실측값)")),
-            ("이미 심사받은 품목", report_data.get("이미 심사받은 품목")),
-            ("고시한 기준 및 시험방법", report_data.get("고시한 기준 및 시험방법")),
-            ("활성물질용량", report_data.get("활성물질용량")),
-            ("용법·용량", report_data.get("용법·용량")),
-            ("사용할 때의 주의사항", report_data.get("사용할 때의 주의사항")),
-            ("원료성분 및 배합비율", report_data.get("원료성분 및 배합비율")),
+            ("보고정보", "제품명", report_data.get("제품명(국문)")),
+            (None, "제품의 pH 기준치", report_data.get("pH (실측값)")),
+            (None, "대상구분", report_data.get("제출유형")),
+            ("제10조 제1항 제3호에 해당하는 경우", "이미 심사받은 품목", report_data.get("이미 심사받은 품목")),
+            (None, "활성물질용량", report_data.get("활성물질용량")),
+            (None, "자외선차단지수(SPF)", spf),
+            (None, "자외선 A차단등급(PA)", pa),
+            (None, "고시한 기준 및 시험방법", report_data.get("고시한 기준 및 시험방법")),
+            (None, "효능효과", effects),
+            (None, "용법용량", report_data.get("용법·용량")),
+            (None, "사용할 때의 주의사항", report_data.get("사용할 때의 주의사항")),
+            ("총량관리", "자동 입력", ""),
         ]
 
-        for label, value in layout:
-            ws.merge_cells(start_row=row_idx, start_column=2, end_row=row_idx, end_column=3)
+        # --- Write data and merge cells ---
+        merge_start_row = 3
+        for val_a, val_b, val_c in layout:
+            if val_a is not None and row_idx > merge_start_row:
+                ws.merge_cells(start_row=merge_start_row, start_column=1, end_row=row_idx - 1, end_column=1)
+                ws.cell(merge_start_row, 1).alignment = left_align_top_wrap
+                merge_start_row = row_idx
             
-            label_cell = ws.cell(row=row_idx, column=1, value=label)
-            value_cell = ws.cell(row=row_idx, column=2, value=value)
-            
-            apply_style_to_range(ws, f"A{row_idx}:C{row_idx}", border=thin_border)
-            
-            label_cell.font = label_font
-            label_cell.fill = label_fill
-            label_cell.alignment = center_align
-            
-            value_cell.font = cell_font
-            value_cell.alignment = left_align_top_wrap
-
-            if value and isinstance(value, str):
-                num_lines = value.count('\n') + 1
-                if num_lines > 1:
-                    ws.row_dimensions[row_idx].height = 15 * num_lines
-            
+            write_row_and_style(row_idx, [val_a, val_b, val_c], is_header=(val_a is not None))
             row_idx += 1
+        ws.merge_cells(start_row=merge_start_row, start_column=1, end_row=row_idx - 1, end_column=1)
+        ws.cell(merge_start_row, 1).alignment = left_align_top_wrap
+
+        # --- Section: 원료성분 및 배합 비율 ---
+        start_row = row_idx
+        
+        ingredients_text = report_data.get("원료성분 및 배합비율", "")
+        ingredients_list = []
+        if ingredients_text and "예시:" not in ingredients_text:
+            for line in ingredients_text.splitlines():
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    name = parts[0].strip()
+                    amount = parts[1].strip()
+                    ingredients_list.append((name, amount))
+                elif line.strip():
+                    ingredients_list.append((line.strip(), ""))
+        
+        if not ingredients_list:
+            write_row_and_style(row_idx, ["원료성분 및 배합 비율", "(내용 없음)", ""], is_header=True)
+            ws.merge_cells(start_row=row_idx, start_column=2, end_row=row_idx, end_column=3)
+            row_idx += 1
+        else:
+            first_ing_name, first_ing_amount = ingredients_list[0]
+            write_row_and_style(row_idx, ["원료성분 및 배합 비율", first_ing_name, first_ing_amount], is_header=True)
+            row_idx += 1
+            for name, amount in ingredients_list[1:]:
+                write_row_and_style(row_idx, [None, name, amount])
+                row_idx += 1
+
+        ws.merge_cells(start_row=start_row, start_column=1, end_row=row_idx - 1, end_column=1)
+        ws.cell(start_row, 1).alignment = left_align_top_wrap
 
         wb.save(file_path)
         messagebox.showinfo("성공", f"보고서 파일이 '{file_path}'에 저장되었습니다.")

@@ -255,8 +255,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.help_button.place(relx=0.98, y=10, anchor="ne")
 
         # '처방 관리'와 '문서' 탭을 추가합니다.
-        self.tab_view.add(self.texts["formulation_mgt"])
-        self.tab_view.add(self.texts["document_sub"])
+        self.tab_map = {
+            self.texts["formulation_mgt"]: "document/formulation_mgt",
+            self.texts["document_sub"]: "document/document_sub"
+        }
+        for tab_name in self.tab_map.keys():
+            self.tab_view.add(tab_name)
 
         # 탭 설정
         self.setup_formulation_tab(self.tab_view.tab(self.texts["formulation_mgt"]))
@@ -289,12 +293,27 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
     def on_tab_change(self):
         selected_tab = self.tab_view.get()
-        # 현재 선택된 탭의 활동을 기록합니다.
-        self.app.record_action(f"document/{selected_tab}")
+        # 탭 이름에 해당하는 고유 키를 찾아서 활동을 기록합니다.
+        static_key = self.tab_map.get(selected_tab)
+        if static_key:
+            self.app.record_action(static_key)
 
     def switch_to_tab(self, tab_name):
         if tab_name in self.tab_view._name_list: # pylint: disable=protected-access
             self.tab_view.set(tab_name)
+
+    def refresh_data(self):
+        """문서 관리 프레임의 데이터를 새로고침합니다."""
+        print("문서 관리 프레임 데이터 새로고침...")
+        try:
+            # 처방 목록 및 폴더 뷰를 새로고침합니다.
+            self.load_formulations()
+            # 클라이언트 필터 드롭다운을 새로고침합니다.
+            self.refresh_formulation_filters()
+            # 다른 탭들의 내용도 초기화/새로고침합니다.
+            self.reset_selection_and_tabs()
+        except Exception as e:
+            print(f"[오류] 문서 관리 프레임 새로고침 실패: {e}")
 
     def refresh_formulation_filters(self):
         print("처방 필터 새로고침...")
@@ -549,37 +568,23 @@ class DocumentManagementFrame(ctk.CTkFrame):
             formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
             if not formulation: return
 
-            # 중복 원료 합산을 위한 딕셔너리
-            aggregated_materials = {}
+            # item.order를 기준으로 처방 항목을 정렬합니다. None인 경우 마지막으로 보냅니다.
+            sorted_items = sorted(formulation.items, key=lambda i: i.order if i.order is not None else float('inf'))
 
-            for item in formulation.items:
-                if not item.material_code or item.material_code == "---":
-                    continue
+            for item in sorted_items:
+                if not item.material_code or item.material_code == "---": continue
+                
+                material = session.query(Material).filter_by(code=item.material_code).first()
+                unit_price = material.unit_price if material else 0.0
 
-                # to_decimal을 사용하여 item.ratio를 Decimal로 변환
-                current_ratio = to_decimal(item.ratio)
-
-                if item.material_code in aggregated_materials:
-                    # 이미 추가된 원료이면 함량만 더함
-                    aggregated_materials[item.material_code]['ratio'] += current_ratio
-                else:
-                    # 새로 추가되는 원료
-                    material = session.query(Material).filter_by(code=item.material_code).first()
-                    unit_price = material.unit_price if material else 0.0
-                    aggregated_materials[item.material_code] = {
-                        'phase': item.phase or "",
-                        'material_name': item.material_name,
-                        'ratio': current_ratio,
-                        'unit_price': unit_price
-                    }
-
-            # 합산된 원료를 Treeview에 추가
-            for code, data in aggregated_materials.items():
                 self.quotation_tree.insert("", "end", values=(
-                    data['phase'], code, data['material_name'], f"{data['ratio']:.4f}", f"{data['unit_price'] or 0:,.0f}", "0.00"
+                    item.phase or "", item.material_code, item.material_name, f"{item.ratio:.4f}", f"{unit_price or 0:,.0f}", "0.00"
                 ))
             
             self.recalculate_quotation()
+            
+            # [추가] '구분' 열을 행 번호로 정규화하여 순서대로 표시합니다.
+            self.app.normalize_group_column_to_row_numbers(self.quotation_tree, header_name='구분', force=True)
 
         except Exception as e:
             messagebox.showerror(self.texts['quotation_creation_error'], f"{self.texts['quotation_creation_error_msg']}: {e}", parent=self)
@@ -587,7 +592,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             session.close()
 
     def recalculate_quotation(self):
-        """현재 Treeview의 내용을 바탕으로 원가와 최종 가격을 다시 계산합니다."""
+        """현재 Treeview의 내용을 바탕으로 원가와 최종 가격을 다시 계산합니다. (중복 원료 자동 합산)"""
         try:
             total_weight = float(self.quotation_weight_entry.get())
         except (ValueError, TypeError):
@@ -601,20 +606,86 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.price_with_profit_label.configure(text="0 원")
             return
 
-        total_raw_cost = 0.0
-        total_ratio = 0.0
+        print("[견적계산] 중복 원료 합산 처리 시작")
+        
+        # 중복 원료 합산 로직
+        material_groups = {}
+        duplicate_count = 0
+        
+        # 1단계: 같은 원료 코드끼리 그룹화하여 합산
         for item_id in self.quotation_tree.get_children():
             values = self.quotation_tree.item(item_id, "values")
             try:
-                ratio = float(values[3])
-                total_ratio += ratio
-                unit_price = float(values[4].replace(",", ""))
-                cost = (ratio / 100.0) * (total_weight / 1000.0) * unit_price # 1g당 원가 계산
-                total_raw_cost += cost
-                # Treeview의 원가 컬럼 업데이트
-                self.quotation_tree.item(item_id, values=(values[0], values[1], values[2], values[3], f"{unit_price:,.0f}", f"{cost:,.2f}"))
-            except (ValueError, TypeError, IndexError):
+                material_code = values[1].strip()  # 원료 코드 (공백 제거)
+                material_name = values[2].strip()  # 원료명
+                ratio = float(values[3])   # 함량
+                unit_price_str = str(values[4]).replace(",", "").strip()
+                unit_price = float(unit_price_str) if unit_price_str else 0.0
+                
+                # 빈 코드나 구분선은 건너뛰기
+                if not material_code or material_code == "---":
+                    continue
+                
+                # 같은 원료 코드가 있으면 함량 합산
+                if material_code in material_groups:
+                    print(f"[견적계산] 중복 원료 발견: {material_code} ({material_name}) - 함량 {material_groups[material_code]['ratio']:.4f}% + {ratio:.4f}%")
+                    material_groups[material_code]['ratio'] += ratio
+                    material_groups[material_code]['duplicate_items'].append(item_id)
+                    duplicate_count += 1
+                else:
+                    material_groups[material_code] = {
+                        'phase': values[0],
+                        'name': material_name,
+                        'ratio': ratio,
+                        'unit_price': unit_price,
+                        'original_item_id': item_id,
+                        'duplicate_items': []  # 중복된 항목들의 ID 목록
+                    }
+                    
+            except (ValueError, TypeError, IndexError) as e:
+                print(f"[견적계산] 항목 처리 중 오류 (항목 {item_id}): {e}")
                 continue
+
+        if duplicate_count > 0:
+            print(f"[견적계산] 총 {duplicate_count}개의 중복 원료 발견, 합산 처리 중...")
+
+        # 2단계: 중복 항목 제거 및 합산된 결과로 업데이트
+        total_raw_cost = 0.0
+        total_ratio = 0.0
+        updated_items = []
+        
+        for material_code, material_info in material_groups.items():
+            ratio = material_info['ratio']
+            unit_price = material_info['unit_price']
+            total_ratio += ratio
+            
+            # 원가 계산: (함량% / 100) * (총중량 / 1000kg) * 단가(원/kg)
+            cost = (ratio / 100.0) * (total_weight / 1000.0) * unit_price
+            total_raw_cost += cost
+            
+            # 원래 항목 업데이트 (첫 번째 발견된 항목만 업데이트)
+            original_item_id = material_info['original_item_id']
+            if self.quotation_tree.exists(original_item_id):
+                self.quotation_tree.item(original_item_id, values=(
+                    material_info['phase'],
+                    material_code,
+                    material_info['name'],
+                    f"{ratio:.4f}",  # 합산된 함량
+                    f"{unit_price:,.0f}",
+                    f"{cost:,.2f}"
+                ))
+                updated_items.append((material_code, ratio))
+            
+            # 중복 항목들 삭제
+            for dup_item_id in material_info['duplicate_items']:
+                if self.quotation_tree.exists(dup_item_id):
+                    self.quotation_tree.delete(dup_item_id)
+                    print(f"[견적계산] 중복 항목 삭제: {material_code}")
+
+        if duplicate_count > 0:
+            print(f"[견적계산] 중복 원료 합산 완료: {len(updated_items)}개 원료")
+            for code, final_ratio in updated_items:
+                print(f"  - {code}: 최종 함량 {final_ratio:.4f}%")
 
         # 최종 가격 계산 및 표시
         self.quotation_total_ratio_label.configure(text=f"{total_ratio:.4f} %")
@@ -927,6 +998,52 @@ class DocumentManagementFrame(ctk.CTkFrame):
             if self.current_user.is_admin:
                 self.delete_button.configure(state="normal" if selection_count > 0 else "disabled")
             self.reset_selection_button.configure(state="normal" if selection_count > 0 else "disabled")
+
+    def sort_treeview_column(self, tree, col, reverse):
+        """Treeview의 컬럼을 클릭하여 정렬하는 함수"""
+        try:
+            # 컬럼의 데이터와 아이템 ID를 리스트로 추출
+            l = [(tree.set(k, col), k) for k in tree.get_children('')]
+            
+            # 데이터 타입을 확인하여 정렬 (숫자 > 문자)
+            try:
+                # 숫자 변환 시도 (소수점, 콤마 등 처리)
+                l.sort(key=lambda t: float(str(t[0]).replace(',','')), reverse=reverse)
+            except (ValueError, TypeError):
+                # 숫자 변환 실패 시 문자열로 정렬
+                l.sort(key=lambda t: str(t[0]), reverse=reverse)
+
+            # 정렬된 순서대로 아이템을 다시 삽입
+            for index, (val, k) in enumerate(l):
+                tree.move(k, '', index)
+
+            # 정렬 방향을 다음 클릭을 위해 반대로 설정
+            tree.heading(col, command=lambda: self.sort_treeview_column(tree, col, not reverse))
+        except Exception as e:
+            print(f"Treeview 정렬 오류: {e}")
+
+    def sort_treeview_column(self, tree, col, reverse):
+        """Treeview의 컬럼을 클릭하여 정렬하는 함수"""
+        try:
+            # 컬럼의 데이터와 아이템 ID를 리스트로 추출
+            l = [(tree.set(k, col), k) for k in tree.get_children('')]
+            
+            # 데이터 타입을 확인하여 정렬 (숫자 > 문자)
+            try:
+                # 숫자 변환 시도 (소수점, 콤마 등 처리)
+                l.sort(key=lambda t: float(str(t[0]).replace(',','')), reverse=reverse)
+            except (ValueError, TypeError):
+                # 숫자 변환 실패 시 문자열로 정렬
+                l.sort(key=lambda t: str(t[0]), reverse=reverse)
+
+            # 정렬된 순서대로 아이템을 다시 삽입
+            for index, (val, k) in enumerate(l):
+                tree.move(k, '', index)
+
+            # 정렬 방향을 다음 클릭을 위해 반대로 설정
+            tree.heading(col, command=lambda: self.sort_treeview_column(tree, col, not reverse))
+        except Exception as e:
+            print(f"Treeview 정렬 오류: {e}")
 
     def create_folder_card(self, master, folder_name, count):
         """슬라이더 값에 따라 크기가 조절되는 폴더 카드 위젯을 생성합니다."""
@@ -2042,12 +2159,19 @@ class DocumentManagementFrame(ctk.CTkFrame):
         excel_handler.export_functional_cosmetics_report_template(report_data)
 
     def setup_functional_report_tab(self, tab_frame):
-        """기능성 보고/참고 자료 탭의 UI를 설정합니다."""
+        """기능성 보고/참고 자료 탭의 UI를 COA 반제품 템플릿과 유사하게 재구성합니다."""
         tab_frame.grid_columnconfigure(0, weight=1)
-        tab_frame.grid_rowconfigure(0, weight=1)
+        tab_frame.grid_rowconfigure(1, weight=1) # 스크롤 프레임
 
+        # --- 상단 버튼 프레임 ---
+        top_button_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
+        top_button_frame.grid(row=0, column=0, padx=10, pady=10, sticky="e")
+        ctk.CTkButton(top_button_frame, text=self.texts['export_report'], command=self.export_functional_report).pack(side="left", padx=5)
+        ctk.CTkButton(top_button_frame, text=self.texts['reset'], command=self.clear_functional_report_form, fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
+
+        # --- 스크롤 가능한 메인 프레임 ---
         scrollable_frame = ctk.CTkScrollableFrame(tab_frame, label_text=self.texts['functional_report_title'])
-        scrollable_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        scrollable_frame.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         scrollable_frame.grid_columnconfigure(0, weight=1)
 
         self.report_entries = {}
@@ -2057,89 +2181,73 @@ class DocumentManagementFrame(ctk.CTkFrame):
         info_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 20))
         info_frame.grid_columnconfigure((1, 3), weight=1)
 
-        fields_info_top = [
-            ("제출유형", ["1호 (고시품목)", "2호 (심사품목)", "3호 (혼합)"], "combo"),
-            ("업체명", "", "entry"),
-            ("책임판매업자", "", "entry"),
-            ("제조원", "", "entry"),
-            ("제품명(국문)", "", "entry"),
-            ("제품명(영문)", "", "entry"),
-            ("제형", ["액제", "로션", "크림", "에센스", "쿠션", "에어로졸"], "combo"),
-            ("자외선 관련 (SPF / PA)", "", "entry"),
-            ("pH (실측값)", "", "entry"),
-            ("이미 심사받은 품목", "", "entry"),
-            ("고시한 기준 및 시험방법", "", "entry"),
+        info_fields = [
+            ("제출유형", ["1호 (고시품목)", "2호 (심사품목)", "3호 (혼합)"], "combo", 0, 0),
+            ("업체명", "", "entry", 0, 2),
+            ("책임판매업자", "", "entry", 1, 0),
+            ("제조원", "", "entry", 1, 2),
+            ("제품명(국문)", "", "entry", 2, 0),
+            ("제품명(영문)", "", "entry", 2, 2),
+            ("제형", ["액제", "로션", "크림", "에센스", "쿠션", "에어로졸"], "combo", 3, 0),
+            ("자외선 관련 (SPF / PA)", "", "entry", 3, 2),
+            ("pH (실측값)", "", "entry", 4, 0),
+            ("이미 심사받은 품목", "", "entry", 4, 2),
+            ("고시한 기준 및 시험방법", "", "entry", 5, 0, 3), # 3칸 병합
         ]
-        
-        row = 0
-        for i in range(0, len(fields_info_top), 2):
-            # First item in row
-            label_text, options, widget_type = fields_info_top[i]
-            ctk.CTkLabel(info_frame, text=label_text, font=ctk.CTkFont(weight="bold")).grid(row=row, column=0, padx=10, pady=5, sticky="w")
+
+        for field_info in info_fields:
+            label_text, options, widget_type, r, c = field_info[:5]
+            colspan = field_info[5] if len(field_info) > 5 else 1
+
+            label = ctk.CTkLabel(info_frame, text=label_text, font=ctk.CTkFont(weight="bold"))
+            label.grid(row=r, column=c, padx=10, pady=5, sticky="w")
+            
             if widget_type == "combo":
                 widget = ctk.CTkComboBox(info_frame, values=options)
                 widget.set(options[0])
             else:
                 widget = ctk.CTkEntry(info_frame)
-            widget.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+
+            widget.grid(row=r, column=c + 1, columnspan=colspan, padx=10, pady=5, sticky="ew")
             self.report_entries[label_text] = widget
 
-            # Second item in row
-            if i + 1 < len(fields_info_top):
-                label_text, options, widget_type = fields_info_top[i+1]
-                ctk.CTkLabel(info_frame, text=label_text, font=ctk.CTkFont(weight="bold")).grid(row=row, column=2, padx=10, pady=5, sticky="w")
-                if widget_type == "combo":
-                    widget = ctk.CTkComboBox(info_frame, values=options)
-                    widget.set(options[0])
-                else:
-                    widget = ctk.CTkEntry(info_frame)
-                widget.grid(row=row, column=3, padx=10, pady=5, sticky="ew")
-                self.report_entries[label_text] = widget
-            row += 1
-
-        # --- 효능·효과 (Checkbox) ---
+        # --- 효능·효과 섹션 ---
         effects_frame = ctk.CTkFrame(scrollable_frame)
         effects_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
-        effects_frame.grid_columnconfigure(1, weight=1)
+        effects_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(effects_frame, text="효능·효과", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(5,0))
         
-        label_text, options, widget_type = ("효능·효과", ["자외선차단", "미백", "주름개선", "탈모증상 완화", "여드름성 피부 완화"], "checkbox")
-        ctk.CTkLabel(effects_frame, text=label_text, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        effects_checkbox_frame = ctk.CTkFrame(effects_frame, fg_color="transparent")
+        effects_checkbox_frame.pack(fill="x", padx=10, pady=5)
         
-        checkbox_frame = ctk.CTkFrame(effects_frame, fg_color="transparent")
-        checkbox_frame.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
-        widget = {}
-        for idx, option_text in enumerate(options):
-            var = tk.BooleanVar()
-            chk = ctk.CTkCheckBox(checkbox_frame, text=option_text, variable=var)
+        effects_options = ["자외선차단", "미백", "주름개선", "탈모증상 완화", "여드름성 피부 완화"]
+        effects_widget = {}
+        for option_text in effects_options:
+            var = ctk.BooleanVar()
+            chk = ctk.CTkCheckBox(effects_checkbox_frame, text=option_text, variable=var)
             chk.pack(side="left", padx=(0, 15))
-            widget[option_text] = var
-        self.report_entries[label_text] = widget
+            effects_widget[option_text] = var
+        self.report_entries["효능·효과"] = effects_widget
 
-        # --- Textbox Fields ---
-        textbox_frame = ctk.CTkFrame(scrollable_frame)
-        textbox_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
-        textbox_frame.grid_columnconfigure(1, weight=1)
+        # --- 상세 설명 섹션 ---
+        details_frame = ctk.CTkFrame(scrollable_frame)
+        details_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
+        details_frame.grid_columnconfigure(1, weight=1)
 
         textbox_fields = [
-            ("활성물질용량", "예시:\n총 에칠헥실트리아존으로서 4.00그램\n총 폴리실리콘-15로서 3.00그램"),
-            ("용법·용량", "본품 적당량을 취해 피부에 골고루 펴 바른다."),
-            ("사용할 때의 주의사항", "1. 화장품 사용 시 또는 사용 후 직사광선에 의하여 사용부위가 붉은 반점, 부어오름 또는 가려움증 등의 이상 증상이나 부작용이 있는 경우에는 전문의 등과 상담할 것\n\n2. 상처가 있는 부위 등에는 사용을 자제할 것\n\n3. 보관 및 취급시의 주의 사항\n가. 어린이의 손이 닿지 않는 곳에 보관할 것\n나. 직사광선을 피해서 보관할 것"),
-            ("원료성분 및 배합비율", "예시:\n나이아신아마이드: 2g\n아데노신: 0.04g"),
+            ("활성물질용량", "예시:\n총 에칠헥실트리아존으로서 4.00그램\n총 폴리실리콘-15로서 3.00그램", 0),
+            ("용법·용량", self.texts['usage_default'], 1),
+            ("사용할 때의 주의사항", self.texts['precautions_default'], 2),
+            ("원료성분 및 배합비율", self.texts['ingredients_ratio_default'], 3),
         ]
 
-        for i, (label_text, default_text) in enumerate(textbox_fields):
-            ctk.CTkLabel(textbox_frame, text=label_text, font=ctk.CTkFont(weight="bold")).grid(row=i, column=0, padx=10, pady=10, sticky="nw")
-            widget = ctk.CTkTextbox(textbox_frame, height=80)
-            widget.insert("1.0", default_text)
-            widget.grid(row=i, column=1, padx=10, pady=10, sticky="ew")
+        for label_text, default_value, r in textbox_fields:
+            label = ctk.CTkLabel(details_frame, text=label_text, font=ctk.CTkFont(weight="bold"))
+            label.grid(row=r, column=0, padx=10, pady=10, sticky="nw")
+            widget = ctk.CTkTextbox(details_frame, height=80)
+            widget.insert("1.0", default_value)
+            widget.grid(row=r, column=1, padx=10, pady=10, sticky="ew")
             self.report_entries[label_text] = widget
-
-        # --- 하단 버튼 프레임 ---
-        button_frame = ctk.CTkFrame(tab_frame)
-        button_frame.grid(row=1, column=0, padx=10, pady=10, sticky="e")
-
-        ctk.CTkButton(button_frame, text=self.texts['export_report'], command=self.export_functional_report).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text=self.texts['reset'], command=self.clear_functional_report_form, fg_color="gray50", hover_color="gray35").pack(side="left", padx=5)
 
     def setup_lab_journal_tab(self, tab_frame):
         """물성치 및 실험일지 탭의 UI를 설정합니다."""

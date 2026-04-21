@@ -1,8 +1,6 @@
 import customtkinter as ctk
 import os
 import sys
-import tkinter as tk
-from tkinter import messagebox
 
 # 프로젝트 루트 경로를 sys.path에 추가 (상대 경로 import를 위함)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,89 +15,33 @@ import base64
 
 class LoginWindow(ctk.CTkToplevel):
     def __init__(self, master=None, on_login_success=None, config_path=None):
-        print(f"{datetime.now()}: LoginWindow 초기화 시작")
-        
-        # 부모 클래스 초기화 전에 변수 저장
-        self._master = master
-        self._on_login_success = on_login_success
-        self._config_path = config_path
-        
-        # 부모 클래스 초기화
         super().__init__(master)
-        
-        # 기본 창 설정
+        print(f"{datetime.now()}: LoginWindow 초기화 시작")
         self.title("로그인")
+        self.geometry("400x500")  # 크기 약간 증가
         self.resizable(False, False)
-        
-        # 윈도우 크기 및 위치 설정
-        window_width = 400
-        window_height = 500
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
-        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        
-        # 초기화 직후 업데이트
-        self.update_idletasks()
-        
-        # 나머지 초기화는 지연 실행
-        self.after(100, self._complete_init)
-        
-        print(f"{datetime.now()}: LoginWindow 기본 초기화 완료")
-    
-    def _complete_init(self):
-        """지연된 초기화를 완료하는 메서드"""
+
+        self.on_login_success = on_login_success
+        self.config_path = config_path
+        self.config = configparser.ConfigParser()
         try:
-            # Config 파일 설정
-            self.config = configparser.ConfigParser()
-            if os.path.exists(self._config_path):
-                self.config.read(self._config_path, encoding='utf-8')
+            if os.path.exists(self.config_path):
+                self.config.read(self.config_path, encoding='utf-8')  # 인코딩 명시
                 print(f"{datetime.now()}: config.ini 읽기 성공")
             else:
                 print(f"{datetime.now()}: config.ini 파일이 없어 새로 생성합니다.")
                 self.config.add_section('User')
-            
-            # UI 설정
-            self.setup_ui()
-            self.load_last_user_info()
-            
-            # 자동 로그인 체크
-            self.check_auto_login()
-            
-            # 윈도우 설정
-            self.attributes('-topmost', True)
-            self.grab_set()
-            self.focus_force()
-            
-            # 창 닫기 이벤트 설정
-            self.protocol("WM_DELETE_WINDOW", self.on_closing)
-            
         except Exception as e:
-            print(f"LoginWindow 초기화 중 오류 발생: {e}")
-            self.on_closing()
+            print(f"{datetime.now()}: config.ini 처리 중 오류: {e}")
+
+        self.setup_ui()
+        self.load_last_user_info()
+        self.center_on_screen()
         
-    def on_closing(self):
-        """창이 닫힐 때의 처리"""
-        try:
-            self.grab_release()
-            if self._master:
-                self._master.deiconify()
-        except:
-            pass
-        finally:
-            self.destroy()
+        # 자동 로그인 체크
+        self.check_auto_login()
         
-    def quit_application(self):
-        """프로그램 종료"""
-        try:
-            self.grab_release()
-            self.master.on_closing()  # 메인 창의 종료 처리 호출
-        except:
-            print("프로그램 종료 중 오류 발생")
-            if self.master:
-                self.master.destroy()
-            self.destroy()
+        print(f"{datetime.now()}: LoginWindow 초기화 완료")
 
     def setup_ui(self):
         print(f"{datetime.now()}: setup_ui 호출")
@@ -299,7 +241,7 @@ class LoginWindow(ctk.CTkToplevel):
         """설정을 로컬 config.ini에 저장"""
         print(f"{datetime.now()}: 로컬 config.ini에 설정 저장")
         config = configparser.ConfigParser()
-        config.read(self._config_path, encoding='utf-8')
+        config.read(self.config_path, encoding='utf-8')
 
         if not config.has_section('User'):
             config.add_section('User')
@@ -322,7 +264,7 @@ class LoginWindow(ctk.CTkToplevel):
             config.set('User', 'saved_password', '')
 
         try:
-            with open(self._config_path, 'w', encoding='utf-8') as f:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
                 config.write(f)
             print(f"{datetime.now()}: config.ini 저장 성공")
         except Exception as e:
@@ -389,6 +331,9 @@ class LoginWindow(ctk.CTkToplevel):
                 self.save_settings_to_config(username, password if self.auto_login_var.get() else None)
                 
                 login_success = True
+                
+                self.after(10, self.destroy)
+                print(f"{datetime.now()}: LoginWindow 파괴")
             else:
                 self.show_message("아이디 또는 비밀번호가 일치하지 않습니다.")
                 
@@ -404,8 +349,8 @@ class LoginWindow(ctk.CTkToplevel):
                 pass  # 창이 파괴된 경우 무시
         else:
             # 성공한 경우에만 콜백 호출
-            if self._on_login_success:
-                self._on_login_success(user)
+            if self.on_login_success:
+                self.on_login_success(user)
             
     def open_signup(self):
         print(f"{datetime.now()}: open_signup 호출")

@@ -9,8 +9,153 @@ import os
 import tkinter.font as tkfont
 import re
 import subprocess
+import time
+from PIL import Image
 
 # ==================== PyInstaller 경로 처리 ====================
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+        print(f"[RESOURCE] Using _MEIPASS: {base_path}")
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        print(f"[RESOURCE] Using script directory: {base_path}")
+    
+    # 아이콘 파일 특별 처리 (더 포괄적)
+    if relative_path.lower() in ['icon.ico', 'Icon.ico', 'app.ico', 'application.ico']:
+        icon_variants = [
+            'Icon.ico',           # 대문자 I
+            'icon.ico',           # 소문자 i
+            'ICON.ICO',           # 모두 대문자
+            'Icon.ICO',           # 혼합
+            'app.ico',            # 앱 아이콘
+            'application.ico',    # 어플리케이션 아이콘
+            'main.ico',           # 메인 아이콘
+        ]
+        
+        # 기본 경로에서 검색
+        for variant in icon_variants:
+            icon_path = os.path.join(base_path, variant)
+            if os.path.exists(icon_path):
+                print(f"[RESOURCE] Found icon at: {icon_path}")
+                return icon_path
+        
+        # data 폴더에서 검색
+        data_path = os.path.join(base_path, 'data')
+        if os.path.exists(data_path):
+            for variant in icon_variants:
+                icon_path = os.path.join(data_path, variant)
+                if os.path.exists(icon_path):
+                    print(f"[RESOURCE] Found icon in data folder: {icon_path}")
+                    return icon_path
+        
+        # assets 폴더에서 검색
+        assets_path = os.path.join(base_path, 'assets')
+        if os.path.exists(assets_path):
+            for variant in icon_variants:
+                icon_path = os.path.join(assets_path, variant)
+                if os.path.exists(icon_path):
+                    print(f"[RESOURCE] Found icon in assets folder: {icon_path}")
+                    return icon_path
+        
+        # 아이콘을 찾지 못한 경우 디렉토리 내용 출력 (더 상세히)
+        try:
+            base_files = [f for f in os.listdir(base_path) if f.lower().endswith(('.ico', '.png', '.jpg', '.jpeg'))]
+            print(f"[RESOURCE] Available image files in {base_path}: {base_files}")
+            
+            # 하위 폴더들도 검사
+            for subdir in ['data', 'assets', 'icons', 'images']:
+                subdir_path = os.path.join(base_path, subdir)
+                if os.path.exists(subdir_path):
+                    sub_files = [f for f in os.listdir(subdir_path) if f.lower().endswith(('.ico', '.png', '.jpg', '.jpeg'))]
+                    if sub_files:
+                        print(f"[RESOURCE] Available image files in {subdir_path}: {sub_files}")
+        except Exception as e:
+            print(f"[RESOURCE] Cannot list directory: {e}")
+        
+        # 기본 아이콘이 없는 경우 대체 아이콘 생성 (임시 해결책)
+        print("[RESOURCE] Creating fallback icon path")
+        return create_fallback_icon(base_path)
+    
+    # 일반 파일 처리
+    possible_paths = [
+        os.path.join(base_path, relative_path),  # 기본 경로
+        os.path.join(base_path, 'data', relative_path),  # data 폴더
+        os.path.join(base_path, 'assets', relative_path),  # assets 폴더
+        os.path.join(base_path, relative_path.capitalize()),  # 첫 글자 대문자
+        os.path.join(base_path, relative_path.upper()),  # 모두 대문자
+        os.path.join(base_path, relative_path.lower()),  # 모두 소문자
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            print(f"[RESOURCE] Found resource at: {path}")
+            return path
+    
+    print(f"[RESOURCE] Resource not found: {relative_path}")
+    print(f"[RESOURCE] Tried paths: {possible_paths}")
+    return possible_paths[0]  # 기본 경로 반환
+
+def create_fallback_icon(base_path):
+    """아이콘 파일이 없는 경우 임시 아이콘을 생성합니다"""
+    try:
+        from PIL import Image, ImageDraw
+        import tempfile
+        
+        # 간단한 임시 아이콘 생성
+        size = (64, 64)
+        image = Image.new('RGBA', size, (70, 130, 180, 255))  # Steel Blue
+        draw = ImageDraw.Draw(image)
+        
+        # 간단한 'R' 문자 그리기 (R&D를 의미)
+        draw.text((20, 20), "R", fill=(255, 255, 255, 255))
+        
+        # 임시 파일로 저장
+        temp_icon_path = os.path.join(base_path, 'temp_icon.ico')
+        image.save(temp_icon_path, format='ICO')
+        
+        print(f"[RESOURCE] Created fallback icon: {temp_icon_path}")
+        return temp_icon_path
+        
+    except Exception as e:
+        print(f"[RESOURCE] Failed to create fallback icon: {e}")
+        # 최후의 수단: 빈 파일 경로 반환
+        return os.path.join(base_path, 'icon.ico')
+
+
+# --- build/debug helper: print where runtime will look for bundled data ---
+try:
+    import customtkinter as _ctk
+    print(f"[BUILD-DEBUG] customtkinter.__file__ = {_ctk.__file__}")
+except Exception as _e:
+    print(f"[BUILD-DEBUG] customtkinter import failed: {_e}")
+
+import pprint
+print(f"[BUILD-DEBUG] sys._MEIPASS = {getattr(sys, '_MEIPASS', None)}")
+
+_mp = getattr(sys, '_MEIPASS', None)
+if _mp:
+    try:
+        sample = os.listdir(_mp)[:80]
+        print("[BUILD-DEBUG] sample _MEIPASS contents:")
+        pprint.pprint(sample)
+    except Exception as _e:
+        print(f"[BUILD-DEBUG] failed listing _MEIPASS: {_e}")
+
+try:
+    # also print where customtkinter assets should be found
+    import customtkinter
+    ctk_path = os.path.join(os.path.dirname(customtkinter.__file__), 'assets', 'themes')
+    print(f"[BUILD-DEBUG] expected customtkinter themes path: {ctk_path}")
+    try:
+        print("[BUILD-DEBUG] themes folder sample:", os.listdir(ctk_path)[:50])
+    except Exception as _e:
+        print(f"[BUILD-DEBUG] cannot list themes folder: {_e}")
+except Exception:
+    pass
+
 if getattr(sys, 'frozen', False):
     # PyInstaller로 빌드된 경우, .exe 파일이 있는 폴더
     application_path = os.path.dirname(sys.executable)
@@ -18,19 +163,86 @@ else:
     # 일반 Python 스크립트로 실행된 경우
     application_path = os.path.dirname(os.path.abspath(__file__))
 
-# config.ini는 항상 .exe 파일 옆에 위치하도록 경로 수정
+# config.ini는 실행 파일과 같은 폴더에 위치하도록 경로를 설정합니다.
 CONFIG_FILE_PATH = os.path.join(application_path, 'config.ini')
 
+
+from sqlalchemy import text
 from database.db_manager import db_manager
-from modules.translation import get_texts
-import modules.translation as _translation
-from modules.login import LoginWindow
-from modules.settings_management import SettingsManagementFrame
-from modules.quality_management import QualityManagementFrame # 품질관리 프레임 import
-from modules.data_management import DataManagementFrame
-from modules.home_frame import HomeFrame
-from modules.progress_window import ProgressWindow
 from datetime import datetime
+
+# PyInstaller 빌드 환경을 고려한 안전한 모듈 임포트
+def safe_import_modules():
+    """빌드 환경에서 안전하게 모듈을 임포트합니다."""
+    global get_texts, _translation, LoginWindow, SettingsManagementFrame
+    global QualityManagementFrame, DataManagementFrame, HomeFrame
+    
+    try:
+        # 경로 설정 (빌드 환경 고려)
+        if getattr(sys, 'frozen', False):
+            # PyInstaller 빌드된 환경
+            application_path = sys._MEIPASS
+            sys.path.insert(0, os.path.join(application_path, 'modules'))
+            sys.path.insert(0, os.path.join(application_path, 'database'))
+            sys.path.insert(0, os.path.join(application_path, 'utils'))
+        
+        from modules.translation import get_texts
+        import modules.translation as _translation
+        from modules.login import LoginWindow
+        from modules.settings_management import SettingsManagementFrame
+        from modules.quality_management import QualityManagementFrame
+        from modules.data_management import DataManagementFrame
+        from modules.home_frame import HomeFrame
+        
+        print("[DEBUG] 모든 모듈 임포트 성공")
+        return True
+        
+    except ImportError as e:
+        print(f"[ERROR] 모듈 임포트 실패: {e}")
+        try:
+            # 대안 임포트 시도
+            import importlib.util
+            
+            # 모듈별 개별 임포트 시도
+            modules_to_import = [
+                ('translation', 'get_texts'),
+                ('login', 'LoginWindow'),
+                ('settings_management', 'SettingsManagementFrame'),
+                ('quality_management', 'QualityManagementFrame'),
+                ('data_management', 'DataManagementFrame'),
+                ('home_frame', 'HomeFrame')
+            ]
+            
+            for module_name, class_name in modules_to_import:
+                try:
+                    if getattr(sys, 'frozen', False):
+                        module_path = os.path.join(sys._MEIPASS, 'modules', f'{module_name}.py')
+                    else:
+                        module_path = os.path.join('modules', f'{module_name}.py')
+                    
+                    spec = importlib.util.spec_from_file_location(module_name, module_path)
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    
+                    globals()[class_name] = getattr(module, class_name)
+                    if module_name == 'translation':
+                        globals()['get_texts'] = getattr(module, 'get_texts')
+                        globals()['_translation'] = module
+                    
+                    print(f"[DEBUG] {module_name} 모듈 동적 임포트 성공")
+                except Exception as module_error:
+                    print(f"[ERROR] {module_name} 모듈 동적 임포트 실패: {module_error}")
+                    return False
+            
+            return True
+        except Exception as fallback_error:
+            print(f"[ERROR] 대안 임포트도 실패: {fallback_error}")
+            return False
+
+# 모듈 임포트 실행
+if not safe_import_modules():
+    print("[CRITICAL] 필수 모듈 임포트 실패 - 프로그램을 종료합니다.")
+    sys.exit(1)
 
 # 프레임 이름을 상수로 정의
 FRAME_SETTINGS = "settings"
@@ -42,285 +254,524 @@ FRAME_QUALITY = "quality" # 품질관리 프레임 이름 추가
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
-        # 아이콘 설정
-        icon_path = os.path.join(application_path, 'icon.ico')
-        if os.path.exists(icon_path):
-            self.iconbitmap(icon_path)
-            
         self.language = "korean" # 기본 언어 설정
         self.texts = get_texts(self.language) # 중앙 번역 객체 생성
         self.title("화장품 연구소 관리 시스템")
 
-        self.last_shared_db_info = (0, 0) # (size, mtime)
         self.db_sync_timer = None
+        self.db_path_warning_shown = False
+        self.last_shared_db_info = (0, 0)
 
         # 최근 활동 기록을 위한 설정
         self.recent_actions = deque(maxlen=5) # 화면에 표시할 최대 개수
         
         self.current_user = None
         self.withdraw()  # 메인 창 숨김
-        self.load_app_settings() # UI 생성 전 설정 로드
-        
-        # DB 초기화 (application_path 전달)
-        db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)
-
-        # 사용자가 한 명도 없으면, 초기 관리자 생성 창을 띄움
-        if not db_manager.has_users():
-            self.show_initial_signup_window()
-        else:
-            # DB 및 Treeview 스타일 초기화
-            self.show_login_window()
 
         # 창 닫기 버튼(X)을 눌렀을 때 처리할 함수 지정
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-    def on_closing(self):
-        """프로그램 종료 시 처리"""
-        try:
-            # DB 연결 종료
-            if hasattr(db_manager, 'close_connection'):
-                db_manager.close_connection()
-            
-            # 타이머 정리
-            if self.db_sync_timer:
-                self.after_cancel(self.db_sync_timer)
-                self.db_sync_timer = None
-            
-            # 모든 창 닫기
-            if hasattr(self, 'login_window') and self.login_window.winfo_exists():
-                self.login_window.destroy()
-            
-            self.quit()
-            self.destroy()
-        except Exception as e:
-            print(f"프로그램 종료 중 오류 발생: {e}")
-            self.quit()
-            self.destroy()
+        # 앱 시작 시 로딩 스플래시 화면 표시
+        self.after(50, self.show_pre_login_splash)
 
     def show_login_window(self):
         print(f"{datetime.now()}: show_login_window 호출")
-        try:
-            if hasattr(self, 'login_window'):
-                try:
-                    self.login_window.destroy()
-                except:
-                    pass
-                    
-            # 메인 윈도우를 숨김
-            self.withdraw()
+        
+        # 재시작 시 자동 로그인 확인
+        if self.check_restart_login():
+            return
+        
+        self.login_window = LoginWindow(
+            master=self, 
+            on_login_success=self.on_login_success,
+            config_path=CONFIG_FILE_PATH
+        )
+        self.login_window.deiconify()
+        self.login_window.lift()
+        self.login_window.focus_force()
+        print(f"{datetime.now()}: 로그인 창 강제 표시")
+    
+    def check_restart_login(self):
+        """재시작 시 이전 로그인 정보로 자동 로그인"""
+        restart_flag = os.environ.get('APP_RESTARTING')
+        if not restart_flag:
+            return False
             
-            # 로그인 윈도우 생성
-            self.login_window = LoginWindow(
-                master=self, 
-                on_login_success=self.on_login_success,
-                config_path=CONFIG_FILE_PATH
-            )
+        # 환경 변수에서 사용자 정보 복원
+        user_id = os.environ.get('RESTART_USER_ID')
+        user_is_admin = os.environ.get('RESTART_USER_IS_ADMIN') == 'True'
+        
+        if user_id:
+            # 사용자 객체 재구성
+            class RestartUser:
+                def __init__(self, user_id, is_admin):
+                    self.id = user_id
+                    self.username = user_id  # username과 id를 동일하게 설정
+                    self.is_admin = is_admin
             
-            # 로그인 윈도우가 완전히 생성될 때까지 대기
-            self.wait_visibility(self.login_window)
+            restart_user = RestartUser(user_id, user_is_admin)
+            self.current_user = restart_user
+            print(f"[RESTART] 자동 로그인: {user_id} (관리자: {user_is_admin})")
             
-            # 창 위치 조정 (화면 중앙)
-            window_width = 400
-            window_height = 500
-            screen_width = self.login_window.winfo_screenwidth()
-            screen_height = self.login_window.winfo_screenheight()
-            x = (screen_width - window_width) // 2
-            y = (screen_height - window_height) // 2
-            self.login_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+            # 환경 변수 정리
+            for key in ['APP_RESTARTING', 'RESTART_USER_ID', 'RESTART_USER_IS_ADMIN']:
+                if key in os.environ:
+                    del os.environ[key]
             
-            # 모달 설정
-            self.login_window.grab_set()
-            self.login_window.focus_set()
-            
-            print(f"{datetime.now()}: 로그인 창 표시")
-        except Exception as e:
-            print(f"로그인 창 표시 중 오류 발생: {e}")
-            # 오류 발생 시 메인 윈도우 복구
-            self.deiconify()
+            self.on_login_success(restart_user)
+            return True
+        
+        return False
     
     def show_initial_signup_window(self):
         """최초 실행 시 관리자 계정 생성을 위한 회원가입 창을 띄웁니다."""
         from modules.signup import SignupWindow
         # on_success 콜백으로 on_login_success를 전달하여 가입 후 바로 로그인되도록 함
-        signup_win = SignupWindow(self, is_initial_setup=True, on_success=self.on_login_success)
+        signup_win = SignupWindow(self, is_initial_setup=True, on_success=self.on_first_login_success)
         signup_win.deiconify()
         signup_win.lift()
         signup_win.focus_force()
+
+    def on_first_login_success(self, user):
+        """첫 로그인 성공 시 공유 DB 설정을 안내합니다."""
+        print(f"{datetime.now()}: 첫 로그인 성공")
+        
+        # 1. 현재 DB 경로를 config.ini에 저장
+        config = configparser.ConfigParser()
+        config.read(CONFIG_FILE_PATH, encoding='utf-8')
+        
+        current_db_path = os.path.join(application_path, 
+                                     db_manager.get_db_relative_path(),
+                                     "cosmetic.db")
+        
+        if not config.has_section('Paths'):
+            config.add_section('Paths')
+            
+        config.set('Paths', 'shared_db_path', current_db_path)
+        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
+            config.write(configfile)
+            
+        # 2. 공유 DB 설정 안내
+        messagebox.showinfo("초기 설정 안내",
+            "프로그램 초기 설정이 완료되었습니다.\n\n"
+            "다른 사용자와 데이터를 공유하려면 설정 메뉴에서\n"
+            "공유 DB 경로를 네트워크 드라이브나 공유 폴더로 변경해주세요.",
+            parent=self)
+            
+        # 3. 일반적인 로그인 성공 처리
+        self.on_login_success(user)
 
     def on_initial_setup(self):
         """DB가 처음 생성될 때 호출되는 콜백. 기본 admin 계정을 생성합니다."""
         db_manager.create_default_admin()
 
+    def show_pre_login_splash(self):
+        """앱 시작 시 초기화 작업을 보여주는 스플래시 화면"""
+        splash = ctk.CTkToplevel(self)
+        splash.overrideredirect(True)
+
+        width, height = 350, 350
+        x = (splash.winfo_screenwidth() // 2) - (width // 2)
+        y = (splash.winfo_screenheight() // 2) - (height // 2)
+        splash.geometry(f'{width}x{height}+{x}+{y}')
+        
+        splash.lift()
+        splash.focus_force()
+        
+        bg_color = splash._apply_appearance_mode(ctk.ThemeManager.theme["CTk"]["fg_color"])
+        splash.configure(fg_color=bg_color)
+
+        try:
+            splash.wm_attributes("-transparentcolor", bg_color)
+        except Exception:
+            pass
+
+        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent")
+        bg_label.pack(fill="both", expand=True)
+
+        # 아이콘 로딩 시도
+        icon_loaded = False
+        splash_image = None
+        
+        try:
+            # 다양한 아이콘 이름으로 시도
+            icon_names = ["Icon.ico", "icon.ico", "ICON.ICO", "icon.png", "Icon.png"]
+            
+            for icon_name in icon_names:
+                try:
+                    icon_path = resource_path(icon_name)
+                    print(f"[PRE-SPLASH] Trying icon: {icon_path}")
+                    
+                    if os.path.exists(icon_path):
+                        print(f"[PRE-SPLASH] Icon file exists: {icon_path}")
+                        pil_img = Image.open(icon_path)
+                        
+                        # 이미지 크기 조정 및 형식 변환
+                        if pil_img.mode != 'RGBA':
+                            pil_img = pil_img.convert("RGBA")
+                        
+                        # 이미지 크기를 스플래시 화면에 맞게 조정
+                        pil_img = pil_img.resize((width-40, height-100), Image.Resampling.LANCZOS)
+                        
+                        splash_image = ctk.CTkImage(light_image=pil_img, size=(width-40, height-100))
+                        bg_label.configure(image=splash_image, text="")
+                        print(f"[PRE-SPLASH] Successfully loaded icon: {icon_path}")
+                        icon_loaded = True
+                        break
+                        
+                except Exception as icon_error:
+                    print(f"[PRE-SPLASH] Failed to load {icon_name}: {icon_error}")
+                    continue
+            
+            if not icon_loaded:
+                print("[PRE-SPLASH] No icon file found, using fallback")
+                raise FileNotFoundError("No icon file found in any variant")
+                
+        except Exception as e:
+            print(f"[PRE-SPLASH] Icon loading completely failed: {e}")
+            # 아이콘 로딩 실패 시 간단한 텍스트만 표시 (배경색 제거)
+            bg_label.configure(
+                text="R&D Management System\n화장품 연구소 관리 시스템", 
+                font=ctk.CTkFont(size=16, weight="bold"),
+                text_color=("gray20", "gray80"),
+                fg_color="transparent"
+            )
+
+        # 언어 설정에 따라 텍스트 선택
+        if self.language == 'korean':
+            initial_text = "애플리케이션 시작 중... 0%"
+            task_descriptions = [
+                "설정 파일 로드 중...",
+                "데이터베이스 연결 중...",
+            ]
+            done_text = "완료!"
+        else: # English or other
+            initial_text = "Starting application... 0%"
+            task_descriptions = [
+                "Loading settings...",
+                "Connecting to database...",
+            ]
+            done_text = "Done!"
+
+        progress_label = ctk.CTkLabel(splash, text=initial_text, font=ctk.CTkFont(size=12),
+                                      fg_color=("white", "black"), text_color=("black", "white"), corner_radius=5)
+        progress_label.place(relx=0.5, rely=0.93, anchor="center")
+
+        progress_bar = ctk.CTkProgressBar(
+            splash, 
+            width=280,
+            fg_color="#E0F2F1",
+            progress_color="#69F0AE"
+        )
+        progress_bar.set(0)
+        progress_bar.place(relx=0.5, rely=0.98, anchor="center")
+
+        splash.update()
+
+        def init_database():
+            try:
+                print("\n=== 데이터베이스 초기화 시작 ===")
+                
+                # 재시작 시 DB 동기화 처리
+                if self.handle_restart_db_sync():
+                    print("=== 재시작 DB 동기화 완료 ===")
+                
+                db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)
+                print("=== 데이터베이스 초기화 완료 ===\n")
+                return True
+            except Exception as e:
+                print(f"데이터베이스 초기화 실패: {e}")
+                return False
+
+        tasks = [
+            (task_descriptions[0], self.load_app_settings),
+            (task_descriptions[1], init_database),
+        ]
+        
+        total_tasks = len(tasks)
+
+        def on_load_complete():
+            try:
+                # 데이터베이스 연결 테스트
+                print("\n=== DB 최종 연결 테스트 시작 ===")
+                
+                if not db_manager.Session:
+                    raise RuntimeError("Session이 생성되지 않았습니다.")
+                print("  - Session 객체 확인 완료")
+                    
+                with db_manager.get_session() as session:
+                    result = session.execute(text("SELECT 1"))
+                    print("  - 연결 테스트 성공")
+                    result.fetchall()  # 결과 소비
+                print("=== DB 최종 연결 테스트 완료 ===\n")
+                
+                # DB 동기화 완료 알림 확인
+                if os.environ.get('DB_SYNC_COMPLETED') == 'True':
+                    print("[재시작-DB동기화] 동기화 완료 알림 준비")
+                    if 'DB_SYNC_COMPLETED' in os.environ:
+                        del os.environ['DB_SYNC_COMPLETED']
+                    # 로그인 후에 알림이 표시되도록 플래그 설정
+                    self.show_sync_completed_message = True
+                else:
+                    self.show_sync_completed_message = False
+                
+                if not db_manager.has_users():
+                    self.show_initial_signup_window()
+                else:
+                    self.show_login_window()
+                    
+            except Exception as e:
+                error_msg = f"데이터베이스 초기화 확인 실패:\n{str(e)}"
+                print(f"\n[오류] {error_msg}")
+                
+                # DB 엔진과 세션 상태 확인
+                print("\nDB 상태 진단:")
+                print(f"  - Session 객체 존재: {db_manager.Session is not None}")
+                print(f"  - Engine 객체 존재: {db_manager.engine is not None}")
+                
+                try:
+                    if db_manager.engine:
+                        print("  - Engine 연결 테스트 시도...")
+                        with db_manager.engine.connect() as conn:
+                            conn.execute(text("SELECT 1"))
+                            print("    * Engine 직접 연결 성공")
+                    else:
+                        print("    * Engine이 없어 연결 테스트 불가")
+                except Exception as e2:
+                    print(f"    * Engine 연결 실패: {e2}")
+                
+                messagebox.showerror("초기화 오류", error_msg)
+                self.destroy()
+
+        def run_tasks(task_index=0):
+            if task_index < total_tasks:
+                description, task_func = tasks[task_index]
+                start_progress = task_index / total_tasks
+                end_progress = (task_index + 1) / total_tasks
+                
+                progress_label.configure(text=f"{description}")
+                splash.update_idletasks()
+
+                try:
+                    task_func()
+                    print(f"Task completed successfully: {description}")
+                except Exception as e:
+                    print(f"Error in task '{description}': {e}")
+                    messagebox.showerror("초기화 오류", 
+                                       f"다음 작업 중 오류가 발생했습니다:\n{description}\n\n{str(e)}")
+                    return
+                
+                steps = 10
+                for i in range(steps + 1):
+                    current_progress = start_progress + (end_progress - start_progress) * (i / steps)
+                    progress_bar.set(current_progress)
+                    progress_label.configure(text=f"{description} {int(current_progress * 100)}%")
+                    splash.update_idletasks()
+                    time.sleep(0.02)
+
+                self.after(50, lambda: run_tasks(task_index + 1))
+            else:
+                progress_label.configure(text=done_text)
+                progress_bar.set(1)
+                splash.update_idletasks()
+                
+                try:
+                    # DB 연결이 활성 상태인지 한 번 더 확인
+                    if not db_manager.Session:
+                        raise RuntimeError("데이터베이스 연결이 없습니다.")
+                        
+                    with db_manager.get_session() as session:
+                        session.execute(text("SELECT 1"))
+                        print("최종 DB 연결 테스트 성공")
+                    
+                    self.after(300, lambda: (splash.destroy(), on_load_complete()))
+                except Exception as e:
+                    error_msg = f"최종 연결 테스트 실패:\n{str(e)}"
+                    print(error_msg)
+                    messagebox.showerror("데이터베이스 오류", error_msg)
+                    self.destroy()
+
+        self.after(100, run_tasks)
+
+    def show_post_login_splash(self, on_complete):
+        """로그인 후 메인 UI 로딩 시 보여주는 스플래시 화면"""
+        splash = ctk.CTkToplevel(self)
+        splash.overrideredirect(True)
+
+        width, height = 350, 350
+        x = (splash.winfo_screenwidth() // 2) - (width // 2)
+        y = (splash.winfo_screenheight() // 2) - (height // 2)
+        splash.geometry(f'{width}x{height}+{x}+{y}')
+        
+        splash.lift()
+        splash.focus_force()
+        
+        bg_color = splash._apply_appearance_mode(ctk.ThemeManager.theme["CTk"]["fg_color"])
+        splash.configure(fg_color=bg_color)
+
+        try:
+            splash.wm_attributes("-transparentcolor", bg_color)
+        except Exception:
+            pass
+
+        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent")
+        bg_label.pack(fill="both", expand=True)
+
+        # 아이콘 로딩 시도
+        icon_loaded = False
+        splash_image = None
+        
+        try:
+            # 다양한 아이콘 이름으로 시도
+            icon_names = ["Icon.ico", "icon.ico", "ICON.ICO", "icon.png", "Icon.png"]
+            
+            for icon_name in icon_names:
+                try:
+                    icon_path = resource_path(icon_name)
+                    print(f"[POST-SPLASH] Trying icon: {icon_path}")
+                    
+                    if os.path.exists(icon_path):
+                        print(f"[POST-SPLASH] Icon file exists: {icon_path}")
+                        pil_img = Image.open(icon_path)
+                        
+                        # 이미지 크기 조정 및 형식 변환
+                        if pil_img.mode != 'RGBA':
+                            pil_img = pil_img.convert("RGBA")
+                        
+                        # 이미지 크기를 스플래시 화면에 맞게 조정
+                        pil_img = pil_img.resize((width-40, height-100), Image.Resampling.LANCZOS)
+                        
+                        splash_image = ctk.CTkImage(light_image=pil_img, size=(width-40, height-100))
+                        bg_label.configure(image=splash_image, text="")
+                        print(f"[POST-SPLASH] Successfully loaded icon: {icon_path}")
+                        icon_loaded = True
+                        break
+                        
+                except Exception as icon_error:
+                    print(f"[POST-SPLASH] Failed to load {icon_name}: {icon_error}")
+                    continue
+            
+            if not icon_loaded:
+                print("[POST-SPLASH] No icon file found, using fallback")
+                raise FileNotFoundError("No icon file found in any variant")
+                
+        except Exception as e:
+            print(f"[POST-SPLASH] Icon loading completely failed: {e}")
+            # 아이콘 로딩 실패 시 간단한 텍스트만 표시 (배경색 제거)
+            bg_label.configure(
+                text="R&D Management System\n화장품 연구소 관리 시스템", 
+                font=ctk.CTkFont(size=16, weight="bold"),
+                text_color=("gray20", "gray80"),
+                fg_color="transparent"
+            )
+
+        if self.language == 'korean':
+            initial_text = "초기화 중... 0%"
+            task_descriptions = [
+                "이전 세션 정리 중...",
+                "사용자 기록 불러오는 중...",
+                "메인 화면 구성 중...",
+                "테마 적용 중..."
+            ]
+            done_text = "완료!"
+        else: # English or other
+            initial_text = "Initializing... 0%"
+            task_descriptions = [
+                "Clearing old session...",
+                "Loading user history...",
+                "Building main interface...",
+                "Applying visual theme..."
+            ]
+            done_text = "Done!"
+
+        progress_label = ctk.CTkLabel(splash, text=initial_text, font=ctk.CTkFont(size=12),
+                                      fg_color=("white", "black"), text_color=("black", "white"), corner_radius=5)
+        progress_label.place(relx=0.5, rely=0.93, anchor="center")
+
+        progress_bar = ctk.CTkProgressBar(
+            splash, 
+            width=280,
+            fg_color="#E0F2F1",
+            progress_color="#69F0AE"
+        )
+        progress_bar.set(0)
+        progress_bar.place(relx=0.5, rely=0.98, anchor="center")
+
+        splash.update()
+
+        tasks = [
+            (task_descriptions[0], lambda: self.recent_actions.clear()),
+            (task_descriptions[1], self.load_recent_actions),
+            (task_descriptions[2], self.setup_main_ui),
+            (task_descriptions[3], self.update_treeview_style),
+        ]
+        
+        total_tasks = len(tasks)
+
+        def run_tasks(task_index=0):
+            if task_index < total_tasks:
+                description, task_func = tasks[task_index]
+                start_progress = task_index / total_tasks
+                end_progress = (task_index + 1) / total_tasks
+                
+                progress_label.configure(text=f"{description}")
+                splash.update_idletasks()
+
+                task_func()
+                
+                steps = 10
+                for i in range(steps + 1):
+                    current_progress = start_progress + (end_progress - start_progress) * (i / steps)
+                    progress_bar.set(current_progress)
+                    progress_label.configure(text=f"{description} {int(current_progress * 100)}%")
+                    splash.update_idletasks()
+                    time.sleep(0.02)
+
+                self.after(50, lambda: run_tasks(task_index + 1))
+            else:
+                progress_label.configure(text=done_text)
+                progress_bar.set(1)
+                splash.update_idletasks()
+                self.after(300, lambda: (splash.destroy(), on_complete()))
+
+        self.after(100, run_tasks)
+
     def on_login_success(self, user):
         print(f"{datetime.now()}: on_login_success 호출")
-        
-        progress_window = ProgressWindow(self, "시스템 초기화 중...", 
-                                      os.path.join(application_path, 'icon.ico'))
-        progress_window.start_animation(duration_ms=2000) # 2초로 애니메이션 시간 조정
-
-        # 설정 작업을 위한 제너레이터 생성
-        setup_generator = self._run_setup_tasks_generator(user, progress_window)
-        
-        # 제너레이터 실행기 호출
-        self.after(50, self._execute_setup_generator, setup_generator, progress_window)
-
-    def _execute_setup_generator(self, generator, progress_window):
-        """설정 제너레이터의 다음 단계를 실행하고, 완료될 때까지 반복 호출합니다."""
-        try:
-            # 제너레이터의 다음 작업 실행
-            next(generator)
-            # 다음 단계 실행 예약 (간격을 20ms로 짧게 하여 더 부드럽게)
-            self.after(20, self._execute_setup_generator, generator, progress_window)
-        except StopIteration:
-            # 제너레이터가 완료되면 최종 처리
-            print(f"{datetime.now()}: 모든 설정 작업 완료")
-            
-            # 메인 창을 화면에 표시하고 중앙에 배치
-            self.deiconify()
-            self.center_on_mouse_screen()
-            
-            progress_window.finish()
-        except Exception as e:
-            print(f"로그인 처리 중 심각한 오류 발생: {e}")
-            if progress_window and progress_window.winfo_exists():
-                progress_window.finish()
-            self.on_closing()
-
-    def _run_setup_tasks_generator(self, user, progress_window):
-        """로그인 설정 작업을 매우 세분화하여 단계별로 실행하는 제너레이터입니다."""
-        
-        # --- 1단계: 사용자 및 기본 UI 설정 ---
         self.current_user = user
-        if hasattr(self, 'login_window'):
-            try: self.login_window.destroy()
-            except: pass
-        yield
 
-        # --- 2단계: 최근 활동 기록 로드 ---
-        self.recent_actions.clear()
-        self.load_recent_actions()
-        yield
+        if hasattr(self, 'login_window') and self.login_window:
+            self.login_window.destroy()
+            self.login_window = None
 
-        # --- 3단계: 메인 UI 골격 생성 ---
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self.navigation_frame = ctk.CTkFrame(self, corner_radius=0, width=200)
-        self.navigation_frame.grid(row=0, column=0, sticky="nsew")
-        self.navigation_frame.grid_columnconfigure(0, weight=1)
-        self.main_content_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_content_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 20), pady=20)
-        self.main_content_frame.grid_columnconfigure(0, weight=1)
-        self.main_content_frame.grid_rowconfigure(0, weight=1)
-        yield
+        def show_splash_and_main_ui():
+            """로그인 창이 완전히 파괴된 후 스플래시 화면과 메인 UI를 표시합니다."""
+            if user.username == 'admin' and db_manager.get_admin_user_count() == 1:
+                messagebox.showinfo("초기 설정 필요", "초기 관리자 계정(admin)으로 로그인했습니다.\n보안을 위해 새로운 관리자 계정을 생성해주세요.")
+                self.show_initial_signup_window()
+                return
 
-        # --- 4단계: 네비게이션 UI 생성 (ACTION_CONFIG 및 제목) ---
-        self.ACTION_CONFIG = {
-            f"document/{self.texts['formulation_mgt']}": {"icon": "℞", "title": self.texts['formulation_mgt']},
-            f"document/{self.texts['document_sub']}": {"icon": "📄", "title": self.texts['document_sub']},
-            f"data/{self.texts['ingredient_mgt']}": {"icon": "🧪", "title": self.texts['ingredient_mgt']},
-            f"data/{self.texts['client_mgt']}": {"icon": "🏢", "title": self.texts['client_mgt']},
-            f"data/{self.texts['user_mgt']}": {"icon": "👥", "title": self.texts['user_mgt']},
-            f"settings/{self.texts['settings_sub']}": {"icon": "⚙️", "title": self.texts['settings_sub']},
-            f"quality/{self.texts['coa']}": {"icon": "🔬", "title": self.texts['coa']},
-            f"quality/{self.texts['msds']}": {"icon": "🔬", "title": self.texts['msds']},
-            f"quality/{self.texts['prod_standard']}": {"icon": "🔬", "title": self.texts['prod_standard']},
-            f"quality/{self.texts['mfg_record']}": {"icon": "🔬", "title": self.texts['mfg_record']},
-        }
-        if 'ingredient_report' in self.texts:
-            self.ACTION_CONFIG[f"quality/{self.texts['ingredient_report']}"] = {"icon": "🔬", "title": self.texts['ingredient_report']}
-        if 'finished_product_report' in self.texts:
-            self.ACTION_CONFIG[f"quality/{self.texts['finished_product_report']}"] = {"icon": "🔬", "title": self.texts['finished_product_report']}
-        for act in list(self.recent_actions):
-            if act not in self.ACTION_CONFIG:
-                title = act.split('/', 1)[-1] if '/' in act else act
-                self.ACTION_CONFIG[act] = {"icon": "❓", "title": title}
-        self.title("R&D Management System" if self.language == "english" else "화장품 연구소 관리 시스템")
-        self.navigation_frame_label = ctk.CTkLabel(self.navigation_frame, text=self.texts["menu"], font=ctk.CTkFont(size=16, weight="bold"))
-        self.navigation_frame_label.grid(row=0, column=0, padx=15, pady=(20, 30))
-        yield
+            def show_main_window():
+                self.center_on_mouse_screen()
+                self.deiconify()
+                
+                # DB 동기화 완료 메시지 표시
+                if hasattr(self, 'show_sync_completed_message') and self.show_sync_completed_message:
+                    self.after(1000, lambda: messagebox.showinfo(
+                        "동기화 완료", 
+                        "데이터베이스가 성공적으로 동기화되었습니다.\n"
+                        "최신 데이터로 업데이트되었습니다.", 
+                        parent=self
+                    ))
+                    self.show_sync_completed_message = False
+                
+                if self.current_user.is_admin:
+                    self.start_db_sync_check()
+                print(f"{datetime.now()}: Main window displayed")
 
-        # --- 5단계: 네비게이션 버튼 생성 ---
-        button_style = {"width": 160, "height": 40, "font": ctk.CTkFont(size=13), "anchor": "center"}
-        self.nav_buttons = {}
-        all_nav_items = [
-            {"name": FRAME_HOME, "text": self.texts["home"], "admin_only": False},
-            {"name": FRAME_DOCUMENT, "text": self.texts["document"], "admin_only": False},
-            {"name": FRAME_QUALITY, "text": self.texts["quality"], "admin_only": False},
-        ]
-        current_row = 1
-        for item in all_nav_items:
-            if not item["admin_only"] or self.current_user.is_admin:
-                button = ctk.CTkButton(self.navigation_frame, text=item["text"], command=lambda name=item["name"]: self.navigate_and_record(name), **button_style)
-                button.grid(row=current_row, column=0, padx=15, pady=8)
-                self.nav_buttons[item["name"]] = button
-                current_row += 1
-        yield
-        
-        self.navigation_frame.grid_rowconfigure(current_row, weight=1)
-        ctk.CTkFrame(self.navigation_frame, fg_color="transparent", height=0).grid(row=current_row, column=0, sticky="nsew")
-        current_row += 1
-        self.data_button = ctk.CTkButton(self.navigation_frame, text=self.texts["data"], command=lambda: self.navigate_and_record("data/" + self.texts["ingredient_mgt"]), width=140, height=35, font=ctk.CTkFont(size=12), fg_color="#E65100", hover_color="#BF360C", anchor="center")
-        self.data_button.grid(row=current_row, column=0, padx=15, pady=8)
-        current_row += 1
-        yield
+            self.show_post_login_splash(on_complete=show_main_window)
 
-        if self.current_user.is_admin:
-            self.settings_button = ctk.CTkButton(self.navigation_frame, text=self.texts["settings"], command=lambda: self.navigate_and_record("settings/" + self.texts["settings_sub"]), width=140, height=35, font=ctk.CTkFont(size=12), fg_color="gray50", hover_color="gray30", anchor="center")
-            self.settings_button.grid(row=current_row, column=0, padx=15, pady=8)
-            current_row += 1
-        self.logout_button = ctk.CTkButton(self.navigation_frame, text=self.texts["logout"], command=self.logout, width=140, height=35, font=ctk.CTkFont(size=12), fg_color="#D32F2F", hover_color="#B71C1C", anchor="center")
-        self.logout_button.grid(row=current_row, column=0, padx=15, pady=(10, 30))
-        yield
-
-        # --- 6단계: 메인 프레임들 생성 ---
-        self.frames = {}
-        from modules.document_management import DocumentManagementFrame
-        
-        self.frames[FRAME_HOME] = HomeFrame(self.main_content_frame, self.current_user, self, self.recent_actions, self.ACTION_CONFIG)
-        self.frames[FRAME_HOME].grid(row=0, column=0, sticky="nsew")
-        yield
-        
-        self.frames[FRAME_SETTINGS] = SettingsManagementFrame(self.main_content_frame, self.current_user, self, config_path=CONFIG_FILE_PATH, application_path=application_path)
-        self.frames[FRAME_SETTINGS].grid(row=0, column=0, sticky="nsew")
-        yield
-
-        self.frames[FRAME_DATA] = DataManagementFrame(self.main_content_frame, self.current_user, self)
-        self.frames[FRAME_DATA].grid(row=0, column=0, sticky="nsew")
-        yield
-
-        self.frames[FRAME_DOCUMENT] = DocumentManagementFrame(self.main_content_frame, self.current_user, self, texts=self.texts)
-        self.frames[FRAME_DOCUMENT].grid(row=0, column=0, sticky="nsew")
-        yield
-
-        self.frames[FRAME_QUALITY] = QualityManagementFrame(self.main_content_frame, self.current_user, self, texts=self.texts)
-        self.frames[FRAME_QUALITY].grid(row=0, column=0, sticky="nsew")
-        yield
-
-        # --- 7단계: 최종 UI 설정 ---
-        self.select_frame_by_name(FRAME_HOME)
-        self.update_treeview_style()
-        yield
-
-        # --- 8단계: DB 연결 확인 ---
-        if not self.check_database_connection():
-            progress_window.finish()
-            messagebox.showinfo("초기 설정 필요", "초기 관리자 계정(admin)으로 로그인했습니다.\n보안을 위해 새로운 관리자 계정을 생성해주세요.")
-            self.show_initial_signup_window()
-            return
-        yield
-
-    def check_database_connection(self):
-        """데이터베이스 연결 확인"""
-        try:
-            # 데이터베이스 연결 확인 및 초기화 코드
-            if self.current_user and self.current_user.username == 'admin' and db_manager.get_admin_user_count() == 1:
-                return False
-            return True
-        except Exception as e:
-            print(f"데이터베이스 연결 확인 중 오류 발생: {e}")
-            return False
-
+        self.after(50, show_splash_and_main_ui)
 
     def load_app_settings(self):
         """config.ini에서 앱 설정을 로드합니다 (테마, 언어 등)."""
@@ -329,68 +780,76 @@ class App(ctk.CTk):
             if os.path.exists(CONFIG_FILE_PATH):
                 config.read(CONFIG_FILE_PATH, encoding='utf-8')
             
-            # 테마 설정 로드 및 적용
             theme = config.get('Appearance', 'theme', fallback='system')
             ctk.set_appearance_mode(theme)
             
-            # 언어 설정 로드
             lang_setting = config.get('Appearance', 'language', fallback='korean').lower()
             self.language = 'english' if lang_setting == 'english' else 'korean'
             print(f"로드된 언어 설정: {self.language}")
         except Exception as e:
             print(f"[경고] config.ini 파일 로드 실패: {e}. 기본 설정으로 계속합니다.")
-            # 오류 발생 시 기본값으로 안전하게 진행
             ctk.set_appearance_mode("System")
             self.language = "korean"
 
     def setup_main_ui(self):
         print(f"{datetime.now()}: setup_main_ui 호출")
         
-        # 전체 그리드 설정
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # --- 네비게이션 프레임 ---
         self.navigation_frame = ctk.CTkFrame(self, corner_radius=0, width=200)
         self.navigation_frame.grid(row=0, column=0, sticky="nsew")
         self.navigation_frame.grid_columnconfigure(0, weight=1)
 
- 
-        # ACTION_CONFIG를 언어에 맞게 동적으로 생성
+        # Static keys for actions
         self.ACTION_CONFIG = {
-            f"document/{self.texts['formulation_mgt']}": {"icon": "℞", "title": self.texts['formulation_mgt']},
-            f"document/{self.texts['document_sub']}": {"icon": "📄", "title": self.texts['document_sub']},
-            f"data/{self.texts['ingredient_mgt']}": {"icon": "🧪", "title": self.texts['ingredient_mgt']},
-            f"data/{self.texts['client_mgt']}": {"icon": "🏢", "title": self.texts['client_mgt']},
-            f"data/{self.texts['user_mgt']}": {"icon": "👥", "title": self.texts['user_mgt']},
-            f"settings/{self.texts['settings_sub']}": {"icon": "⚙️", "title": self.texts['settings_sub']},
-            f"quality/{self.texts['coa']}": {"icon": "🔬", "title": self.texts['coa']},
-            f"quality/{self.texts['msds']}": {"icon": "🔬", "title": self.texts['msds']},
-            f"quality/{self.texts['prod_standard']}": {"icon": "🔬", "title": self.texts['prod_standard']},
-            f"quality/{self.texts['mfg_record']}": {"icon": "🔬", "title": self.texts['mfg_record']},
+            "document/formulation_mgt": {"icon": "℞", "title": self.texts.get('formulation_mgt', 'Formulation Mgt.')},
+            "document/document_sub": {"icon": "📄", "title": self.texts.get('document_sub', 'Documents')},
+            "data/ingredient_mgt": {"icon": "🧪", "title": self.texts.get('ingredient_mgt', 'Ingredient Mgt.')},
+            "data/client_mgt": {"icon": "🏢", "title": self.texts.get('client_mgt', 'Client Mgt.')},
+            "data/user_mgt": {"icon": "👥", "title": self.texts.get('user_mgt', 'User Mgt.')},
+            "settings/settings_sub": {"icon": "⚙️", "title": self.texts.get('settings_sub', 'Settings')},
+            "quality/coa": {"icon": "🔬", "title": self.texts.get('coa', 'COA')},
+            "quality/msds": {"icon": "🔬", "title": self.texts.get('msds', 'MSDS')},
+            "quality/prod_standard": {"icon": "🔬", "title": self.texts.get('prod_standard', 'Product Standard')},
+            "quality/mfg_record": {"icon": "🔬", "title": self.texts.get('mfg_record', 'Mfg. Record')},
+            "quality/ingredient_report": {"icon": "🔬", "title": self.texts.get('ingredient_report', 'Ingredient Report')},
         }
-        # 품질 관리 탭에 동적으로 추가된 항목들을 ACTION_CONFIG에 반영
-        # '원료목록보고 자료'와 같이 quality_management.py에서 추가된 탭을 자동으로 인식
-        if 'ingredient_report' in self.texts:
-            self.ACTION_CONFIG[f"quality/{self.texts['ingredient_report']}"] = {"icon": "🔬", "title": self.texts['ingredient_report']}
-        # '완제품 시험성적서' 탭 추가
-        if 'finished_product_report' in self.texts:
-            self.ACTION_CONFIG[f"quality/{self.texts['finished_product_report']}"] = {"icon": "🔬", "title": self.texts['finished_product_report']}
 
+        # Build reverse lookup from displayed title -> action key for resolving
+        # recent/legacy entries that may store localized titles.
+        def rebuild_action_title_map():
+            self.ACTION_TITLE_TO_KEY = {}
+            for k, v in self.ACTION_CONFIG.items():
+                title = v.get('title')
+                if title:
+                    self.ACTION_TITLE_TO_KEY[title] = k
 
-        # --- 변경: recent_actions에 들어있는 항목이 ACTION_CONFIG에 없으면 표시용 플레이스홀더 추가 ---
-        # (삭제된 거래처 등으로 인해 ACTION_CONFIG에서 사라졌더라도 홈 화면에서 항목이 사라지지 않도록 함)
-        for act in list(self.recent_actions):
-            if act not in self.ACTION_CONFIG:
-                # act 형식: "scope/name" 이라고 가정. 마지막 부분을 제목으로 사용
-                title = act.split('/', 1)[-1] if '/' in act else act
-                # 번역 키가 있을 경우 그대로 사용, 없으면 제목으로 표시
-                self.ACTION_CONFIG[act] = {"icon": "❓", "title": title}
+        # initialize the reverse map
+        rebuild_action_title_map()
 
-        # 프로그램 제목 설정
+        # Normalize any recent_actions loaded earlier (they may contain
+        # localized titles or legacy keys). Replace entries in-place with
+        # canonical ACTION_CONFIG keys where possible so icons are resolved.
+        try:
+            normalized = deque(maxlen=self.recent_actions.maxlen)
+            for act in list(self.recent_actions):
+                normalized.append(self._normalize_action_name(act))
+            self.recent_actions = normalized
+        except Exception:
+            # Defensive: if normalization fails, keep existing recent_actions
+            pass
+
+        # Persist normalized recent actions so subsequent runs don't show '?'
+        try:
+            self.save_recent_actions()
+        except Exception:
+            pass
+
+        # Rebuild title map in case normalization or ACTION_CONFIG changed
+        rebuild_action_title_map()
         self.title("R&D Management System" if self.language == "english" else "화장품 연구소 관리 시스템")
 
-        # 네비게이션 제목
         self.navigation_frame_label = ctk.CTkLabel(
             self.navigation_frame, 
             text=self.texts["menu"],
@@ -398,7 +857,6 @@ class App(ctk.CTk):
         )
         self.navigation_frame_label.grid(row=0, column=0, padx=15, pady=(20, 30))
 
-        # ===== 네비게이션 버튼 생성 (데이터 기반) =====
         button_style = {
             "width": 160,
             "height": 40,
@@ -426,35 +884,30 @@ class App(ctk.CTk):
                 self.nav_buttons[item["name"]] = button
                 current_row += 1
  
-        # 빈 공간 (하단 버튼들을 아래로 밀어내기 위해)
         self.navigation_frame.grid_rowconfigure(current_row, weight=1)
         empty_space = ctk.CTkFrame(self.navigation_frame, fg_color="transparent", height=0)
         empty_space.grid(row=current_row, column=0, sticky="nsew")
         current_row += 1
  
-        # 데이터 관리 버튼
         self.data_button = ctk.CTkButton(
             self.navigation_frame,
             text=self.texts["data"],
-            command=lambda: self.navigate_and_record("data/" + self.texts["ingredient_mgt"]),
+            command=lambda: self.navigate_and_record("data/ingredient_mgt"),
             width=140, height=35, font=ctk.CTkFont(size=12),
-            fg_color="#E65100", hover_color="#BF360C", anchor="center"  # 주황색 계열
+            fg_color="#E65100", hover_color="#BF360C", anchor="center"
         )
         self.data_button.grid(row=current_row, column=0, padx=15, pady=8)
         current_row += 1
 
-        # 설정 관리 버튼 (관리자 전용)
-        if self.current_user.is_admin:
-            self.settings_button = ctk.CTkButton(
-                self.navigation_frame,
-                text=self.texts["settings"],
-                command=lambda: self.navigate_and_record("settings/" + self.texts["settings_sub"]),
-                width=140, height=35, font=ctk.CTkFont(size=12), fg_color="gray50", hover_color="gray30", anchor="center"
-            )
-            self.settings_button.grid(row=current_row, column=0, padx=15, pady=8)
-            current_row += 1
+        self.settings_button = ctk.CTkButton(
+            self.navigation_frame,
+            text=self.texts["settings"],
+            command=lambda: self.navigate_and_record("settings/settings_sub"),
+            width=140, height=35, font=ctk.CTkFont(size=12), fg_color="gray50", hover_color="gray30", anchor="center"
+        )
+        self.settings_button.grid(row=current_row, column=0, padx=15, pady=8)
+        current_row += 1
 
-        # 로그아웃 버튼 (다른 스타일)
         self.logout_button = ctk.CTkButton(
             self.navigation_frame, 
             text=self.texts["logout"],
@@ -462,32 +915,28 @@ class App(ctk.CTk):
             width=140,
             height=35,
             font=ctk.CTkFont(size=12),
-            fg_color="#D32F2F",          # 빨간색 배경
-            hover_color="#B71C1C",       # 호버시 더 진한 빨간색
+            fg_color="#D32F2F",
+            hover_color="#B71C1C",
             anchor="center"
         )
         self.logout_button.grid(row=current_row, column=0, padx=15, pady=(10, 30))
 
-        # ===== 메인 컨텐츠 프레임 =====
         self.main_content_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.main_content_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 20), pady=20)
         self.main_content_frame.grid_columnconfigure(0, weight=1)
         self.main_content_frame.grid_rowconfigure(0, weight=1)
         
-        # ===== 프레임 생성 =====
         self.frames = {}
 
-        # 메인 화면 프레임
         self.frames[FRAME_HOME] = HomeFrame(
             self.main_content_frame,
             self.current_user,
-            self,  # App 인스턴스 전달
+            self,
             self.recent_actions, # noqa
             self.ACTION_CONFIG,
         )
         self.frames[FRAME_HOME].grid(row=0, column=0, sticky="nsew")
         
-        # 설정 관리 프레임
         self.frames[FRAME_SETTINGS] = SettingsManagementFrame(
             self.main_content_frame, 
             self.current_user, 
@@ -497,7 +946,6 @@ class App(ctk.CTk):
         )
         self.frames[FRAME_SETTINGS].grid(row=0, column=0, sticky="nsew")
         
-        # 데이터 관리 프레임
         from modules.document_management import DocumentManagementFrame
         self.frames[FRAME_DATA] = DataManagementFrame(
             self.main_content_frame,
@@ -506,7 +954,6 @@ class App(ctk.CTk):
         )
         self.frames[FRAME_DATA].grid(row=0, column=0, sticky="nsew")
 
-        # 서류 관리 프레임
         self.frames[FRAME_DOCUMENT] = DocumentManagementFrame(
             self.main_content_frame,
             self.current_user,
@@ -515,7 +962,6 @@ class App(ctk.CTk):
         )
         self.frames[FRAME_DOCUMENT].grid(row=0, column=0, sticky="nsew")
 
-        # 품질 관리 프레임
         self.frames[FRAME_QUALITY] = QualityManagementFrame(
             self.main_content_frame,
             self.current_user,
@@ -523,7 +969,6 @@ class App(ctk.CTk):
             texts=self.texts
         )
         self.frames[FRAME_QUALITY].grid(row=0, column=0, sticky="nsew")
-        # 기본 선택
         self.select_frame_by_name(FRAME_HOME)
 
     def navigate_and_record(self, name: str):
@@ -533,35 +978,37 @@ class App(ctk.CTk):
 
     def record_action(self, action_name: str):
         """사용자 활동을 기록하고, 홈 화면을 업데이트합니다."""
-        # 유효한 활동인지 검사: ACTION_CONFIG에 있어야 하는 기존 규칙을 완화.
-        # data/, document/, quality/, settings/ 등 주요 스코프는 ACTION_CONFIG에 없어도 허용.
         if action_name == FRAME_HOME:
             return
+
+        # Normalize action_name: accept localized titles or legacy keys and
+        # convert them to canonical ACTION_CONFIG keys when possible.
+        action_name = self._normalize_action_name(action_name)
 
         allowed_prefixes = ("data/", "document/", "quality/", "settings/")
         is_allowed = (action_name in self.ACTION_CONFIG) or any(action_name.startswith(p) for p in allowed_prefixes)
         if not is_allowed:
-            # 허용되지 않는 형식이면 무시
             return
 
-        # 중복 제거 후 맨 앞에 추가
         if action_name in self.recent_actions:
             self.recent_actions.remove(action_name)
         self.recent_actions.appendleft(action_name)
 
-        # ACTION_CONFIG에 없는 항목이면 표시용 플레이스홀더 등록 (홈 화면에서 보이도록)
         if action_name not in self.ACTION_CONFIG:
             title = action_name.split('/', 1)[-1] if '/' in action_name else action_name
             self.ACTION_CONFIG[action_name] = {"icon": "❓", "title": title}
 
-        # HomeFrame의 recent_actions를 직접 업데이트하고 카드를 새로고침합니다.
+        # Keep reverse title map in sync
+        try:
+            self.ACTION_TITLE_TO_KEY[self.ACTION_CONFIG[action_name]['title']] = action_name
+        except Exception:
+            pass
         home_frame = self.frames.get(FRAME_HOME)
         if home_frame:
             home_frame.recent_actions = self.recent_actions
             try:
                 self.frames[FRAME_HOME].refresh_cards()
             except Exception:
-                # HomeFrame이 아직 초기화되지 않았거나 refresh 실패 시 무시
                 pass
 
         print(f"활동 기록: {action_name}. 현재 목록: {list(self.recent_actions)}")
@@ -574,10 +1021,66 @@ class App(ctk.CTk):
         if config.has_section(section):
             items_str = config.get(section, 'items', fallback='')
             if items_str:
-                # maxlen을 초과하지 않도록 슬라이싱
                 items = items_str.split(',')[:self.recent_actions.maxlen]
-                self.recent_actions.extend(items)
+                # Normalize loaded items to canonical keys where possible
+                for it in items:
+                    self.recent_actions.append(self._normalize_action_name(it))
         print(f"불러온 활동 기록: {list(self.recent_actions)}")
+
+    def _normalize_action_name(self, name: str) -> str:
+        """Try to resolve various forms of action identifiers to the
+        canonical keys used in ACTION_CONFIG.
+
+        Examples handled:
+        - 'data/성분 관리' -> 'data/ingredient_mgt' (matching by displayed title)
+        - 'ingredient_mgt' -> 'data/ingredient_mgt' (matching by suffix key)
+        - already canonical keys are returned as-is.
+        """
+        if not name:
+            return name
+
+        # If ACTION_CONFIG isn't set up yet (startup path), avoid accessing it
+        # because `self.ACTION_CONFIG` would trigger tkinter's __getattr__ and
+        # raise. In that case, just return the original name and let later
+        # initialization normalize it.
+        if not hasattr(self, 'ACTION_CONFIG') or not isinstance(self.ACTION_CONFIG, dict):
+            return name
+
+        # already canonical
+        if name in self.ACTION_CONFIG:
+            return name
+
+        # If name is a displayed title (without the frame prefix), try to map
+        # directly from title->key
+        title_map = getattr(self, 'ACTION_TITLE_TO_KEY', {})
+        if name in title_map:
+            return title_map[name]
+
+        # If name includes a frame prefix like 'settings/설정', try to match the
+        # right-hand side (tab label) to an action whose key starts with the
+        # same frame.
+        if '/' in name:
+            frame_part, tab_part = name.split('/', 1)
+            # check title mapping first
+            if tab_part in title_map:
+                candidate = title_map[tab_part]
+                # ensure candidate has same frame prefix
+                if candidate.startswith(frame_part + '/'):
+                    return candidate
+
+            # try to match by key suffix (e.g., 'ingredient_mgt')
+            for k in self.ACTION_CONFIG.keys():
+                if k.endswith('/' + tab_part) or k.endswith(tab_part):
+                    return k
+
+        # If given a short internal key like 'ingredient_mgt', attempt to find
+        # a canonical key that endswith it
+        for k in self.ACTION_CONFIG.keys():
+            if k.endswith('/' + name) or k == name:
+                return k
+
+        # No resolution found; return original
+        return name
 
     def save_recent_actions(self):
         """현재 사용자의 최근 활동을 config.ini에 저장합니다."""
@@ -617,31 +1120,24 @@ class App(ctk.CTk):
         style = ttk.Style()
         
         if theme.lower() == 'light':
-            # 라이트 테마 설정
             style.theme_use("default")
-            # 글씨 크기(11pt)와 행 높이(30)를 키워 가독성 향상
             style.configure("Treeview", background="white", foreground="black", fieldbackground="white", borderwidth=0, rowheight=30, font=('Malgun Gothic', 11))
             style.configure("Treeview.Heading", background="#f0f0f0", foreground="black", font=('Malgun Gothic', 12, 'bold'))
             style.map('Treeview', background=[('selected', '#3475d9')])
             style.map('Treeview.Heading', background=[('active', '#dcdcdc')])
-            # 폴더 스타일 추가 (굵은 글씨)
             style.configure("folder", font=('Malgun Gothic', 11, 'bold'))
-            # 원료 그룹별 배경색 스타일 추가
-            style.configure("group_odd", background="#F0F8FF") # AliceBlue
+            style.configure("group_odd", background="#F0F8FF")
             style.configure("group_even", background="white")
             style.map("group_odd", background=[('selected', '#3475d9')])
             style.map("group_even", background=[('selected', '#3475d9')])
         else: # 다크 테마 설정
             style.theme_use("default")
-            # 글씨 크기(11pt)와 행 높이(30)를 키워 가독성 향상
             style.configure("Treeview", background="#2b2b2b", foreground="white", fieldbackground="#2b2b2b", borderwidth=0, rowheight=30, font=('Malgun Gothic', 11))
             style.configure("Treeview.Heading", background="#333333", foreground="white", font=('Malgun Gothic', 12, 'bold'))
             style.map('Treeview', background=[('selected', '#253655')])
             style.map('Treeview.Heading', background=[('active', '#4a4a4a')])
-            # 폴더 스타일 추가 (굵은 글씨)
             style.configure("folder", font=('Malgun Gothic', 11, 'bold'))
-            # 원료 그룹별 배경색 스타일 추가
-            style.configure("group_odd", background="#2c3e50") # Dark Slate Blue
+            style.configure("group_odd", background="#2c3e50")
             style.configure("group_even", background="#2b2b2b")
             style.map("group_odd", background=[('selected', '#253655')])
             style.map("group_even", background=[('selected', '#253655')])
@@ -651,20 +1147,13 @@ class App(ctk.CTk):
     def autosize_treeview_columns(self, treeview, padding=10, min_width=20, max_width=None):
         """
         Treeview의 각 열과 트리 컬럼('#0') 너비를 해당 열의 가장 긴 텍스트에 맞춰 자동 조절합니다.
-        - treeview: ttk.Treeview 인스턴스
-        - padding: 측정된 텍스트 너비에 더할 여유 픽셀
-        - min_width: 최소 너비
-        - max_width: (선택) 최대 너비로 제한
-        사용 예: app.autosize_treeview_columns(my_treeview, padding=18)
         """
         try:
-            # 가능한 경우 Treeview에서 사용 중인 폰트를 얻어 측정에 사용
             try:
                 font = tkfont.Font(font=treeview.cget("font"))
             except Exception:
                 font = tkfont.nametofont("TkDefaultFont")
 
-            # 트리 컬럼('#0') 처리 (있을 경우)
             try:
                 header = treeview.heading('#0').get('text', '') or ''
                 max_w = font.measure(str(header))
@@ -678,10 +1167,8 @@ class App(ctk.CTk):
                     width = min(width, max_width)
                 treeview.column('#0', width=int(width))
             except Exception:
-                # '#0' 컬럼이 없거나 접근 불가하면 무시
                 pass
 
-            # 일반 컬럼들 처리
             cols = list(treeview["columns"]) if treeview["columns"] else []
             for col in cols:
                 header = treeview.heading(col).get('text', '') or col
@@ -690,10 +1177,8 @@ class App(ctk.CTk):
                     try:
                         val = treeview.set(iid, col) or ''
                     except Exception:
-                        # 안전하게 item values에서 시도 (인덱스 불확실 시 빈 문자열)
                         try:
-                            vals = treeview.item(iid).get('values', ())
-                            # 값이 튜플/리스트이고 컬럼 인덱스를 찾을 수 있으면 사용
+                            vals = treeview.item(iid).get('values', ()) # noqa
                             val = vals[cols.index(col)] if cols.index(col) < len(vals) else ''
                         except Exception:
                             val = ''
@@ -710,15 +1195,8 @@ class App(ctk.CTk):
     def move_total_between_en_and_cas(self, treeview, total_candidates=None, en_candidates=None, cas_candidates=None):
         """
         Treeview에서 '총합량' 열을 '영문명' 열 뒤, 'CAS No.' 열 앞에 위치시키는 유틸리티.
-        - treeview: ttk.Treeview 인스턴스
-        - total_candidates: 총합량 컬럼을 식별할 문자열 목록(컬럼 id 또는 헤더 텍스트 일부). 기본값 포함.
-        - en_candidates: 영문명 컬럼 식별 목록(기본값 포함)
-        - cas_candidates: CAS No. 컬럼 식별 목록(기본값 포함)
-        반환: True(성공적으로 이동) / False(대상 컬럼을 찾지 못함)
-        사용: app.move_total_between_en_and_cas(my_treeview)
         """
         try:
-            # 기본 후보 키워드
             if total_candidates is None:
                 total_candidates = ['total', '총합', '총합량', '총량', 'total_amount', 'amount_total']
             if en_candidates is None:
@@ -728,20 +1206,16 @@ class App(ctk.CTk):
 
             cols = list(treeview["columns"]) if treeview["columns"] else []
 
-            # helper: 컬럼 id 또는 heading 텍스트로 매칭
             def find_col_by_candidates(candidates):
                 for c in cols:
-                    # 컬럼 id로 먼저 검사
                     if any(k.lower() in str(c).lower() for k in candidates):
                         return c
-                    # heading 텍스트 검사
                     try:
                         hdr = treeview.heading(c).get('text', '') or ''
                         if any(k.lower() in str(hdr).lower() for k in candidates):
                             return c
                     except Exception:
                         pass
-                # '#0' (tree column) 검사
                 try:
                     hdr0 = treeview.heading('#0').get('text', '') or ''
                     if any(k.lower() in str(hdr0).lower() for k in candidates):
@@ -754,29 +1228,21 @@ class App(ctk.CTk):
             cas_col = find_col_by_candidates(cas_candidates)
             total_col = find_col_by_candidates(total_candidates)
 
-            # 못 찾으면 실패
             if not total_col or not en_col:
                 return False
 
-            # '#0'이 포함될 수 있으므로 처리: columns 튜플에는 '#0'이 없음 -> 별도 처리 필요
-            # 여기서는 '#0'이 총합량/영문명인 경우를 고려하되, 일반적인 컬럼 재배열은 columns 항목만 변경.
             if total_col == '#0' or en_col == '#0' or cas_col == '#0':
-                # 단순한 케이스가 아니면 프레임 쪽에서 수동으로 처리하도록 False 반환
                 return False
 
-            # cols 리스트에서 total_col 제거 후 en_col 다음 위치로 삽입
             if total_col in cols and en_col in cols:
                 cols.remove(total_col)
                 en_index = cols.index(en_col)
                 insert_index = en_index + 1
-                # 만약 cas_col 존재하면 그 앞에 들어가도록 보장
                 if cas_col in cols:
                     cas_index = cols.index(cas_col)
-                    # insert_index가 cas_index보다 크면 cas_index 위치로 조정
                     if insert_index > cas_index:
                         insert_index = cas_index
                 cols.insert(insert_index, total_col)
-                # 재할당하여 순서 변경
                 treeview["columns"] = tuple(cols)
                 return True
 
@@ -788,17 +1254,9 @@ class App(ctk.CTk):
     def reorder_treeview_columns_by_headers(self, treeview, desired_headers_order, match_partial=True):
         """
         Treeview 컬럼을 헤더 텍스트 기준으로 재배열합니다.
-        - treeview: ttk.Treeview 인스턴스
-        - desired_headers_order: 재배열할 헤더 문자열 목록(예: ['국문명','영문명','총함량(%)','cas no.','기능'])
-        - match_partial: True면 부분 일치 허용
-        반환: True/False (성공 여부)
-        사용: app.reorder_treeview_columns_by_headers(my_treeview, ['국문명','영문명','총함량(%)','cas no.','기능'])
         """
         try:
-            # 현재 컬럼 리스트 (('#0'은 columns에 없음))
             cols = list(treeview["columns"]) if treeview["columns"] else []
-
-            # 컬럼 id와 heading 텍스트 매핑 수집
             col_map = {}
             for c in cols:
                 try:
@@ -807,7 +1265,6 @@ class App(ctk.CTk):
                     hdr = ''
                 col_map[c] = hdr
 
-            # '#0' 헤더도 검사 대상에 포함될 수 있으므로 따로 저장
             root_hdr = ''
             try:
                 root_hdr = str(treeview.heading('#0').get('text', '') or '')
@@ -826,33 +1283,26 @@ class App(ctk.CTk):
             for desired in desired_headers_order:
                 nd = normalize(desired)
                 found = None
-                # 1) header 텍스트로 정확/부분 매칭
                 for c, nh in norm_map.items():
                     if c in used:
                         continue
                     if (nh == nd) or (match_partial and nd in nh) or (match_partial and nh in nd):
                         found = c
                         break
-                # 2) '#0' 매칭 검사
                 if not found and norm_root:
                     if (norm_root == nd) or (match_partial and nd in norm_root) or (match_partial and norm_root in nd):
-                        # '#0'는 columns 튜플에 포함되지 않으므로 무시하고 실패 처리
-                        # 프레임 쪽에서 '#0'을 컬럼으로 사용하면 별도 처리 필요
                         found = None
                 if found:
                     new_order.append(found)
                     used.add(found)
 
-            # 나머지(사용되지 않은) 컬럼은 기존 순서대로 뒤에 붙인다.
             for c in cols:
                 if c not in used:
                     new_order.append(c)
 
-            # 유효성: 새 순서가 기존 columns와 같은 길이를 가지면 적용
             if len(new_order) == len(cols) and tuple(new_order) != tuple(cols):
                 treeview["columns"] = tuple(new_order)
                 return True
-            # 길이가 다르거나 변경 없음이면 False 반환
             return False
         except Exception as e:
             print(f"[경고] reorder_treeview_columns_by_headers 실패: {e}")
@@ -861,11 +1311,9 @@ class App(ctk.CTk):
     def reorder_ingredient_sum_columns(self, treeview):
         """
         전성분 합계 탭(복합 전성분, 서류용) 전용 래퍼.
-        요청된 순서: [국문명, 영문명, 총함량(%), cas no., 기능]
         """
         desired = ['구분', '국문명', '영문명', '총함량(%)', 'cas no.', '기능']
         res = self.reorder_treeview_columns_by_headers(treeview, desired, match_partial=True)
-        # 전성분 합계 탭은 항상 '구분'을 행 번호로 표시해야 하므로 강제 교정
         try:
             self.normalize_group_column_to_row_numbers(treeview, header_name='구분', force=True)
         except Exception:
@@ -874,21 +1322,12 @@ class App(ctk.CTk):
 
     def normalize_group_column_to_row_numbers(self, treeview, header_name='구분', force=False):
         """
-        '구분' 헤더(또는 지정한 header_name)에 들어있는 값이
-        "1,10,18,..." 처럼 쉼표로 연결된 ID 목록으로 보일 때,
-        각 행에 대해 해당 값을 해당 행의 순번(1-based)으로 대체합니다.
-
-        - treeview: ttk.Treeview 인스턴스
-        - header_name: 헤더 텍스트(부분일치 허용)
-        - force: True면 내용과 상관없이 모든 행을 해당 행 번호로 덮어씀
-        동작: 변경이 필요할 때만 수정. '#0' 컬럼(트리 텍스트)도 지원.
+        '구분' 헤더의 값이 ID 목록일 때 행 번호로 대체합니다.
         """
-        # 컬럼 id 찾기 (헤더 텍스트 기준, 부분 일치 허용)
         cols = list(treeview["columns"]) if treeview["columns"] else []
         target_col = None
         header_norm = ''.join(ch for ch in (header_name or '').lower() if ch.isalnum())
 
-        # 먼저 columns에서 헤더 텍스트 매칭
         for c in cols:
             try:
                 hdr = str(treeview.heading(c).get('text', '') or '')
@@ -899,7 +1338,6 @@ class App(ctk.CTk):
                 target_col = c
                 break
 
-        # '#0' 헤더도 가능성 검사
         if not target_col:
             try:
                 hdr0 = str(treeview.heading('#0').get('text', '') or '')
@@ -910,13 +1348,10 @@ class App(ctk.CTk):
                 pass
 
         if not target_col:
-            # 대상 컬럼을 찾지 못하면 아무 작업 안 함
             return
 
-        # 값이 "숫자(,숫자...)" 형태인지 확인하는 정규식
         listnum_re = re.compile(r'^\s*\d+(?:\s*,\s*\d+\s*)*$')
 
-        # 각 행 순회하며 필요 시 교정 (force=True면 무조건 교정)
         for idx, iid in enumerate(treeview.get_children(), start=1):
             try:
                 if target_col == '#0':
@@ -935,18 +1370,15 @@ class App(ctk.CTk):
                     except Exception:
                         pass
                 else:
-                    # 시도 1: set 사용
                     try:
                         treeview.set(iid, target_col, new_val)
                         continue
                     except Exception:
                         pass
-                    # 시도 2: item values로 재설정
                     try:
-                        vals = list(treeview.item(iid).get('values', ()))
+                        vals = list(treeview.item(iid).get('values', ())) # noqa
                         col_index = cols.index(target_col) if target_col in cols else None
                         if col_index is not None:
-                            # 확장 필요 시 빈값으로 채움
                             while len(vals) <= col_index:
                                 vals.append('')
                             vals[col_index] = new_val
@@ -958,27 +1390,109 @@ class App(ctk.CTk):
     def logout(self):
         print(f"{datetime.now()}: logout 호출")
 
-        # 자동 로그인 설정 해제
         try:
-            self.save_recent_actions() # 로그아웃 전 활동 기록 저장
+            self.save_recent_actions()
             LoginWindow.disable_auto_login_on_logout(CONFIG_FILE_PATH, self.current_user.username)
             print(f"{datetime.now()}: 자동 로그인 설정 해제 완료")
         except Exception as e:
             print(f"{datetime.now()}: 자동 로그인 해제 중 오류: {e}")
 
-        # UI 리셋
         self.current_user = None
         for widget in self.winfo_children():
             widget.destroy()
         self.withdraw()
         self.show_login_window()
 
+    def handle_restart_db_sync(self):
+        """재시작 시 DB 동기화를 처리합니다"""
+        try:
+            sync_required = os.environ.get('DB_SYNC_REQUIRED')
+            sync_source = os.environ.get('DB_SYNC_SOURCE')
+            
+            if sync_required == 'True' and sync_source:
+                print(f"[재시작-DB동기화] 동기화 처리 시작: {sync_source}")
+                
+                # 환경 변수 정리
+                if 'DB_SYNC_REQUIRED' in os.environ:
+                    del os.environ['DB_SYNC_REQUIRED']
+                if 'DB_SYNC_SOURCE' in os.environ:
+                    del os.environ['DB_SYNC_SOURCE']
+                
+                # 실제 DB 파일 동기화 수행
+                if os.path.exists(sync_source):
+                    import shutil
+                    local_db_path = os.path.join(application_path, db_manager.get_db_relative_path(), "cosmetic.db")
+                    
+                    # 기존 DB 연결 완전히 해제
+                    try:
+                        db_manager.dispose_engine()
+                        print("[재시작-DB동기화] 기존 DB 연결 해제 완료")
+                    except Exception as e:
+                        print(f"[재시작-DB동기화] DB 연결 해제 중 오류: {e}")
+                    
+                    # 잠시 대기 (파일 잠금 해제)
+                    import time
+                    time.sleep(1)
+                    
+                    # 파일 복사
+                    shutil.copy2(sync_source, local_db_path)
+                    print(f"[재시작-DB동기화] DB 파일 복사 완료: {local_db_path}")
+                    
+                    # 동기화 완료 플래그 설정
+                    os.environ['DB_SYNC_COMPLETED'] = 'True'
+                    
+                    return True
+                else:
+                    print(f"[재시작-DB동기화] 소스 파일을 찾을 수 없음: {sync_source}")
+                    
+            return False
+            
+        except Exception as e:
+            print(f"[재시작-DB동기화] 처리 중 오류: {e}")
+            return False
+
     def on_closing(self):
         """프로그램이 종료될 때 호출되는 함수입니다."""
         print(f"{datetime.now()}: 프로그램 종료 중... 활동 기록 저장")
-        self.save_app_settings()
-        self.save_recent_actions()
-        self.destroy()
+        try:
+            # 1. DB 동기화 타이머 중지
+            self.stop_db_sync_check()
+            
+            # 2. 설정 및 활동 기록 저장
+            self.save_app_settings()
+            self.save_recent_actions()
+            
+            # 3. DB 연결 완전히 해제
+            print(f"{datetime.now()}: DB 연결 해제 중...")
+            db_manager.dispose_engine()
+            print(f"{datetime.now()}: DB 연결 해제 완료")
+            
+            # 4. 모든 자식 창 강제 종료
+            for child in self.winfo_children():
+                try:
+                    if hasattr(child, 'destroy'):
+                        child.destroy()
+                except:
+                    pass
+            
+            # 5. 메인 창 파괴
+            self.destroy()
+            
+            # 6. 완전한 프로세스 종료
+            print(f"{datetime.now()}: 프로그램 종료 완료")
+            
+        except Exception as e:
+            print(f"{datetime.now()}: 종료 중 오류 발생: {e}")
+        finally:
+            # 강제 종료 (모든 스레드와 프로세스 완전 종료)
+            try:
+                self.destroy()
+            except:
+                pass
+            
+            # 시스템 종료
+            import threading
+            threading.Timer(0.1, lambda: os._exit(0)).start()
 
     def get_config_value(self, section, option, fallback=None):
         """config.ini에서 값을 읽어옵니다."""
@@ -1008,55 +1522,75 @@ class App(ctk.CTk):
     def center_on_mouse_screen(self):
         """
         마우스 커서가 위치한 모니터의 중앙에 창을 배치하고 크기를 조절합니다.
-        멀티 모니터 환경에서 각기 다른 해상도를 지원합니다.
         """
         self.update_idletasks()
 
-        # 마우스 커서의 현재 위치를 가져와서 해당 모니터의 정보를 얻습니다.
         pointer_x = self.winfo_pointerx()
         pointer_y = self.winfo_pointery()
 
-        # 창을 임시로 마우스 위치에 옮겨서 해당 모니터의 정보를 얻습니다.
         self.geometry(f'+{pointer_x}+{pointer_y}')
         self.update_idletasks()
         
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
 
-        # [수정] 창 크기를 화면 크기에 비례하여 설정
         width = int(screen_width * 0.85)
-        height = int(screen_height * 0.7) # [수정] 높이를 1/3 줄여서 60%로 설정
+        height = int(screen_height * 0.8)
 
-        # [수정] 모니터의 중앙에 위치하도록 좌표 계산
         x = (screen_width // 2) - (width // 2)
         y = (screen_height // 2) - (height // 2)
 
-        # [수정] 크기와 위치를 한 번에 설정하여 정확도를 높입니다.
         self.geometry(f"{width}x{height}+{x}+{y}")
-        self.minsize(int(screen_width * 0.6), int(screen_height * 0.6))
+        self.minsize(int(screen_width * 0.6), int(screen_height * 0.7))
 
     def recreate_main_ui(self):
         """메인 UI를 재생성하여 언어 변경 등을 반영합니다."""
-        # ACTION_CONFIG와 같은 동적 설정을 다시 생성하기 위해 기존 UI 위젯을 먼저 제거합니다.
         for widget in self.winfo_children():
             widget.destroy()
 
-        # 언어 설정에 따라 번역 텍스트를 다시 로드합니다.
         self.texts = get_texts(self.language)
 
-        # 최근 활동 기록은 유지되어야 하므로 그대로 둡니다.
-        # self.recent_actions.clear() # 기존 기록을 유지해야 하므로 주석 처리
-
-        # 메인 UI를 새로운 설정으로 다시 설정합니다.
         self.setup_main_ui()
         self.update_treeview_style()
-        # 기존 메인 UI 위젯들 제거
+
+    def refresh_data_in_all_frames(self):
+        """모든 프레임을 순회하며 refresh_data 메소드가 있으면 호출합니다."""
+        print("모든 프레임의 데이터 새로고침 시작...")
+        for frame_name, frame_instance in self.frames.items():
+            if hasattr(frame_instance, 'refresh_data'):
+                try:
+                    print(f"  - {frame_name} 프레임 새로고침 중...")
+                    frame_instance.refresh_data()
+                except Exception as e:
+                    print(f"[오류] 프레임 '{frame_name}' 새로고침 실패: {e}")
 
     def start_db_sync_check(self):
         """공유 DB의 변경 사항을 주기적으로 확인하는 타이머를 시작합니다."""
-        # 30초마다 check_shared_db 함수를 호출
+        # 초기 DB 상태를 조용히 설정 (알림 없이)
+        self.initialize_db_sync_baseline()
+        # 첫 체크는 1분 후부터 시작 (초기 설정 시간 여유)
+        self.db_sync_timer = self.after(60000, self.start_periodic_sync_check)
+        
+    def initialize_db_sync_baseline(self):
+        """DB 동기화 기준선을 조용히 설정합니다."""
+        try:
+            config = configparser.ConfigParser()
+            config.read(CONFIG_FILE_PATH, encoding='utf-8')
+            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+            
+            if shared_db_path and os.path.exists(shared_db_path):
+                shared_db_stat = os.stat(shared_db_path)
+                self.last_shared_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
+                print(f"[DB동기화] 기준선 설정 완료: 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
+            else:
+                print("[DB동기화] 공유 DB 경로가 설정되지 않음 또는 파일 없음")
+        except Exception as e:
+            print(f"[DB동기화] 기준선 설정 중 오류: {e}")
+            
+    def start_periodic_sync_check(self):
+        """주기적인 DB 동기화 검사를 시작합니다."""
         self.check_shared_db()
-        self.db_sync_timer = self.after(30000, self.start_db_sync_check)
+        self.db_sync_timer = self.after(30000, self.start_periodic_sync_check)
 
     def stop_db_sync_check(self):
         """DB 동기화 검사 타이머를 중지합니다."""
@@ -1066,63 +1600,276 @@ class App(ctk.CTk):
 
     def check_shared_db(self):
         """공유 DB 파일의 상태를 확인하고, 변경 시 업데이트를 제안합니다."""
-        config = configparser.ConfigParser()
-        config.read(CONFIG_FILE_PATH, encoding='utf-8')
-        shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
-
-        if not shared_db_path or not os.path.exists(shared_db_path):
-            return # 공유 경로가 설정되지 않았거나 존재하지 않으면 중단
-
         try:
-            # 공유 DB 파일의 정보 가져오기
-            shared_db_stat = os.stat(shared_db_path)
-            current_db_info = (shared_db_stat.st_size, shared_db_stat.st_mtime)
+            config = configparser.ConfigParser()
+            config.read(CONFIG_FILE_PATH, encoding='utf-8')
+            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
-            # 처음 확인하는 경우, 현재 상태를 저장만 함
-            if self.last_shared_db_info == (0, 0):
-                self.last_shared_db_info = current_db_info
+            if not shared_db_path:
+                if self.current_user.is_admin and not self.db_path_warning_shown:
+                    messagebox.showinfo(
+                        "DB 동기화 설정 안내",
+                        "공유 데이터베이스 동기화 기능이 활성화되었지만, 경로가 설정되지 않았습니다.\n\n[설정] 메뉴에서 공유 DB 파일의 경로를 지정해주세요.",
+                        parent=self
+                    )
+                    self.db_path_warning_shown = True
                 return
 
-            # 이전 정보와 다를 경우, 변경된 것으로 간주
-            if self.last_shared_db_info != current_db_info:
-                print("공유 DB 변경 감지! 업데이트 제안")
-                self.last_shared_db_info = current_db_info # 다음 비교를 위해 최신 정보로 업데이트
+            if not os.path.exists(shared_db_path):
+                if self.current_user.is_admin and not self.db_path_warning_shown:
+                     messagebox.showwarning(
+                        "DB 동기화 경로 오류",
+                        f"설정된 공유 DB 경로를 찾을 수 없습니다:\n{shared_db_path}\n\n[설정] 메뉴에서 경로를 다시 확인해주세요.",
+                        parent=self
+                    )
+                     self.db_path_warning_shown = True
+                return
+            
+            shared_db_stat = os.stat(shared_db_path)
+            # 파일 크기와 수정 시간을 더 정확하게 체크
+            current_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
 
-                if messagebox.askyesno("데이터베이스 업데이트", "다른 사용자가 데이터를 업데이트했습니다.\n최신 데이터로 동기화하시겠습니까?\n\n(프로그램이 재시작됩니다.)"):
-                    self.sync_with_shared_db(shared_db_path)
+            # 초기 설정 시에는 현재 정보만 저장하고 알림 표시하지 않음
+            if self.last_shared_db_info == (0, 0):
+                self.last_shared_db_info = current_db_info
+                print(f"[DB동기화] 초기 DB 상태 설정: 크기={current_db_info[0]}, 수정시간={current_db_info[1]}")
+                return
+
+            # 실제 변경사항이 있는지 더 엄격하게 체크
+            if self.last_shared_db_info != current_db_info:
+                # 파일 크기가 다르거나, 수정 시간이 15초 이상 차이날 때만 변경으로 간주 (더 보수적)
+                size_changed = self.last_shared_db_info[0] != current_db_info[0]
+                time_diff = abs(self.last_shared_db_info[1] - current_db_info[1])
+                
+                # 최소 변경 임계값 더 증가 (15초 이상, 크기는 2KB 이상 변경)
+                significant_size_change = size_changed and abs(self.last_shared_db_info[0] - current_db_info[0]) > 2048
+                significant_time_change = time_diff > 15
+                
+                if significant_size_change or significant_time_change:
+                    print(f"[DB동기화] 실제 변경 감지! 크기변경: {significant_size_change} ({self.last_shared_db_info[0]} -> {current_db_info[0]}), 시간차: {time_diff}초")
+                    
+                    # 현재 사용자가 관리자인 경우, 자신의 변경일 가능성이 있으므로 더 신중하게 처리
+                    if self.current_user.is_admin:
+                        # 관리자의 경우 더 큰 변경이거나 오래된 변경일 때만 알림 (더 보수적)
+                        if time_diff > 60 or abs(self.last_shared_db_info[0] - current_db_info[0]) > 20480:  # 1분 이상 또는 20KB 이상
+                            self.last_shared_db_info = current_db_info
+                            if messagebox.askyesno("데이터베이스 업데이트", 
+                                                 f"공유 데이터베이스에 외부 변경사항이 감지되었습니다.\n"
+                                                 f"(크기 변경: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)\n\n"
+                                                 f"최신 데이터로 동기화하시겠습니까?\n\n"
+                                                 f"※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.\n"
+                                                 f"※ 동기화 후 프로그램이 재시작됩니다.", parent=self):
+                                self.sync_with_shared_db_safe(shared_db_path)
+                        else:
+                            # 관리자의 경우 작은 변경은 자신의 변경으로 간주하고 조용히 업데이트
+                            print(f"[DB동기화] 관리자 변경으로 추정되어 조용히 업데이트 (시간차: {time_diff}초)")
+                            self.last_shared_db_info = current_db_info
+                    else:
+                        # 일반 사용자의 경우 모든 변경에 대해 알림
+                        self.last_shared_db_info = current_db_info
+                        if messagebox.askyesno("데이터베이스 업데이트", 
+                                             "관리자에 의해 데이터가 변경되었습니다.\n"
+                                             "최신 데이터로 동기화하시겠습니까?\n\n"
+                                             "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.\n"
+                                             "※ 동기화 후 프로그램이 재시작됩니다.", parent=self):
+                            self.sync_with_shared_db_safe(shared_db_path)
+                else:
+                    # 미미한 변경사항은 무시하고 정보만 업데이트
+                    print(f"[DB동기화] 미미한 변경 무시 (크기차: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)")
+                    self.last_shared_db_info = current_db_info
 
         except (FileNotFoundError, OSError):
-            # 공유 DB 파일이 없거나 접근 권한 문제 등으로 오류 발생 시 무시
             pass
         except Exception as e:
             print(f"[경고] 공유 DB 확인 중 오류 발생: {e}")
+            # 오류 발생시 동기화 타이머를 일시 중지 (오류 누적 방지)
+            self.stop_db_sync_check()
+            print("[DB동기화] 오류로 인해 동기화 타이머를 일시 중지합니다.")
 
-    def sync_with_shared_db(self, shared_db_path):
-        """공유 DB 파일을 로컬 DB로 복사하고 프로그램을 재시작합니다."""
-        import shutil
-        local_db_path = os.path.join(application_path, db_manager.get_db_relative_path(), "cosmetic.db")
-        
+    def sync_with_shared_db_safe(self, shared_db_path):
+        """안전한 공유 DB 동기화 - 재시작을 통해 안정성 보장"""
         try:
-            db_manager.dispose_engine() # DB 연결 해제
-            shutil.copy(shared_db_path, local_db_path) # 파일 복사
-            self.restart_program() # 프로그램 재시작
+            print(f"[DB동기화] 안전한 동기화 시작: {shared_db_path}")
+            
+            # 현재 작업 저장 안내
+            if messagebox.askyesno("동기화 전 확인", 
+                                "동기화를 위해 프로그램이 재시작됩니다.\n\n"
+                                "저장하지 않은 작업이 있다면 지금 저장하세요.\n"
+                                "계속 진행하시겠습니까?", parent=self):
+                
+                # 동기화 정보를 환경변수에 저장
+                os.environ['DB_SYNC_REQUIRED'] = 'True'
+                os.environ['DB_SYNC_SOURCE'] = shared_db_path
+                
+                print("[DB동기화] 재시작을 통한 동기화 진행")
+                self.restart_program()
+            else:
+                print("[DB동기화] 사용자가 동기화를 취소했습니다.")
+                
         except Exception as e:
-            messagebox.showerror("동기화 오류", f"데이터베이스 동기화 중 오류가 발생했습니다: {e}")
+            print(f"[DB동기화] 안전한 동기화 중 오류: {e}")
+            messagebox.showerror("동기화 오류", 
+                               f"데이터베이스 동기화 준비 중 오류가 발생했습니다:\n\n{e}\n\n"
+                               f"프로그램을 재시작해보세요.", parent=self)
+    
+    def sync_with_shared_db(self, shared_db_path):
+        """기존 동기화 메서드 (레거시 호환용)"""
+        print("[DB동기화] 기존 동기화 메서드 호출 - 안전한 동기화로 전환")
+        self.sync_with_shared_db_safe(shared_db_path)
 
     def restart_program(self):
         """프로그램을 재시작합니다."""
+        restart_error = None
+        
         try:
-            print("프로그램 재시작...")
-            self.destroy()  # 현재 창 닫기
+            print(f"{datetime.now()}: 프로그램 재시작 시작...")
+            
+            # 1. DB 연결 완전히 해제
+            try:
+                print(f"{datetime.now()}: DB 연결 해제 중...")
+                db_manager.dispose_engine()
+                print(f"{datetime.now()}: DB 연결 해제 완료")
+            except Exception as db_error:
+                error_msg = f"DB 해제 중 오류: {db_error}"
+                print(f"{datetime.now()}: {error_msg}")
+                restart_error = error_msg
+            
+            # 2. 설정 저장
+            try:
+                self.save_app_settings()
+                self.save_recent_actions()
+                print(f"{datetime.now()}: 설정 저장 완료")
+            except Exception as save_error:
+                error_msg = f"설정 저장 중 오류: {save_error}"
+                print(f"{datetime.now()}: {error_msg}")
+                if not restart_error:
+                    restart_error = error_msg
+            
+            # 3. 타이머 중지
+            try:
+                self.stop_db_sync_check()
+                print(f"{datetime.now()}: 타이머 중지 완료")
+            except Exception as timer_error:
+                error_msg = f"타이머 중지 중 오류: {timer_error}"
+                print(f"{datetime.now()}: {error_msg}")
+                if not restart_error:
+                    restart_error = error_msg
+            
+            # 4. GUI 리소스 정리
+            try:
+                for widget in self.winfo_children():
+                    widget.destroy()
+                self.withdraw()
+                print(f"{datetime.now()}: GUI 리소스 정리 완료")
+            except Exception as gui_error:
+                error_msg = f"GUI 정리 중 오류: {gui_error}"
+                print(f"{datetime.now()}: {error_msg}")
+                if not restart_error:
+                    restart_error = error_msg
+            
+            # 5. 파일 및 DB 정리 완료 대기 (재시작 시 파일 접근 보장)
+            import time
+            time.sleep(2.0)  # 대기 시간 증가하여 파일 잠금 해제 보장
+            
+            # 6. 추가 파일 정리 확인
+            try:
+                # 설정 파일과 데이터 파일 접근 가능 확인
+                import gc
+                gc.collect()  # 가비지 컬렉션으로 리소스 정리
+                print(f"{datetime.now()}: 리소스 정리 완료")
+            except Exception as cleanup_error:
+                print(f"{datetime.now()}: 리소스 정리 중 오류: {cleanup_error}")
 
-            # 현재 실행 파일 경로와 인자들을 사용하여 새 프로세스 시작
-            # sys.executable은 python.exe 또는 빌드된 .exe 파일의 경로
-            subprocess.Popen([sys.executable] + sys.argv)
+            # 6. 오류 발생 시 사용자에게 알리고 수동 재시작 안내
+            if restart_error:
+                try:
+                    result = messagebox.askyesno("재시작 오류 발생", 
+                                               f"재시작 준비 중 오류가 발생했습니다:\n\n{restart_error}\n\n"
+                                               f"그래도 재시작을 시도하시겠습니까?\n\n"
+                                               f"'아니요'를 선택하면 수동으로 프로그램을 다시 실행해주세요.", 
+                                               parent=None)  # parent=None으로 독립 창
+                    
+                    if not result:
+                        print(f"{datetime.now()}: 사용자가 재시작 취소")
+                        return
+                        
+                except Exception as msg_error:
+                    print(f"{datetime.now()}: 메시지박스 표시 실패: {msg_error}")
+
+            # 7. 새 프로세스 시작 (경로와 환경 설정 보장)
+            print(f"{datetime.now()}: 새 프로세스 시작...")
+            
+            try:
+                # 실행 파일 경로 결정
+                if getattr(sys, 'frozen', False):
+                    # 패키징된 실행 파일인 경우
+                    executable_path = sys.executable
+                    current_dir = os.path.dirname(sys.executable)
+                else:
+                    # 개발 환경인 경우
+                    executable_path = sys.executable
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                
+                print(f"{datetime.now()}: 실행 경로: {executable_path}")
+                print(f"{datetime.now()}: 작업 디렉토리: {current_dir}")
+                
+                # 환경 변수 설정 (모듈 경로 보장 및 사용자 정보 전달)
+                env = os.environ.copy()
+                if getattr(sys, 'frozen', False):
+                    # PyInstaller 환경에서 모듈 경로 설정
+                    env['PYTHONPATH'] = os.pathsep.join([
+                        os.path.join(current_dir, 'modules'),
+                        os.path.join(current_dir, 'database'),
+                        os.path.join(current_dir, 'utils'),
+                        env.get('PYTHONPATH', '')
+                    ])
+                
+                # 재시작 시 사용자 정보 전달
+                if hasattr(self, 'current_user') and self.current_user:
+                    env['APP_RESTARTING'] = 'True'
+                    env['RESTART_USER_ID'] = str(self.current_user.id)
+                    env['RESTART_USER_IS_ADMIN'] = str(self.current_user.is_admin)
+                    print(f"[RESTART] 사용자 정보 전달: {self.current_user.id} (관리자: {self.current_user.is_admin})")
+                
+                # 새 프로세스 시작 (작업 디렉토리 및 환경 변수 명시적 설정)
+                subprocess.Popen(
+                    [executable_path] + (sys.argv[1:] if not getattr(sys, 'frozen', False) else []),
+                    cwd=current_dir,  # 작업 디렉토리 명시적 설정
+                    env=env,  # 환경 변수 설정
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+                )
+                print(f"{datetime.now()}: 새 프로세스 시작 성공 (환경 변수 포함)")
+            except Exception as process_error:
+                error_msg = f"새 프로세스 시작 실패: {process_error}"
+                print(f"{datetime.now()}: {error_msg}")
+                try:
+                    messagebox.showerror("재시작 실패", 
+                                       f"{error_msg}\n\n"
+                                       f"프로그램을 수동으로 종료하고 다시 실행해주세요.", 
+                                       parent=None)
+                except Exception:
+                    pass
+                return
+
+            # 8. 현재 프로세스 종료
+            print(f"{datetime.now()}: 현재 프로세스 종료")
+            import os as _os
+            _os._exit(0)
+            
         except Exception as e:
-            print(f"프로그램 재시작 실패: {e}")
+            error_msg = f"프로그램 재시작 실패: {e}"
+            print(f"{datetime.now()}: {error_msg}")
+            
+            # 재시작 실패 시 사용자에게 수동 재시작 안내
+            try:
+                messagebox.showerror("심각한 재시작 오류", 
+                                   f"자동 재시작에 실패했습니다.\n\n"
+                                   f"오류: {str(e)}\n\n"
+                                   f"프로그램을 수동으로 종료하고 다시 실행해주세요.", 
+                                   parent=None)
+            except Exception:
+                pass
 
-# --- 변경: get_texts에 안전한 기본값 주입용 래퍼 추가 ---
-# 기존 get_texts를 보존한 뒤, 누락된 키가 있으면 언어에 맞는 기본 문자열을 삽입합니다.
 _old_get_texts = get_texts
 def safe_get_texts(lang):
     try:
@@ -1130,40 +1877,90 @@ def safe_get_texts(lang):
     except Exception:
         texts = {}
 
-    # 기본 메시지 (한국어 / 영어)
     defaults_korean = {
         'export_formulation_name_empty': '내보낼 제형명을 입력해주세요.',
         'warning': '경고',
-        'finished_product_report': '완제품 시험성적서',
-        'ingredient_report': '원료목록보고',
     }
     defaults_english = {
         'export_formulation_name_empty': 'Please enter a name for the formulation to export.',
         'warning': 'Warning',
-        'finished_product_report': 'Finished Product Test Report',
-        'ingredient_report': 'Ingredient List Report',
     }
 
     lang_key = (lang or '').lower()
     defaults = defaults_english if 'eng' in lang_key or lang_key.startswith('en') else defaults_korean
 
-    # 누락된 키를 채움
     for k, v in defaults.items():
         if k not in texts:
             texts[k] = v
 
     return texts
 
-# 모듈 전체에 적용 (다른 모듈들이 import할 때도 안전한 버전 사용)
 try:
     _translation.get_texts = safe_get_texts
-    get_texts = safe_get_texts  # 로컬 참조도 교체
+    get_texts = safe_get_texts
 except Exception as e:
     print(f"[경고] 번역 래퍼 적용 실패: {e}")
 
+def check_sqlite_availability():
+    """SQLite 모듈 가용성을 확인합니다."""
+    try:
+        import sqlite3
+        # 간단한 메모리 DB 생성 테스트
+        conn = sqlite3.connect(':memory:')
+        conn.execute('CREATE TABLE test (id INTEGER)')
+        conn.close()
+        print("[STARTUP] SQLite 모듈 정상 작동 확인")
+        return True
+    except Exception as e:
+        print(f"[STARTUP] SQLite 모듈 오류: {e}")
+        
+        # 오류 발생 시 상세 진단
+        print("[STARTUP] SQLite 진단 시작...")
+        
+        try:
+            import _sqlite3
+            print("[STARTUP] _sqlite3 모듈 가져오기 성공")
+        except ImportError as ie:
+            print(f"[STARTUP] _sqlite3 모듈 가져오기 실패: {ie}")
+        
+        if hasattr(sys, '_MEIPASS'):
+            import os
+            meipass_files = [f for f in os.listdir(sys._MEIPASS) if 'sqlite' in f.lower()]
+            print(f"[STARTUP] _MEIPASS 내 SQLite 관련 파일들: {meipass_files}")
+        
+        return False
+
 if __name__ == "__main__":
-    # App 생성자에서 설정을 로드하므로 여기서 미리 적용할 필요 없음
-    ctk.set_default_color_theme("blue")
+    # SQLite 가용성 확인
+    if not check_sqlite_availability():
+        import tkinter as tk
+        from tkinter import messagebox
+        
+        root = tk.Tk()
+        root.withdraw()
+        
+        messagebox.showerror(
+            "시스템 오류",
+            "SQLite 데이터베이스 모듈을 로드할 수 없습니다.\n\n"
+            "이는 빌드 과정에서 필요한 모듈이 포함되지 않았기 때문입니다.\n"
+            "개발자에게 문의해주세요.\n\n"
+            "오류 코드: SQLITE_MODULE_MISSING"
+        )
+        sys.exit(1)
+    
+    # CustomTkinter 테마 설정 (안전한 방식)
+    try:
+        ctk.set_default_color_theme("blue")
+        print("[STARTUP] CustomTkinter 테마 설정 완료")
+    except Exception as theme_error:
+        print(f"[WARNING] CustomTkinter 테마 설정 실패: {theme_error}")
+        try:
+            # 기본 테마로 폴백
+            ctk.set_default_color_theme("dark-blue")
+            print("[STARTUP] 기본 테마로 폴백 완료")
+        except Exception as fallback_error:
+            print(f"[WARNING] 기본 테마도 실패: {fallback_error}")
+            # 테마 없이 진행
     
     app = App()
     app.mainloop()
