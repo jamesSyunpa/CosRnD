@@ -489,26 +489,26 @@ class DocumentManagementFrame(ctk.CTkFrame):
         
         # 관리자 전용 버튼들 (왼쪽 정렬)
         if self.current_user.is_admin:
-            self.export_logs_button = ctk.CTkButton(bottom_button_frame, text="이력 내보내기", width=95, command=self.export_change_logs, font=("", 11))
+            self.export_logs_button = ctk.CTkButton(bottom_button_frame, text="이력 내보내기", width=85, height=26, command=self.export_change_logs, font=("", 12))
             self.export_logs_button.pack(side="left", padx=(0, 5))
         
         # --- 오른쪽 정렬 버튼들 ---
         # pack을 right로 하면 역순으로 추가해야 원하는 순서대로 보입니다.
         if self.current_user.is_admin:
-            self.import_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 가져오기", width=110, command=self.import_all_formulations, font=("", 11))
+            self.import_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 가져오기", width=100, height=26, command=self.import_all_formulations, font=("", 12))
             self.import_all_button.pack(side="right", padx=3)
-            self.export_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 내보내기", width=110, command=self.export_all_formulations, font=("", 11))
+            self.export_all_button = ctk.CTkButton(bottom_button_frame, text="처방 전체 내보내기", width=100, height=26, command=self.export_all_formulations, font=("", 12))
             self.export_all_button.pack(side="right", padx=3)
         # 단일 처방 엑셀 내보내기 (항상 Excel)
-        self.export_single_button = ctk.CTkButton(bottom_button_frame, text="처방 내보내기", width=90, command=self.export_selected_formulation_to_excel, font=("", 11))
+        self.export_single_button = ctk.CTkButton(bottom_button_frame, text="처방 내보내기", width=80, height=26, command=self.export_selected_formulation_to_excel, font=("", 12))
         self.export_single_button.pack(side="right", padx=3)
-        self.delete_button = ctk.CTkButton(bottom_button_frame, text=self.texts['delete'], width=75, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation, font=("", 11))
+        self.delete_button = ctk.CTkButton(bottom_button_frame, text=self.texts['delete'], width=65, height=26, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_formulation, font=("", 12))
         self.delete_button.pack(side="right", padx=3) # 오른쪽에 여백 추가
-        self.copy_button = ctk.CTkButton(bottom_button_frame, text="처방 복사", width=75, fg_color="#2B7A3B", hover_color="#236030", command=self.copy_formulation, font=("", 11))
+        self.copy_button = ctk.CTkButton(bottom_button_frame, text="처방 복사", width=65, height=26, fg_color="#2B7A3B", hover_color="#236030", command=self.copy_formulation, font=("", 12))
         self.copy_button.pack(side="right", padx=3)
-        self.edit_button = ctk.CTkButton(bottom_button_frame, text=self.texts['edit'], width=70, command=lambda: self.open_formulation_popup(edit_mode=True), font=("", 11))
+        self.edit_button = ctk.CTkButton(bottom_button_frame, text=self.texts['edit'], width=60, height=26, command=lambda: self.open_formulation_popup(edit_mode=True), font=("", 12))
         self.edit_button.pack(side="right", padx=3)
-        self.new_button = ctk.CTkButton(bottom_button_frame, text=self.texts['new'], width=70, command=lambda: self.open_formulation_popup(edit_mode=False), font=("", 11))
+        self.new_button = ctk.CTkButton(bottom_button_frame, text=self.texts['new'], width=60, height=26, command=lambda: self.open_formulation_popup(edit_mode=False), font=("", 12))
         self.new_button.pack(side="right", padx=3)
 
         self.show_folder_view() # 초기 화면은 폴더 뷰
@@ -5663,8 +5663,8 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                 self.icon_size_slider.set(40)
         try:
             query = session.query(Formulation.experiment_name, func.count(Formulation.id))
-            # 삭제되지 않은 처방만 표시
-            query = query.filter(Formulation.is_deleted == False)
+            # is_deleted 컬럼이 없으므로 필터 제거
+            # query = query.filter(Formulation.is_deleted == False)
             if client_id:
                 query = query.filter(Formulation.oem_odm_client_id == client_id) # 타겟 거래처는 텍스트이므로 필터에서 제외
             grouped_data = query.group_by(Formulation.experiment_name).order_by(Formulation.experiment_name).all()

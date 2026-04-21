@@ -1,10 +1,9 @@
 # modules/ui_components.py
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 import json
 from database.db_manager import db_manager
-from utils import center_window_on_mouse_display
 from modules.translation import get_texts
 
 class HelpPopup(ctk.CTkToplevel):
@@ -28,10 +27,6 @@ class HelpPopup(ctk.CTkToplevel):
 
         close_button = ctk.CTkButton(self, text=self.texts['close'], command=self.destroy)
         close_button.grid(row=1, column=0, padx=15, pady=(0, 15))
-        try:
-            center_window_on_mouse_display(self)
-        except Exception:
-            pass
 
 class CustomErrorDialog(ctk.CTkToplevel):
     """'클립보드로 복사' 기능이 포함된 커스텀 오류 대화상자"""
@@ -70,10 +65,6 @@ class CustomErrorDialog(ctk.CTkToplevel):
 
         copy_button = ctk.CTkButton(button_frame, text="클립보드로 복사", command=self.copy_to_clipboard)
         copy_button.pack(side="right", padx=10)
-        try:
-            center_window_on_mouse_display(self)
-        except Exception:
-            pass
 
     def copy_to_clipboard(self):
         self.clipboard_clear()
@@ -167,8 +158,7 @@ class AddMaterialDialog(ctk.CTkToplevel):
         self.title(self.texts['add_material_title'])
         self.geometry("600x500")
         self.transient(master)
-        # grab_set() 제거 - 원료 추가 창이 떠 있어도 처방 내용 수정 가능하도록
-        # self.grab_set()
+        self.grab_set()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -225,10 +215,6 @@ class AddMaterialDialog(ctk.CTkToplevel):
         ctk.CTkButton(button_frame, text=self.texts['close'], fg_color="gray50", hover_color="gray35", command=self.destroy).pack(side="left", padx=10)
 
         self.search_materials() # 초기 전체 목록 로드
-        try:
-            center_window_on_mouse_display(self)
-        except Exception:
-            pass
 
     def reset_search(self):
         """검색창을 비우고 전체 목록을 다시 불러옵니다."""
@@ -485,5 +471,3 @@ class ProductionPreviewPane(ctk.CTkFrame):
                 proc_text,
                 insp_text,
             ))
-
-    # (미리보기는 통합표만 사용)

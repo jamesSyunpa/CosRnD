@@ -1,5 +1,6 @@
 # modules/signup.py
 import customtkinter as ctk
+import tkinter
 from tkinter import messagebox
 import bcrypt
 from database.db_manager import db_manager
@@ -138,26 +139,6 @@ class SignupWindow(ctk.CTkToplevel):
 
     def register_user(self):
         """사용자 등록 로직을 처리합니다."""
-        # 초기 설정인 경우 하드웨어 바인딩 동의 확인
-        if self.is_initial_setup:
-            from tkinter import messagebox
-            hw_consent = messagebox.askyesno(
-                "PC 등록 동의",
-                "프로그램 보안을 위해 이 PC의 하드웨어 정보를 등록합니다.\n\n"
-                "등록 내용:\n"
-                "- BIOS 정보\n"
-                "- CPU 정보\n"
-                "- 디스크 정보\n"
-                "- 네트워크 어댑터 MAC 주소\n\n"
-                "※ 다른 PC에서는 이 프로그램을 실행할 수 없습니다.\n"
-                "※ 개인정보는 수집되지 않으며, PC 식별 목적으로만 사용됩니다.\n\n"
-                "동의하시겠습니까?",
-                parent=self
-            )
-            if not hw_consent:
-                messagebox.showinfo("취소", "PC 등록이 취소되어 계정 생성을 중단합니다.", parent=self)
-                return
-        
         # 입력 값 가져오기
         username = self.entries["username"].get()
         password = self.entries["password"].get()
@@ -226,19 +207,6 @@ class SignupWindow(ctk.CTkToplevel):
                 session.add(new_user)
                 session.commit()
                 print("  * DB 저장 완료")
-                
-                # 초기 설정인 경우 하드웨어 바인딩 생성
-                if self.is_initial_setup:
-                    try:
-                        from utils.hw_binding import save_binding
-                        save_binding(mode="flex")
-                        print("  * 하드웨어 바인딩 생성 완료")
-                    except Exception as bind_e:
-                        print(f"  * [경고] 하드웨어 바인딩 생성 실패: {bind_e}")
-                        messagebox.showwarning("경고", 
-                            f"PC 등록 중 오류가 발생했습니다.\n{bind_e}\n\n"
-                            "계정은 생성되었지만 PC 보안이 적용되지 않았습니다.",
-                            parent=self)
                 
                 # 사용자 정보 다시 로드 (세션에서 최신 상태로)
                 session.refresh(new_user)

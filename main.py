@@ -211,37 +211,7 @@ def create_fallback_icon(base_path):
         return None
 
 
-# --- build/debug helper: print where runtime will look for bundled data ---
-try:
-    import customtkinter as _ctk
-    print(f"[BUILD-DEBUG] customtkinter.__file__ = {_ctk.__file__}")
-except Exception as _e:
-    print(f"[BUILD-DEBUG] customtkinter import failed: {_e}")
-
-import pprint
 from utils import center_window_on_mouse_display
-print(f"[BUILD-DEBUG] sys._MEIPASS = {getattr(sys, '_MEIPASS', None)}")
-
-_mp = getattr(sys, '_MEIPASS', None)
-if _mp:
-    try:
-        sample = os.listdir(_mp)[:80]
-        print("[BUILD-DEBUG] sample _MEIPASS contents:")
-        pprint.pprint(sample)
-    except Exception as _e:
-        print(f"[BUILD-DEBUG] failed listing _MEIPASS: {_e}")
-
-try:
-    # also print where customtkinter assets should be found
-    import customtkinter
-    ctk_path = os.path.join(os.path.dirname(customtkinter.__file__), 'assets', 'themes')
-    print(f"[BUILD-DEBUG] expected customtkinter themes path: {ctk_path}")
-    try:
-        print("[BUILD-DEBUG] themes folder sample:", os.listdir(ctk_path)[:50])
-    except Exception as _e:
-        print(f"[BUILD-DEBUG] cannot list themes folder: {_e}")
-except Exception:
-    pass
 
 if getattr(sys, 'frozen', False):
     # PyInstaller로 빌드된 경우, .exe 파일이 있는 폴더
@@ -369,6 +339,7 @@ FRAME_HOME = "home"
 FRAME_DATA = "data"
 FRAME_DOCUMENT = "document"
 FRAME_QUALITY = "quality" # 품질관리 프레임 이름 추가
+FRAME_PACKAGE = "package" # 패키지 관리 프레임 이름 추가
 
 class App(ctk.CTk):
     def __init__(self):
@@ -392,7 +363,6 @@ class App(ctk.CTk):
         self.db_sync_timer = None
         self.db_path_warning_shown = False
         self.last_shared_db_info = (0, 0)
-        self.db_initial_setup_complete = False  # 초기 DB 설정 완료 여부
 
         # 최근 활동 기록을 위한 설정
         self.recent_actions = deque(maxlen=5) # 화면에 표시할 최대 개수
@@ -1075,6 +1045,7 @@ class App(ctk.CTk):
             "quality/prod_standard": {"icon": "🔬", "title": self.texts.get('prod_standard', 'Product Standard')},
             "quality/mfg_record": {"icon": "🔬", "title": self.texts.get('mfg_record', 'Mfg. Record')},
             "quality/ingredient_report": {"icon": "🔬", "title": self.texts.get('ingredient_report', 'Ingredient Report')},
+            "package": {"icon": "📦", "title": "문서 관리 (패키지)"},  # 패키지 관리 추가
         }
 
         # Build reverse lookup from displayed title -> action key for resolving
@@ -1130,10 +1101,15 @@ class App(ctk.CTk):
             {"name": FRAME_HOME, "text": self.texts["home"], "requires": None},
             {"name": FRAME_DOCUMENT, "text": self.texts["document"], "requires": "research"},
             {"name": FRAME_QUALITY, "text": self.texts["quality"], "requires": "quality"},
+            {"name": FRAME_PACKAGE, "text": "문서 관리", "requires": "admin", "hidden": True},  # 숨김 처리
         ]
 
         current_row = 1
         for item in all_nav_items:
+            # 숨김 항목 건너뛰기
+            if item.get("hidden", False):
+                continue
+                
             # 권한 체크
             show_item = False
             if item["requires"] is None:
@@ -1142,6 +1118,8 @@ class App(ctk.CTk):
                 show_item = self.current_user.has_research_access()
             elif item["requires"] == "quality":
                 show_item = self.current_user.has_quality_access()
+            elif item["requires"] == "admin":
+                show_item = self.current_user.is_admin
             
             if show_item:
                 button = ctk.CTkButton(
@@ -1241,6 +1219,17 @@ class App(ctk.CTk):
             texts=self.texts
         )
         self.frames[FRAME_QUALITY].grid(row=0, column=0, sticky="nsew")
+        
+        # 패키지 관리 프레임 (숨김 - 향후 확장용)
+        self.frames[FRAME_PACKAGE] = ctk.CTkFrame(self.main_content_frame)
+        package_label = ctk.CTkLabel(
+            self.frames[FRAME_PACKAGE],
+            text="문서 관리 (패키지)\n\n향후 확장 예정",
+            font=ctk.CTkFont(size=20)
+        )
+        package_label.pack(expand=True)
+        self.frames[FRAME_PACKAGE].grid(row=0, column=0, sticky="nsew")
+        
         self.select_frame_by_name(FRAME_HOME)
 
     def navigate_and_record(self, name: str):
@@ -1257,7 +1246,7 @@ class App(ctk.CTk):
         # convert them to canonical ACTION_CONFIG keys when possible.
         action_name = self._normalize_action_name(action_name)
 
-        allowed_prefixes = ("data/", "document/", "quality/", "settings/")
+        allowed_prefixes = ("data/", "document/", "quality/", "settings/", "package/")
         is_allowed = (action_name in self.ACTION_CONFIG) or any(action_name.startswith(p) for p in allowed_prefixes)
         if not is_allowed:
             return
@@ -1419,22 +1408,22 @@ class App(ctk.CTk):
         
         if theme.lower() == 'light':
             style.theme_use("default")
-            style.configure("Treeview", background="white", foreground="black", fieldbackground="white", borderwidth=0, rowheight=30, font=('Malgun Gothic', 11))
-            style.configure("Treeview.Heading", background="#f0f0f0", foreground="black", font=('Malgun Gothic', 12, 'bold'))
+            style.configure("Treeview", background="white", foreground="black", fieldbackground="white", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
+            style.configure("Treeview.Heading", background="#f0f0f0", foreground="black", font=('Malgun Gothic', 10, 'bold'))
             style.map('Treeview', background=[('selected', '#3475d9')])
             style.map('Treeview.Heading', background=[('active', '#dcdcdc')])
-            style.configure("folder", font=('Malgun Gothic', 11, 'bold'))
+            style.configure("folder", font=('Malgun Gothic', 9, 'bold'))
             style.configure("group_odd", background="#F0F8FF")
             style.configure("group_even", background="white")
             style.map("group_odd", background=[('selected', '#3475d9')])
             style.map("group_even", background=[('selected', '#3475d9')])
         else: # 다크 테마 설정
             style.theme_use("default")
-            style.configure("Treeview", background="#2b2b2b", foreground="white", fieldbackground="#2b2b2b", borderwidth=0, rowheight=30, font=('Malgun Gothic', 11))
-            style.configure("Treeview.Heading", background="#333333", foreground="white", font=('Malgun Gothic', 12, 'bold'))
+            style.configure("Treeview", background="#2b2b2b", foreground="white", fieldbackground="#2b2b2b", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
+            style.configure("Treeview.Heading", background="#333333", foreground="white", font=('Malgun Gothic', 10, 'bold'))
             style.map('Treeview', background=[('selected', '#253655')])
             style.map('Treeview.Heading', background=[('active', '#4a4a4a')])
-            style.configure("folder", font=('Malgun Gothic', 11, 'bold'))
+            style.configure("folder", font=('Malgun Gothic', 9, 'bold'))
             style.configure("group_odd", background="#2c3e50")
             style.configure("group_even", background="#2b2b2b")
             style.map("group_odd", background=[('selected', '#253655')])
@@ -2066,31 +2055,10 @@ class App(ctk.CTk):
             # 파일 크기와 수정 시간을 더 정확하게 체크
             current_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
 
-            # 초기 설정 시에는 현재 정보와 change_log ID만 저장하고 알림 표시하지 않음
+            # 초기 설정 시에는 현재 정보만 저장하고 알림 표시하지 않음
             if self.last_shared_db_info == (0, 0):
                 self.last_shared_db_info = current_db_info
-                
-                # change_log 기준선도 초기 설정 (전체 DB 업데이트 날짜 기록)
-                try:
-                    import sqlite3
-                    conn = sqlite3.connect(shared_db_file)
-                    cur = conn.cursor()
-                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
-                    if cur.fetchone():
-                        cur.execute("SELECT IFNULL(MAX(id), 0) FROM change_log")
-                        row = cur.fetchone()
-                        self.last_change_log_id = int(row[0] or 0)
-                        if self.last_change_log_id > 0:
-                            print(f"[DB동기화] 전체 DB 업데이트 기록 완료 (change_log ID={self.last_change_log_id})")
-                        else:
-                            print(f"[DB동기화] 변경 로그 없음 - 초기 DB 상태")
-                    conn.close()
-                except Exception as e:
-                    print(f"[DB동기화] 초기 변경 로그 기준선 설정 실패(무시): {e}")
-                
-                # 초기 설정 완료 플래그 설정
-                self.db_initial_setup_complete = True
-                print(f"[DB동기화] 초기 설정 완료 (이후 개별 변경사항만 알림) - 크기={current_db_info[0]}, 수정시간={current_db_info[1]}")
+                print(f"[DB동기화] 초기 DB 상태 설정: 크기={current_db_info[0]}, 수정시간={current_db_info[1]}")
                 return
 
             # 실제 변경사항이 있는지 더 엄격하게 체크
@@ -2182,32 +2150,35 @@ class App(ctk.CTk):
 
                     print(f"[DB동기화] 실제 변경 감지! 크기변경: {significant_size_change} ({self.last_shared_db_info[0]} -> {current_db_info[0]}), 시간차: {time_diff}초")
                     
-                    # 초기 설정이 아닌 실제 변경이므로 플래그 해제
-                    self.db_initial_setup_complete = False
-                    
-                    # 관리자(is_admin 또는 MSAD, RQD)는 자동 업데이트 (알림 없음)
-                    is_admin_level = (
-                        getattr(self.current_user, 'is_admin', False) or 
-                        getattr(self.current_user, 'role', None) in ['MSAD', 'RQD']
-                    )
-                    
-                    if is_admin_level:
-                        # 관리자는 조용히 기준선만 업데이트 (다음 로그인 시 자동 반영)
-                        print(f"[DB동기화] 관리자 권한 사용자 - 조용히 기준선 업데이트 (시간차: {time_diff}초)")
-                        self.last_shared_db_info = current_db_info
+                    # 현재 사용자가 관리자인 경우, 자신의 변경일 가능성이 있으므로 더 신중하게 처리
+                    if self.current_user.is_admin:
+                        # 관리자의 경우 더 큰 변경이거나 오래된 변경일 때만 알림 (더 보수적)
+                        if time_diff > 60 or abs(self.last_shared_db_info[0] - current_db_info[0]) > 20480:  # 1분 이상 또는 20KB 이상
+                            self.last_shared_db_info = current_db_info
+                            details_text = (
+                                f"공유 데이터베이스에 외부 변경사항이 감지되었습니다.\n"
+                                f"(크기 변경: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)"
+                            )
+                            if changes_summary_text:
+                                details_text += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
+                            details_text += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
+                                              "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
+                            if messagebox.askyesno("데이터베이스 업데이트", details_text, parent=self):
+                                self.sync_with_shared_db_safe(shared_db_file)
+                        else:
+                            # 관리자의 경우 작은 변경은 자신의 변경으로 간주하고 조용히 업데이트
+                            print(f"[DB동기화] 관리자 변경으로 추정되어 조용히 업데이트 (시간차: {time_diff}초)")
+                            self.last_shared_db_info = current_db_info
                     else:
-                        # 일반 사용자(데이터관리자 이하)는 업데이트 알림 표시
+                        # 일반 사용자의 경우 모든 변경에 대해 알림
                         self.last_shared_db_info = current_db_info
                         user_details = "관리자에 의해 데이터가 변경되었습니다."
                         if changes_summary_text:
                             user_details += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
                         user_details += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
-                                         "※ '아니오'를 선택하면 다음 재접속 시 자동으로 업데이트됩니다.\n"
-                                         "※ '예'를 선택하면 프로그램이 재시작됩니다.")
+                                         "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
                         if messagebox.askyesno("데이터베이스 업데이트", user_details, parent=self):
                             self.sync_with_shared_db_safe(shared_db_file)
-                        else:
-                            print(f"[DB동기화] 사용자가 동기화 거부 - 다음 재접속 시 자동 업데이트 예정")
                 else:
                     # 미미한 변경사항은 무시하고 정보만 업데이트
                     print(f"[DB동기화] 미미한 변경 무시 (크기차: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)")
@@ -2222,30 +2193,102 @@ class App(ctk.CTk):
             print("[DB동기화] 오류로 인해 동기화 타이머를 일시 중지합니다.")
 
     def sync_with_shared_db_safe(self, shared_db_path):
-        """안전한 공유 DB 동기화 - 재시작을 통해 안정성 보장"""
+        """안전한 공유 DB 동기화 - 실시간으로 데이터를 다시 불러옴"""
         try:
-            print(f"[DB동기화] 안전한 동기화 시작: {shared_db_path}")
+            print(f"[DB동기화] 실시간 동기화 시작: {shared_db_path}")
             
-            # 현재 작업 저장 안내
-            if messagebox.askyesno("동기화 전 확인", 
-                                "동기화를 위해 프로그램이 재시작됩니다.\n\n"
-                                "저장하지 않은 작업이 있다면 지금 저장하세요.\n"
-                                "계속 진행하시겠습니까?", parent=self):
+            # 1. 공유 DB 파일 경로 확인
+            def resolve_shared_file(path):
+                if not path:
+                    return None
+                path = path.strip().strip('"').strip("'")
+                if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
+                    return path
+                return os.path.join(path, 'cosmetic.db')
+            
+            shared_db_file = resolve_shared_file(shared_db_path)
+            
+            if not shared_db_file or not os.path.exists(shared_db_file):
+                messagebox.showerror("동기화 오류", 
+                                   f"공유 DB 파일을 찾을 수 없습니다:\n{shared_db_file}", 
+                                   parent=self)
+                return
+            
+            # 2. 로컬 DB 파일 경로
+            local_db_path = os.path.join(application_path, 
+                                        db_manager.get_db_relative_path(),
+                                        "cosmetic.db")
+            
+            print(f"[DB동기화] 로컬 DB: {local_db_path}")
+            print(f"[DB동기화] 공유 DB: {shared_db_file}")
+            
+            # 3. DB 연결 완전히 해제
+            try:
+                print("[DB동기화] 기존 DB 연결 해제 중...")
+                db_manager.dispose_engine()
+                print("[DB동기화] DB 연결 해제 완료")
+            except Exception as e:
+                print(f"[DB동기화] DB 연결 해제 중 오류: {e}")
+            
+            # 4. 파일 잠금 해제 대기
+            import time
+            time.sleep(0.5)
+            
+            # 5. 파일 복사
+            try:
+                import shutil
+                # 백업 생성
+                backup_path = local_db_path + ".backup"
+                if os.path.exists(local_db_path):
+                    shutil.copy2(local_db_path, backup_path)
+                    print(f"[DB동기화] 백업 생성: {backup_path}")
                 
-                # 동기화 정보를 환경변수에 저장
-                os.environ['DB_SYNC_REQUIRED'] = 'True'
-                os.environ['DB_SYNC_SOURCE'] = shared_db_path
+                # 공유 DB를 로컬로 복사
+                shutil.copy2(shared_db_file, local_db_path)
+                print(f"[DB동기화] DB 파일 복사 완료")
                 
-                print("[DB동기화] 재시작을 통한 동기화 진행")
-                self.restart_program()
-            else:
-                print("[DB동기화] 사용자가 동기화를 취소했습니다.")
+            except Exception as copy_error:
+                print(f"[DB동기화] 파일 복사 실패: {copy_error}")
+                messagebox.showerror("동기화 오류", 
+                                   f"DB 파일 복사 중 오류가 발생했습니다:\n\n{copy_error}", 
+                                   parent=self)
+                return
+            
+            # 6. DB 재연결
+            try:
+                print("[DB동기화] DB 재연결 중...")
+                db_manager.setup_database(application_path, CONFIG_FILE_PATH, None)
+                print("[DB동기화] DB 재연결 완료")
+            except Exception as reconnect_error:
+                print(f"[DB동기화] DB 재연결 실패: {reconnect_error}")
+                messagebox.showerror("동기화 오류", 
+                                   f"DB 재연결 중 오류가 발생했습니다:\n\n{reconnect_error}", 
+                                   parent=self)
+                return
+            
+            # 7. 모든 프레임의 데이터 새로고침
+            try:
+                print("[DB동기화] 모든 프레임 데이터 새로고침 중...")
+                self.refresh_data_in_all_frames()
+                print("[DB동기화] 데이터 새로고침 완료")
+            except Exception as refresh_error:
+                print(f"[DB동기화] 데이터 새로고침 중 오류: {refresh_error}")
+            
+            # 8. 동기화 기준선 업데이트
+            self.update_db_sync_baseline()
+            
+            # 9. 성공 메시지
+            messagebox.showinfo("동기화 완료", 
+                              "데이터베이스가 성공적으로 동기화되었습니다.\n"
+                              "최신 데이터로 업데이트되었습니다.", 
+                              parent=self)
+            print("[DB동기화] 실시간 동기화 완료")
                 
         except Exception as e:
-            print(f"[DB동기화] 안전한 동기화 중 오류: {e}")
+            print(f"[DB동기화] 실시간 동기화 중 오류: {e}")
             messagebox.showerror("동기화 오류", 
-                               f"데이터베이스 동기화 준비 중 오류가 발생했습니다:\n\n{e}\n\n"
-                               f"프로그램을 재시작해보세요.", parent=self)
+                               f"데이터베이스 동기화 중 오류가 발생했습니다:\n\n{e}", 
+                               parent=self)
     
     def sync_with_shared_db(self, shared_db_path):
         """기존 동기화 메서드 (레거시 호환용)"""
@@ -2528,25 +2571,25 @@ if __name__ == "__main__":
             print(f"[WARNING] 기본 테마도 실패: {fallback_error}")
             # 테마 없이 진행
 
-    # 실행 PC 하드웨어 바인딩 검증 (최초 실행 시 회원가입에서 생성)
+    # 실행 PC 하드웨어 바인딩 검증 (최초 실행 시 생성)
     try:
         from utils.hw_binding import ensure_machine_binding
-        ensure_machine_binding()
+        ensure_machine_binding(CONFIG_FILE_PATH)
         print("[STARTUP] 하드웨어 바인딩 검증 완료")
     except SystemExit:
         # ensure_machine_binding에서 차단 시 종료
         raise
     except Exception as bind_e:
-        # 바인딩 로직 실패 시 경고만 표시 (첫 실행은 회원가입 시 생성)
-        print(f"[WARNING] 하드웨어 바인딩 처리 중 오류: {bind_e}")
-    
-    # 데이터베이스 자동 백업
-    try:
-        from database.db_manager import db_manager
-        db_manager.backup_database()
-        print("[STARTUP] 데이터베이스 자동 백업 완료")
-    except Exception as backup_e:
-        print(f"[WARNING] 데이터베이스 백업 실패: {backup_e}")
+        # 바인딩 로직 실패 시 안전을 위해 실행 차단 (요구사항: 불일치 시 실행 차단)
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk(); root.withdraw()
+            messagebox.showerror("실행 차단", f"하드웨어 바인딩 처리 중 오류가 발생했습니다.\n{bind_e}")
+            root.destroy()
+        except Exception:
+            pass
+        raise SystemExit(1)
     
     app = App()
     app.mainloop()

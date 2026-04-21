@@ -56,7 +56,6 @@ class QualityManagementFrame(ctk.CTkFrame):
         """원료목록보고 탭의 UI를 설정합니다."""
         self.saved_products = []  # 저장된 제품 데이터 리스트 (엑셀용 버퍼)
         self.current_ingredient_report_id = None  # DB 로드 시 편집 중인 ID
-        self.loaded_from_db = False  # DB에서 불러왔는지 여부 플래그
         
         self.cosmetic_type_map = {
             "가": {"name": "만 3세 이하 영유아용 제품류", "items": {"가1": "영유아용 샴푸, 린스", "가2": "영유아용 로션, 크림", "가3": "영유아용 오일", "가4": "영유아용 인체 세정용 제품", "가5": "영유아용 목욕용 제품"}},
@@ -299,7 +298,6 @@ class QualityManagementFrame(ctk.CTkFrame):
         self._redraw_report_table()
         self.saved_products.clear()  # 저장된 제품 목록도 초기화
         self.current_ingredient_report_id = None
-        self.loaded_from_db = False  # 불러오기 플래그도 초기화
         messagebox.showinfo("알림", "폼이 초기화되었습니다.", parent=self)
 
     def _collect_current_ingredient_report_data(self):
@@ -451,23 +449,8 @@ class QualityManagementFrame(ctk.CTkFrame):
                     self.report_entries["유형표시"].set(header.type_code)
             except Exception:
                 pass
-            
-            # 기능성화장품유형 설정 - f? 패턴이 있으면 자동 설정
             if header.functional_type_code:
-                # f1, f2, f3 등 패턴 확인
-                import re
-                if re.match(r'^f\d+$', header.functional_type_code.lower()):
-                    # f 뒤의 숫자 추출
-                    func_num = re.search(r'\d+', header.functional_type_code.lower()).group()
-                    # 콤보박스의 값들 중에서 해당 패턴 찾기
-                    combo_values = self.report_entries["기능성화장품유형"].cget("values")
-                    for val in combo_values:
-                        if val.lower().startswith(f'f{func_num}'):
-                            self.report_entries["기능성화장품유형"].set(val)
-                            break
-                else:
-                    self.report_entries["기능성화장품유형"].set(header.functional_type_code)
-            
+                self.report_entries["기능성화장품유형"].set(header.functional_type_code)
             self.report_entries["기능성화장품품목코드"].delete(0, 'end'); self.report_entries["기능성화장품품목코드"].insert(0, header.functional_code or '')
             self.report_entries["용도"].set(header.usage or '')
             self.report_entries["맞춤형내용물"].set(header.custom_content or '')
@@ -492,10 +475,6 @@ class QualityManagementFrame(ctk.CTkFrame):
                 )
             self.current_ingredient_report_id = header.id
             self.saved_products.clear()
-            
-            # 불러오기 완료 플래그 설정 (원료성분명 입력 없이도 엑셀 생성 가능)
-            self.loaded_from_db = True
-            
             messagebox.showinfo("불러오기 완료", "원료목록보고 데이터가 로드되었습니다.", parent=self)
         except Exception as e:
             messagebox.showerror("오류", f"불러오기 중 오류가 발생했습니다: {e}", parent=self)
@@ -580,19 +559,7 @@ class QualityManagementFrame(ctk.CTkFrame):
                 messagebox.showwarning("입력 오류", "제품명을 입력해주세요.", parent=self)
                 return
 
-            # DB에서 불러온 경우 체크
-            is_loaded_from_db = getattr(self, 'loaded_from_db', False)
-            
-            # 테이블에 이미 데이터가 있는지 확인 (불러오기 후)
-            has_table_data = len(self.report_item_rows) > 0
-            
-            if is_loaded_from_db and has_table_data:
-                # 불러오기 후: 테이블의 기존 데이터를 사용
-                print("[DEBUG] 불러오기 데이터로 엑셀 생성")
-                self._export_to_excel_from_table()
-                return
-            
-            # 신규 생성: 원료성분명 붙여넣기 데이터 필요
+            # 원료성분명 붙여넣기 데이터 파싱
             pasted_text = self.bulk_ingredient_entry.get("1.0", "end-1c").strip()
             if ', ' in pasted_text:
                 pasted_ingredients = pasted_text.split(', ')
@@ -755,83 +722,6 @@ class QualityManagementFrame(ctk.CTkFrame):
         if file_path:
             wb.save(file_path)
             messagebox.showinfo("성공", f"엑셀 파일이 성공적으로 저장되었습니다:\n{file_path}", parent=self)
-
-    def _export_to_excel_from_table(self):
-        """불러온 데이터의 테이블에서 직접 엑셀로 내보냅니다."""
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "원료목록보고"
-        
-        # 스타일 정의
-        header_font = Font(name='맑은 고딕', size=11, bold=True, color="FFFFFF")
-        cell_font = Font(name='맑은 고딕', size=10)
-        center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
-                           top=Side(style='thin'), bottom=Side(style='thin'))
-        header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-
-        # 헤더
-        headers = ["일련번호", "제품명", "유형표시", "기능성화장품유형", "기능성화장품품목코드", 
-                  "제조업자상호", "원료성분명", "용도", "맞춤형 내용물(혼합용'C1',소분용'C2')"]
-        ws.append(headers)
-        for col_idx, header_text in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col_idx)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = center_align
-            cell.border = thin_border
-
-        # 테이블의 데이터 행 읽기
-        usage = self.report_entries.get("용도", ctk.CTkComboBox(self, values=[])).get()
-        custom_content = self.report_entries.get("맞춤형내용물", ctk.CTkComboBox(self, values=[])).get()
-        
-        for row_widgets in self.report_item_rows:
-            excel_row = [row_widgets[f"col{i}"].get() for i in range(7)]
-            excel_row.append(usage)  # 용도
-            excel_row.append(custom_content)  # 맞춤형 내용물
-            
-            current_row_num = ws.max_row + 1
-            for col_idx, value in enumerate(excel_row, 1):
-                cell = ws.cell(row=current_row_num, column=col_idx, value=value)
-                cell.font = cell_font
-                cell.border = thin_border
-                cell.alignment = left_align
-
-        # 열 너비 자동 조절
-        for col in ws.columns:
-            max_length = 0
-            column_letter = col[0].column_letter
-            
-            # 헤더 길이 계산
-            header_cell = ws[f"{column_letter}1"]
-            if header_cell.value:
-                header_lines = str(header_cell.value).split('\n')
-                for line in header_lines:
-                    if len(line) * 1.2 > max_length:
-                        max_length = len(line) * 1.2
-            
-            # 데이터 길이 계산
-            for cell in col:
-                if cell.value:
-                    length = sum(2 if '\uac00' <= char <= '\ud7a3' else 1 for char in str(cell.value))
-                    if length > max_length:
-                        max_length = length
-            
-            adjusted_width = (max_length + 2)
-            ws.column_dimensions[column_letter].width = adjusted_width
-
-        # 파일 저장
-        default_name = f"원료목록보고_{self.report_entries['제품명'].get()}.xlsx"
-        file_path = fd.asksaveasfilename(defaultextension=".xlsx", 
-                                        filetypes=[("Excel Files", "*.xlsx")], 
-                                        initialfile=default_name, 
-                                        title="엑셀로 저장")
-        if file_path:
-            wb.save(file_path)
-            messagebox.showinfo("성공", f"엑셀 파일이 성공적으로 저장되었습니다:\n{file_path}", parent=self)
-            # 플래그 초기화
-            self.loaded_from_db = False
 
     def _export_to_excel(self, usage, custom_content):
         """테이블 데이터를 엑셀로 내보냅니다."""
