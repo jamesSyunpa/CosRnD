@@ -72,6 +72,26 @@ def _draw_text_left_top(draw: ImageDraw.ImageDraw, box: Tuple[int,int,int,int], 
         draw.text((x0 + pad, y), line, font=font, fill=fill)
         y += LINE_H
 
+def _draw_text_left_vcenter(draw: ImageDraw.ImageDraw, box: Tuple[int,int,int,int], text: str, font, fill=TEXT_COLOR, pad=4):
+    """왼쪽 정렬 + 세로 중앙 정렬로 여러 줄 텍스트를 그립니다.
+    실제 글꼴 bbox를 사용해 줄 높이를 계산하여 잘림을 방지합니다.
+    """
+    x0, y0, x1, y1 = box
+    lines = (text or "").splitlines() or [""]
+    # 실제 라인 높이 추정 (대표 문자열로 측정)
+    try:
+        lh = draw.textbbox((0,0), "Ag한", font=font)[3]
+    except Exception:
+        lh = LINE_H
+    line_h = max(LINE_H, lh)
+    total_h = max(line_h, len(lines) * line_h)
+    box_h = max(0, y1 - y0)
+    # 상하 여백을 고려한 중앙 배치 (최소 pad 유지)
+    y = y0 + max(pad, (box_h - total_h) // 2)
+    for line in lines:
+        draw.text((x0 + pad, y), line, font=font, fill=fill)
+        y += line_h
+
 
 def _wrap_text_by_width(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
     """Wrap text to fit within max_width using draw.textbbox for measurement.
@@ -184,21 +204,21 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
     bd0 = x + sum(COL_PIX[:1]); bd1 = x + sum(COL_PIX[:4])
     draw.rectangle([bd0, y, bd1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
     prod_name = str(details.get('제품명','') or '')
-    _draw_text_left_top(draw, (bd0, y, bd1, y + INFO_ROW_H), prod_name, NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (bd0, y, bd1, y + INFO_ROW_H), prod_name, NORMAL_FONT)
     # E3:F3(+G3 병합) 생산코드
     e0 = x + sum(COL_PIX[:4]); e1 = x + sum(COL_PIX[:5])
     draw.rectangle([e0, y, e1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (e0, y, e1, y + INFO_ROW_H), '생산코드', BOLD_FONT)
     f0 = x + sum(COL_PIX[:5]); g1 = x + sum(COL_PIX[:7])
     draw.rectangle([f0, y, g1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_top(draw, (f0, y, g1, y + INFO_ROW_H), str(details.get('생산코드','') or ''), NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (f0, y, g1, y + INFO_ROW_H), str(details.get('생산코드','') or ''), NORMAL_FONT)
     # H3:I3 제조자 (오른쪽으로 1칸 이동)
     h0 = x + sum(COL_PIX[:7]); h1 = x + sum(COL_PIX[:8])
     draw.rectangle([h0, y, h1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (h0, y, h1, y + INFO_ROW_H), '제조자', BOLD_FONT)
     i0 = x + sum(COL_PIX[:8]); i1 = x + sum(COL_PIX[:9])
     draw.rectangle([i0, y, i1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_top(draw, (i0, y, i1, y + INFO_ROW_H), str(details.get('제조자','') or ''), NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (i0, y, i1, y + INFO_ROW_H), str(details.get('제조자','') or ''), NORMAL_FONT)
     y += INFO_ROW_H
 
     # Row 4: 지시일/제조일/생산량(kg)/수득량
@@ -209,28 +229,28 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
     _draw_text_center(draw, (ax0, y, ax1, y + INFO_ROW_H), '지시일', BOLD_FONT)
     bx0 = x + sum(COL_PIX[:1]); bx1 = x + sum(COL_PIX[:2])
     draw.rectangle([bx0, y, bx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_top(draw, (bx0, y, bx1, y + INFO_ROW_H), str(details.get('지시일', details.get('출력일시','')) or ''), NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (bx0, y, bx1, y + INFO_ROW_H), str(details.get('지시일', details.get('출력일시','')) or ''), NORMAL_FONT)
     # C/D
     cx0 = x + sum(COL_PIX[:2]); cx1 = x + sum(COL_PIX[:3])
     draw.rectangle([cx0, y, cx1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (cx0, y, cx1, y + INFO_ROW_H), '제조일', BOLD_FONT)
     dx0 = x + sum(COL_PIX[:3]); dx1 = x + sum(COL_PIX[:4])
     draw.rectangle([dx0, y, dx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_top(draw, (dx0, y, dx1, y + INFO_ROW_H), str(details.get('제조일','') or ''), NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (dx0, y, dx1, y + INFO_ROW_H), str(details.get('제조일','') or ''), NORMAL_FONT)
     # E/F(+G 병합)
     ex0 = x + sum(COL_PIX[:4]); ex1 = x + sum(COL_PIX[:5])
     draw.rectangle([ex0, y, ex1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (ex0, y, ex1, y + INFO_ROW_H), '생산량(kg)', BOLD_FONT)
     fx0 = x + sum(COL_PIX[:5]); gx1 = x + sum(COL_PIX[:7])
     draw.rectangle([fx0, y, gx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_top(draw, (fx0, y, gx1, y + INFO_ROW_H), str(details.get('생산량(kg)','') or ''), NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (fx0, y, gx1, y + INFO_ROW_H), str(details.get('생산량(kg)','') or ''), NORMAL_FONT)
     # H/I (수득량을 오른쪽으로 1칸 이동)
     hx0 = x + sum(COL_PIX[:7]); hx1 = x + sum(COL_PIX[:8])
     draw.rectangle([hx0, y, hx1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (hx0, y, hx1, y + INFO_ROW_H), '수득량', BOLD_FONT)
     ix0 = x + sum(COL_PIX[:8]); ix1 = x + sum(COL_PIX[:9])
     draw.rectangle([ix0, y, ix1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_top(draw, (ix0, y, ix1, y + INFO_ROW_H), str(details.get('수득량','') or ''), NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (ix0, y, ix1, y + INFO_ROW_H), str(details.get('수득량','') or ''), NORMAL_FONT)
     y += INFO_ROW_H
 
     # Spacer
@@ -327,7 +347,7 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
                 if c_idx in (1,2):
                     _draw_text_center(draw, box, str(val or ''), NORMAL_FONT)
                 elif c_idx == 3:
-                    _draw_text_left_top(draw, box, str(val or ''), NORMAL_FONT)
+                    _draw_text_left_vcenter(draw, box, str(val or ''), NORMAL_FONT)
                 elif c_idx in (4,5,6):
                     text = ""
                     try:
@@ -353,22 +373,26 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
         # H column merged (wrap to width) - 제조공정
         g_x0 = x + sum(COL_PIX[:7]); g_x1 = x + sum(COL_PIX[:8])
         draw.rectangle([g_x0, group_y_start, g_x1, group_y_end], outline=GRID_COLOR, width=1)
-        _draw_text_left_top(draw, (g_x0, group_y_start, g_x1, group_y_end), g_wrap, NORMAL_FONT)
+        _draw_text_left_vcenter(draw, (g_x0, group_y_start, g_x1, group_y_end), g_wrap, NORMAL_FONT)
         # I column merged (wrap to width) - 공정검사
         h_x0 = x + sum(COL_PIX[:8]); h_x1 = x + sum(COL_PIX[:9])
         draw.rectangle([h_x0, group_y_start, h_x1, group_y_end], outline=GRID_COLOR, width=1)
-        _draw_text_left_top(draw, (h_x0, group_y_start, h_x1, group_y_end), h_wrap, NORMAL_FONT)
+        _draw_text_left_vcenter(draw, (h_x0, group_y_start, h_x1, group_y_end), h_wrap, NORMAL_FONT)
 
-    # 6) Sum row
+    # 6) Sum row (A:D merged visually)
     sum_h = HEADER_H
     ensure_page_space(sum_h)
-    cx = x
-    for c_idx in range(9):
+    # Draw merged A:D block
+    ad_w = sum(COL_PIX[:4])
+    ad_box = (x, y, x + ad_w, y + sum_h)
+    draw.rectangle(ad_box, fill=HEADER_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, ad_box, "합계 (Total)", HEADER_FONT, fill=HEADER_TEXT)
+    # Draw remaining E..I cells normally
+    cx = x + ad_w
+    for c_idx in range(4, 9):
         cw = COL_PIX[c_idx]
         box = (cx, y, cx + cw, y + sum_h)
         draw.rectangle(box, fill=HEADER_FILL, outline=GRID_COLOR, width=1)
-        if c_idx == 0:
-            _draw_text_center(draw, box, "합계 (Total)", HEADER_FONT, fill=HEADER_TEXT)
         if c_idx == 4:
             _draw_text_center(draw, box, f"{total_ratio:.4f}", HEADER_FONT, fill=HEADER_TEXT)
         cx += cw

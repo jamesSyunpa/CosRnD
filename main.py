@@ -1773,7 +1773,6 @@ class App(ctk.CTk):
         if doc_frame and hasattr(doc_frame, 'save_journal_settings'):
             doc_frame.save_journal_settings(config)
 
-
     def center_on_mouse_screen(self):
         """
         마우스 커서가 위치한 모니터의 중앙에 창을 배치하고, 해당 모니터 기준 비율로 크기를 조절합니다.

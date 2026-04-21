@@ -124,6 +124,62 @@ class DocumentManagementFrame(ctk.CTkFrame):
         except Exception:
             pass
 
+    # ------------------------------
+    # 권한/상태 헬퍼
+    # ------------------------------
+    def _role_level(self) -> int:
+        """사용자 역할을 정수 레벨로 환산합니다. QC=0 < RD=1 < RQ=2 < RQD=3 < MSAD/Admin=4"""
+        try:
+            if getattr(self.current_user, 'is_admin', False):
+                return 4
+            role = (getattr(self.current_user, 'role', '') or '').upper()
+        except Exception:
+            role = ''
+        mapping = {
+            'QC': 0,
+            'RD': 1,
+            'RQ': 2,
+            'RQD': 3,
+            'MSAD': 4,
+        }
+        return mapping.get(role, 0)
+
+    def _min_level_for_status(self, status: str) -> int:
+        """상태별 최소 요구 레벨을 반환합니다. 초안=RD+(1), 검토중=RQ+(2), 확정=RQD+(3)"""
+        s = (status or '').strip()
+        if s == '초안':
+            return 1
+        if s == '검토중':
+            return 2
+        if s == '확정':
+            return 3
+        # 알 수 없는 상태는 보수적으로 최고 레벨 요구
+        return 4
+
+    def can_view_production(self, prod) -> bool:
+        """해당 생산처방을 목록/열람할 수 있는지 여부."""
+        try:
+            need = self._min_level_for_status(getattr(prod, 'status', None))
+            return self._role_level() >= need
+        except Exception:
+            return False
+
+    def can_use_production(self, prod) -> bool:
+        """해당 생산처방을 '사용'(편집/내보내기/미리보기 등)할 수 있는지 여부."""
+        # 현재 정책상 사용 권한은 열람과 동일 레벨로 적용
+        return self.can_view_production(prod)
+
+    def allowed_status_values_for_create(self):
+        """현재 사용자 기준 생성 시 선택 가능한 상태 목록을 반환합니다."""
+        lvl = self._role_level()
+        if lvl >= 3:
+            return ['초안', '검토중', '확정']
+        if lvl == 2:
+            return ['초안', '검토중']
+        if lvl == 1:
+            return ['초안']
+        return []
+
     def setup_document_sub_tabs(self, tab_frame):
         """'문서' 탭 내부에 서브 탭들을 설정합니다."""
         tab_frame.grid_columnconfigure(0, weight=1)
@@ -296,6 +352,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 .all()
             )
             for r in rows:
+                # 상태/권한 정책: 열람 가능한 항목만 목록에 표시
+                try:
+                    if not self.can_view_production(r):
+                        continue
+                except Exception:
+                    pass
                 eff = r.effective_date.strftime('%Y-%m-%d') if r.effective_date else ''
                 created = r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else ''
                 try:
@@ -845,10 +907,15 @@ class DocumentManagementFrame(ctk.CTkFrame):
         header = ctk.CTkFrame(tab_frame, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=10, pady=(10,5))
 
-        ctk.CTkButton(header, text="생산처방 생성", width=120, command=self.create_production_formulation).pack(side="left")
+        # 생성은 RD+만 노출
+        try:
+            if self._role_level() >= 1:
+                ctk.CTkButton(header, text="생산처방 생성", width=120, command=self.create_production_formulation).pack(side="left")
+        except Exception:
+            # 문제 시 기본 노출 (이후 내부에서 한 번 더 권한 체크)
+            ctk.CTkButton(header, text="생산처방 생성", width=120, command=self.create_production_formulation).pack(side="left")
         ctk.CTkButton(header, text="공정(제법) 편집", width=120, command=self.edit_production_process).pack(side="left", padx=(10,0))
         ctk.CTkButton(header, text="내보내기", width=100, command=self.export_selected_production_to_excel).pack(side="left", padx=(10,0))
-        ctk.CTkButton(header, text="전체 목록", width=90, fg_color="gray", command=self.show_all_production_list).pack(side="left", padx=(10,0))
 
         # 관리자 이상만 보이는 삭제 버튼 (버튼 군과 같이 좌측에 배치)
         try:
@@ -929,13 +996,16 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.production_tree.delete(item)
         session = db_manager.get_session()
         try:
-            # 선택된 실험처방이 있으면 해당 목록, 없으면 전역 목록 표시
-            if getattr(self, '_selected_formulation_id', None):
-                q = session.query(ProductionFormulation).filter_by(source_formulation_id=self._selected_formulation_id)
-            else:
-                q = session.query(ProductionFormulation)
+            # 요구사항: 항상 전역 생산처방 목록을 표시 (선택된 실험처방 필터 무시)
+            q = session.query(ProductionFormulation)
             rows = q.order_by(ProductionFormulation.created_at.desc()).all()
             for r in rows:
+                # 상태/권한 정책: 열람 가능한 항목만 표시
+                try:
+                    if not self.can_view_production(r):
+                        continue
+                except Exception:
+                    pass
                 approver = ""
                 try:
                     approver = (r.approved_by.real_name or r.approved_by.username) if r.approved_by else ""
@@ -994,6 +1064,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
             rows = q.order_by(ProductionFormulation.created_at.desc()).all()
 
             for r in rows:
+                # 상태/권한 정책: 열람 가능한 항목만 표시
+                try:
+                    if not self.can_view_production(r):
+                        continue
+                except Exception:
+                    pass
                 approver = ""
                 try:
                     approver = (r.approved_by.real_name or r.approved_by.username) if r.approved_by else ""
@@ -1032,16 +1108,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # 선택된 실험처방 기준 목록 다시 로드
         self.refresh_production_list()
 
-    def show_all_production_list(self):
-        """선택된 실험처방과 무관하게 전역 생산처방 목록을 표시합니다."""
-        # 전체 목록을 보기 위해 실험처방 필터 해제
-        self._selected_formulation_id = None
-        try:
-            if hasattr(self, 'prod_search_entry'):
-                self.prod_search_entry.delete(0, 'end')
-        except Exception:
-            pass
-        self.refresh_production_list()
+    
 
     def delete_selected_production(self):
         """관리자 이상: 선택된 생산처방 삭제 (연결 패키지의 참조는 해제)."""
@@ -1514,6 +1581,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
             if not prod:
                 messagebox.showerror("오류", "생산처방을 찾을 수 없습니다.", parent=self)
                 return
+            # 사용 권한 확인 (상태 기반)
+            try:
+                if not self.can_use_production(prod):
+                    messagebox.showwarning("권한 없음", f"현재 계정으로는 상태 '{prod.status or ''}' 문서를 사용할 수 없습니다.", parent=self)
+                    return
+            except Exception:
+                pass
 
             win = ctk.CTkToplevel(self)
             win.title(f"생산처방 편집 - {prod.product_name or ''} ({prod.revision or ''})")
@@ -1594,12 +1668,25 @@ class DocumentManagementFrame(ctk.CTkFrame):
             # Phase별 시각적 그룹화를 위한 태그 스타일 설정
             style = ttk.Style()
 
-            # 전용 스타일로 행 높이 조정 (기존 전역 "Treeview" 스타일에 영향 주지 않음)
-            style.configure("Recipe.Treeview", rowheight=60)
-            
-            recipe_tree.tag_configure("phase_first", background="#2b2b2b")  # 첫 행 - 진한 배경
-            recipe_tree.tag_configure("phase_rest", background="#1a1a1a")   # 나머지 행 - 약간 어두운 배경
-            recipe_tree.tag_configure("phase_border", background="#3a3a3a") # Phase 경계 강조
+            # 전용 스타일로 행 높이 '정상' 수준으로 설정
+            style.configure("Recipe.Treeview", rowheight=30)
+
+            # 테마별 가독성 보장: Light에서는 밝은 톤 배경 + 검은 글씨, Dark에서는 어두운 배경 + 흰 글씨
+            try:
+                appearance = ctk.get_appearance_mode().lower()
+            except Exception:
+                appearance = 'dark'
+
+            if appearance == 'light':
+                # 밝은 테마: 밝은 배경에 검정 텍스트
+                recipe_tree.tag_configure("phase_first", background="#E8F0FE", foreground="black")   # 연한 파란색 톤
+                recipe_tree.tag_configure("phase_rest", background="#F5F8FF", foreground="black")    # 더 연한 톤으로 대비
+                recipe_tree.tag_configure("phase_border", background="#DDE7F3", foreground="black")  # 경계 강조
+            else:
+                # 어두운 테마: 기존 색 유지 + 흰 텍스트로 명암 확보
+                recipe_tree.tag_configure("phase_first", background="#2b2b2b", foreground="white")
+                recipe_tree.tag_configure("phase_rest", background="#1a1a1a", foreground="white")
+                recipe_tree.tag_configure("phase_border", background="#3a3a3a", foreground="white")
             
             rscroll = ttk.Scrollbar(recipe_list_wrap, orient="vertical", command=recipe_tree.yview)
             recipe_tree.configure(yscrollcommand=rscroll.set)
@@ -1864,6 +1951,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
             session.close()
 
     def create_production_formulation(self):
+        # 생성 권한: RD+만 허용
+        try:
+            if self._role_level() < 1:
+                messagebox.showwarning("권한 없음", "생산처방 생성 권한이 없습니다.", parent=self)
+                return
+        except Exception:
+            pass
         # 선택된 처방 ID가 없다면 현재 트리뷰의 선택을 한 번 더 확인하여 보조적으로 설정합니다.
         if not getattr(self, '_selected_formulation_id', None):
             try:
@@ -1987,8 +2081,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 pass
 
             ctk.CTkLabel(frm, text="상태").grid(row=7, column=0, sticky="w", pady=4)
-            status_var = tk.StringVar(value='확정')
-            status_opt = ctk.CTkOptionMenu(frm, values=['초안','검토중','확정'], variable=status_var)
+            allowed_statuses = self.allowed_status_values_for_create()
+            # 허용 상태가 없으면 진입 자체가 차단되었겠지만 안전망
+            if not allowed_statuses:
+                allowed_statuses = ['초안']
+            status_var = tk.StringVar(value=allowed_statuses[0])
+            status_opt = ctk.CTkOptionMenu(frm, values=allowed_statuses, variable=status_var)
             status_opt.grid(row=7, column=1, sticky="w", pady=4)
 
             ctk.CTkLabel(frm, text="비고").grid(row=8, column=0, sticky="nw", pady=4)
@@ -2163,6 +2261,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
             if not prod:
                 messagebox.showerror("오류", "생산처방을 찾을 수 없습니다.", parent=self)
                 return
+            # 사용 권한 확인 (상태 기반)
+            try:
+                if not self.can_use_production(prod):
+                    messagebox.showwarning("권한 없음", f"현재 계정으로는 상태 '{prod.status or ''}' 문서를 사용할 수 없습니다.", parent=self)
+                    return
+            except Exception:
+                pass
             # 승인자명 표시용
             approver_name = ""
             try:
@@ -2377,6 +2482,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
             if not prod:
                 messagebox.showerror("오류", "생산처방을 찾을 수 없습니다.", parent=self)
                 return
+            # 사용 권한 확인 (상태 기반)
+            try:
+                if not self.can_use_production(prod):
+                    messagebox.showwarning("권한 없음", f"현재 계정으로는 상태 '{prod.status or ''}' 문서를 사용할 수 없습니다.", parent=self)
+                    return
+            except Exception:
+                pass
 
             # 승인자명 표시용
             try:
