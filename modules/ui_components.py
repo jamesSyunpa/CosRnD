@@ -10,11 +10,10 @@ class HelpPopup(ctk.CTkToplevel):
     """도움말 내용을 표시하는 스크롤 가능한 팝업 창"""
     def __init__(self, master, title, message):
         super().__init__(master)
+        self.withdraw()  # 초기 렌더링 랙 방지
         self.texts = get_texts(master.language if hasattr(master, 'language') else 'korean')
         self.title(title)
         self.geometry("600x450")
-        self.transient(master)
-        self.grab_set()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -28,13 +27,27 @@ class HelpPopup(ctk.CTkToplevel):
         close_button = ctk.CTkButton(self, text=self.texts['close'], command=self.destroy)
         close_button.grid(row=1, column=0, padx=15, pady=(0, 15))
 
+        # 메인 창 중앙에 배치 후 deiconify
+        self.update_idletasks()
+        parent = master
+        if parent:
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            self.geometry(f"+{x}+{y}")
+        self.deiconify()
+
 class CustomErrorDialog(ctk.CTkToplevel):
     """'클립보드로 복사' 기능이 포함된 커스텀 오류 대화상자"""
     def __init__(self, master, title="오류", error_message=""):
         super().__init__(master)
+        self.withdraw()  # 초기 렌더링 랙 방지
         self.title(title)
-        self.transient(master)
-        self.grab_set()
         self.resizable(False, False)
 
         self.error_message = str(error_message)
@@ -65,6 +78,21 @@ class CustomErrorDialog(ctk.CTkToplevel):
 
         copy_button = ctk.CTkButton(button_frame, text="클립보드로 복사", command=self.copy_to_clipboard)
         copy_button.pack(side="right", padx=10)
+
+        # 메인 창 중앙에 배치 후 deiconify
+        self.update_idletasks()
+        parent = master
+        if parent:
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            self.geometry(f"+{x}+{y}")
+        self.deiconify()
 
     def copy_to_clipboard(self):
         self.clipboard_clear()
@@ -151,6 +179,7 @@ class AddMaterialDialog(ctk.CTkToplevel):
     def __init__(self, master, on_add_callback, on_line_break_callback):
         import re
         super().__init__(master)
+        self.withdraw()  # 초기 렌더링 랙 방지
         self.on_add_callback = on_add_callback
         self.on_line_break_callback = on_line_break_callback
 
@@ -158,8 +187,6 @@ class AddMaterialDialog(ctk.CTkToplevel):
         self.texts = get_texts(self.language)
         self.title(self.texts['add_material_title'])
         self.geometry("600x500")
-        self.transient(master)
-        self.grab_set()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -216,6 +243,21 @@ class AddMaterialDialog(ctk.CTkToplevel):
         ctk.CTkButton(button_frame, text=self.texts['close'], fg_color="gray50", hover_color="gray35", command=self.destroy).pack(side="left", padx=10)
 
         self.search_materials() # 초기 전체 목록 로드
+
+        # 메인 창 중앙에 배치 후 deiconify
+        self.update_idletasks()
+        parent = master
+        if parent:
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            self.geometry(f"+{x}+{y}")
+        self.deiconify()
 
     def reset_search(self):
         """검색창을 비우고 전체 목록을 다시 불러옵니다."""

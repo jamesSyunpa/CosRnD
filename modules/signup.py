@@ -10,6 +10,7 @@ from utils import center_window_on_mouse_display
 class SignupWindow(ctk.CTkToplevel):
     def __init__(self, master=None, is_initial_setup=False, on_success=None):
         super().__init__(master)
+        self.withdraw()  # 초기 드로잉 깜빡임 및 드드득 방지를 위해 숨김
         self.is_initial_setup = is_initial_setup
         self.on_success = on_success
 
@@ -20,12 +21,22 @@ class SignupWindow(ctk.CTkToplevel):
         self.transient(master)
         self.grab_set()
 
+        # 회원가입 창 아이콘 설정
+        try:
+            from utils import resource_path
+            icon_file = resource_path('Icon.ico')
+            if os.path.exists(icon_file):
+                self.iconbitmap(icon_file)
+        except Exception as icon_err:
+            print(f"[ICON] 회원가입 창 아이콘 설정 실패: {icon_err}")
+
         self.setup_ui()
         try:
             center_window_on_mouse_display(self)
         except Exception:
             pass
 
+        self.deiconify()  # 배치 완료 후 표시
         # 회원가입 창이 뜰 때 법적 고지(약관) 내용도 자동으로 띄움
         # 동의하지 않고 닫으면 프로그램 종료됨 (LegalNoticeDialog 로직)
         self.after(200, self.open_legal_notice)
@@ -190,13 +201,13 @@ class SignupWindow(ctk.CTkToplevel):
     def register_user(self):
         """사용자 등록 로직을 처리합니다."""
         # 입력 값 가져오기
-        username = self.entries["username"].get()
-        password = self.entries["password"].get()
-        password_confirm = self.entries["password_confirm"].get()
-        position = self.entries["position"].get()
-        contact = self.entries["contact"].get()
-        zip_code = self.entries["zip_code"].get()
-        address = self.entries["address"].get()
+        username = self.entries["username"].get().strip()
+        password = self.entries["password"].get().strip()
+        password_confirm = self.entries["password_confirm"].get().strip()
+        position = self.entries["position"].get().strip()
+        contact = self.entries["contact"].get().strip()
+        zip_code = self.entries["zip_code"].get().strip()
+        address = self.entries["address"].get().strip()
         
         # 권한 가져오기
         role_display = self.role_combo.get()
@@ -214,6 +225,31 @@ class SignupWindow(ctk.CTkToplevel):
         if not self.legal_agreed.get():
             messagebox.showwarning("동의 필요", "이용약관 및 법적고지에 동의해야 가입할 수 있습니다.\n[내용 보기]를 눌러 확인해주세요.", parent=self)
             return
+
+        # config.ini 경로 찾기
+        import os
+        config_path = None
+        if hasattr(self, 'master') and self.master:
+            if hasattr(self.master, 'config_path'):
+                config_path = self.master.config_path
+        if not config_path:
+            PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            config_path = os.path.join(PROJECT_ROOT, 'config.ini')
+
+        # 약관 동의 상태를 config.ini에 영구 기록
+        try:
+            import configparser
+            config = configparser.ConfigParser(interpolation=None)
+            if os.path.exists(config_path):
+                config.read(config_path, encoding='utf-8')
+            if not config.has_section('Legal'):
+                config.add_section('Legal')
+            config.set('Legal', 'agreed_version', 'agreed')
+            with open(config_path, 'w', encoding='utf-8') as f:
+                config.write(f)
+            print("[SIGNUP] 이용약관 및 법적고지 동의 상태를 config.ini에 저장 완료")
+        except Exception as config_err:
+            print(f"[SIGNUP] config.ini 동의 상태 저장 실패: {config_err}")
 
         # 2. 비밀번호 일치 여부 확인
         if password != password_confirm:

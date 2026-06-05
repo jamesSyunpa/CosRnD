@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import os
 import sys
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 # 프로젝트 루트 경로를 sys.path에 추가 (상대 경로 import를 위함)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,66 +15,10 @@ from datetime import datetime
 import configparser
 import base64
 
-class PasswordChangeDialog(ctk.CTkToplevel):
-    def __init__(self, master, username):
-        super().__init__(master)
-        self.title("비밀번호 변경")
-        self.geometry("350x250")
-        self.username = username
-        self.success = False
-        
-        self.transient(master)
-        self.grab_set()
-        self.resizable(False, False)
-        
-        self.setup_ui()
-        try:
-            center_window_on_mouse_display(self)
-        except:
-            pass
-            
-    def setup_ui(self):
-        self.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(self, text="🔒 비밀번호 변경 필요", font=("Arial", 16, "bold")).pack(pady=(20, 10))
-        ctk.CTkLabel(self, text="관리자가 비밀번호를 초기화했습니다.\n새로운 비밀번호를 설정해주세요.", font=("Arial", 12)).pack(pady=(0, 20))
-        
-        self.pw1 = ctk.CTkEntry(self, placeholder_text="새 비밀번호", show="*", width=250)
-        self.pw1.pack(pady=5)
-        
-        self.pw2 = ctk.CTkEntry(self, placeholder_text="비밀번호 확인", show="*", width=250)
-        self.pw2.pack(pady=5)
-        
-        ctk.CTkButton(self, text="변경하기", command=self.change_password, width=250).pack(pady=20)
-        
-    def change_password(self):
-        p1 = self.pw1.get()
-        p2 = self.pw2.get()
-        
-        if not p1 or not p2:
-            messagebox.showwarning("경고", "비밀번호를 입력해주세요.", parent=self)
-            return
-            
-        if p1 != p2:
-            messagebox.showwarning("경고", "비밀번호가 일치하지 않습니다.", parent=self)
-            return
-            
-        if len(p1) < 4:
-            messagebox.showwarning("경고", "비밀번호는 4자 이상이어야 합니다.", parent=self)
-            return
-            
-        try:
-            if db_manager.update_user_password(self.username, p1):
-                messagebox.showinfo("성공", "비밀번호가 성공적으로 변경되었습니다.", parent=self)
-                self.success = True
-                self.destroy()
-            else:
-                messagebox.showerror("오류", "비밀번호 변경에 실패했습니다.", parent=self)
-        except Exception as e:
-            messagebox.showerror("오류", f"오류 발생: {e}", parent=self)
-
 class LoginWindow(ctk.CTkToplevel):
     def __init__(self, master=None, on_login_success=None, config_path=None, application_path=None):
         super().__init__(master)
+        self.withdraw()  # 초기 드로잉 깜빡임 및 드드득 방지를 위해 숨김
         print(f"{datetime.now()}: LoginWindow 초기화 시작")
         self.title("로그인")
         self.geometry("400x500")  # 크기 약간 증가
@@ -84,6 +28,15 @@ class LoginWindow(ctk.CTkToplevel):
         self.config_path = config_path
         self.application_path = application_path
         self.config = configparser.ConfigParser()
+        
+        # 로그인 창 아이콘 설정
+        try:
+            from utils import resource_path
+            icon_file = resource_path('Icon.ico')
+            if os.path.exists(icon_file):
+                self.iconbitmap(icon_file)
+        except Exception as icon_err:
+            print(f"[ICON] 로그인 창 아이콘 설정 실패: {icon_err}")
         try:
             if os.path.exists(self.config_path):
                 self.config.read(self.config_path, encoding='utf-8')  # 인코딩 명시
@@ -110,6 +63,8 @@ class LoginWindow(ctk.CTkToplevel):
         # 첫 사용자 확인 (등록된 사용자가 없으면 회원가입 창 자동 실행)
         self.check_first_run()
 
+        # 배치 완료 후 화면에 보이게 함
+        self.deiconify()
         print(f"{datetime.now()}: LoginWindow 초기화 완료")
 
     def check_first_run(self):
@@ -403,7 +358,7 @@ class LoginWindow(ctk.CTkToplevel):
 
     def login_event(self, event=None):
         username = self.id_entry.get().strip()
-        password = self.pw_entry.get()
+        password = self.pw_entry.get().strip()
 
         if not username or not password:
             self.show_message("아이디와 비밀번호를 모두 입력하세요.")
@@ -424,34 +379,6 @@ class LoginWindow(ctk.CTkToplevel):
                 user = db_manager.verify_user(username, password)
 
                 if user:
-                    # 비밀번호 강제 변경 확인
-                    if getattr(user, 'force_password_change', False):
-                        print(f"{datetime.now()}: 사용자 '{username}' 비밀번호 강제 변경 대상")
-                        
-                        # 다이얼로그 띄우기
-                        pw_dialog = PasswordChangeDialog(self, username)
-                        self.wait_window(pw_dialog)
-                        
-                        if not pw_dialog.success:
-                            print(f"{datetime.now()}: 비밀번호 변경 취소 또는 실패")
-                            self.show_message("비밀번호를 변경해야 로그인할 수 있습니다.")
-                            # 버튼 복원
-                            try:
-                                self.login_button.configure(state="normal", text="로그인")
-                            except:
-                                pass
-                            return
-
-                        # 비밀번호 변경 성공 시 다시 유저 정보 가져오기 (상태 업데이트됨)
-                        user = db_manager.verify_user(username, pw_dialog.pw1.get())
-                        if not user:
-                            self.show_message("로그인 재시도 필요")
-                            try:
-                                self.login_button.configure(state="normal", text="로그인")
-                            except:
-                                pass
-                            return
-
                     print(f"{datetime.now()}: 사용자 '{username}' 인증 성공")
                     self.show_message("로그인 성공!", "green")
 

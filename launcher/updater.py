@@ -48,7 +48,7 @@ class Updater:
         Check if updates are available.
         
         Args:
-            update_server_url: URL to check for updates (latest.json)
+            update_server_url: URL or local file path to check for updates (latest.json)
             
         Returns:
             Update info dictionary if update available, None otherwise
@@ -63,14 +63,22 @@ class Updater:
         logger.info(f"Checking for updates from: {update_server_url}")
         
         try:
-            # Download latest.json
-            response = requests.get(
-                update_server_url,
-                timeout=self.CHECK_TIMEOUT
-            )
-            response.raise_for_status()
-            
-            latest_info = response.json()
+            # Check if local path (Windows network share or local drive)
+            if not (update_server_url.startswith("http://") or update_server_url.startswith("https://")):
+                manifest_path = Path(update_server_url)
+                if manifest_path.exists():
+                    with open(manifest_path, 'r', encoding='utf-8') as f:
+                        latest_info = json.load(f)
+                else:
+                    raise UpdateError(f"Local update server path not found: {update_server_url}")
+            else:
+                # Download latest.json via HTTP
+                response = requests.get(
+                    update_server_url,
+                    timeout=self.CHECK_TIMEOUT
+                )
+                response.raise_for_status()
+                latest_info = response.json()
             
             # Compare versions
             current_version = self.config_manager.get_version()
@@ -85,10 +93,8 @@ class Updater:
                 logger.info("Application is up to date")
                 return None
                 
-        except requests.RequestException as e:
+        except Exception as e:
             raise UpdateError(f"Failed to check for updates: {e}")
-        except (json.JSONDecodeError, KeyError) as e:
-            raise UpdateError(f"Invalid update manifest: {e}")
     
     def download_update(
         self,
@@ -97,10 +103,10 @@ class Updater:
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> Path:
         """
-        Download update file.
+        Download/copy update file.
         
         Args:
-            download_url: URL to download from
+            download_url: URL or local file path to download/copy from
             dest_path: Destination file path
             progress_callback: Optional callback(bytes_downloaded, total_bytes)
             
@@ -108,10 +114,37 @@ class Updater:
             Path to downloaded file
             
         Raises:
-            UpdateError: If download fails
+            UpdateError: If download/copy fails
         """
-        logger.info(f"Downloading update from: {download_url}")
+        logger.info(f"Downloading/copying update from: {download_url}")
         
+        # Check if local file or network share path
+        if not (download_url.startswith("http://") or download_url.startswith("https://")):
+            try:
+                src_path = Path(download_url)
+                if not src_path.exists():
+                    raise UpdateError(f"Source update file not found: {download_url}")
+                
+                total_size = src_path.stat().st_size
+                downloaded = 0
+                
+                with open(src_path, 'rb') as fsrc, open(dest_path, 'wb') as fdst:
+                    while True:
+                        chunk = fsrc.read(65536) # Read in 64kb chunks
+                        if not chunk:
+                            break
+                        fdst.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        if progress_callback and total_size:
+                            progress_callback(downloaded, total_size)
+                            
+                logger.info(f"Local update file copy completed: {dest_path}")
+                return dest_path
+            except Exception as e:
+                raise UpdateError(f"Failed to copy local update file: {e}")
+        
+        # Original HTTP download logic
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
                 response = requests.get(

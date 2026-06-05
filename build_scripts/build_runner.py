@@ -35,15 +35,6 @@ def collect_datas(root):
         fpath = os.path.join(root, fname)
         if os.path.isfile(fpath):
             datas.append(f"{fname};.")
-            
-    # 아이콘 파일 명시적 포함 (Icon.ico, icon.png 등)
-    # 실행 파일 아이콘(--icon)과는 별개로, 런타임에 리소스로 사용하기 위해 포함
-    for icon_name in ["Icon.ico", "icon.ico", "icon.png", "Icon.png"]:
-        icon_path = os.path.join(root, icon_name)
-        if os.path.isfile(icon_path):
-            datas.append(f"{icon_name};.")
-            print(f"Adding icon resource: {icon_name}")
-            
     return datas
 
 def get_version_from_folder(root):
@@ -62,12 +53,8 @@ def run_pyinstaller_with_script(script_path, onefile=False, windowed=False, noco
         args.append("--noconfirm")
     if onefile:
         args.append("--onefile")
-    
-    # 3. CMD 창 비활성화: --windowed (또는 --noconsole) 옵션 강제 적용
-    # 사용자가 명시적으로 windowed=False로 하지 않는 한 기본적으로 적용
-    if True: # 항상 윈도우 모드(콘솔 숨김) 적용
+    if windowed:
         args.append("--windowed")
-    
     if clean:
         args.append("--clean")
     if name:

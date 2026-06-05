@@ -81,83 +81,87 @@ class MaterialManagementFrame(ctk.CTkFrame):
             
     def refresh_data(self):
         """이 화면에 필요한 모든 데이터를 DB에서 새로 불러옵니다."""
-        # Load clients asynchronously
+        # Load clients asynchronously (non-blocking) and materials in background
         try:
+            # clients loader already runs in background
             self.load_clients_to_combobox()
-            # Load materials asynchronously using the consolidated method
-            self.load_materials()
-        except Exception as e:
-            print(f"refresh_data 오류: {e}")
 
-    def _load_materials_async(self, search_term=""):
-        """원료 목록을 비동기적으로 로드합니다."""
-        if getattr(self, '_materials_loader_running', False):
-            return
+            # Load materials in background to avoid UI freeze
+            if getattr(self, '_materials_loader_running', False):
+                return
 
-        def _materials_loader():
-            setattr(self, '_materials_loader_running', True)
-            try:
-                # Reuse existing load_materials logic but perform DB call off main thread
-                materials = db_manager.search_materials(search_term, load_ingredients=False, search_ingredients=True)
-                material_data_list = []
-                for i, mat in enumerate(materials):
-                    supplier_name = mat.supplier.name if mat.supplier else ""
-                    tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-                    values = (
-                        i + 1, mat.id, mat.code, mat.name,
-                        f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
-                        mat.package_unit, supplier_name, mat.manufacturer, mat.hs_code,
-                        mat.origin, mat.name_en or "", mat.nmpa_reg_num or "",
-                    )
-                    material_data_list.append((values, tag))
+            def _materials_loader():
+                setattr(self, '_materials_loader_running', True)
+                try:
+                    # Reuse existing load_materials logic but perform DB call off main thread
+                    search_term = self.material_search_entry.get().strip()
+                    materials = db_manager.search_materials(search_term, load_ingredients=False, search_ingredients=True)
+                    material_data_list = []
+                    for i, mat in enumerate(materials):
+                        supplier_name = mat.supplier.name if mat.supplier else ""
+                        tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+                        values = (
+                            i + 1, mat.id, mat.code, mat.name,
+                            f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
+                            mat.package_unit, supplier_name, mat.manufacturer, mat.hs_code,
+                            mat.origin, mat.name_en or "", mat.nmpa_reg_num or "",
+                        )
+                        material_data_list.append((values, tag))
 
-                def _apply_initial_and_schedule():
-                    try:
-                        # 초기 화면에는 상위 CHUNK 개만 빠르게 표시
-                        CHUNK = 200
-                        initial = material_data_list[:CHUNK]
-                        for item in self.material_tree.get_children():
-                            self.material_tree.delete(item)
-                        for values, tag in initial:
-                            self.material_tree.insert("", "end", tags=(tag,), values=values)
+                    def _apply_initial_and_schedule():
+                        try:
+                            # 초기 화면에는 상위 CHUNK 개만 빠르게 표시
+                            CHUNK = 200
+                            initial = material_data_list[:CHUNK]
+                            for item in self.material_tree.get_children():
+                                self.material_tree.delete(item)
+                            for values, tag in initial:
+                                self.material_tree.insert("", "end", tags=(tag,), values=values)
 
-                        # 나머지 항목은 배치로 점진 추가
-                        if len(material_data_list) > CHUNK:
-                            def _append_batches():
-                                try:
-                                    for start in range(CHUNK, len(material_data_list), CHUNK):
-                                        batch = material_data_list[start:start+CHUNK]
-                                        def _apply_batch(b=batch):
+                            # 나머지 항목은 배치로 점진 추가
+                            if len(material_data_list) > CHUNK:
+                                def _append_batches():
+                                    try:
+                                        for start in range(CHUNK, len(material_data_list), CHUNK):
+                                            batch = material_data_list[start:start+CHUNK]
+                                            def _apply_batch(b=batch):
+                                                try:
+                                                    for values, tag in b:
+                                                        self.material_tree.insert("", "end", tags=(tag,), values=values)
+                                                except Exception:
+                                                    pass
                                             try:
-                                                for values, tag in b:
-                                                    self.material_tree.insert("", "end", tags=(tag,), values=values)
+                                                self.after(0, _apply_batch)
                                             except Exception:
                                                 pass
-                                        try:
-                                            self.after(0, _apply_batch)
-                                        except Exception:
-                                            pass
-                                        time.sleep(0.02)
-                                finally:
-                                    setattr(self, '_materials_loader_running', False)
+                                            time.sleep(0.02)
+                                    finally:
+                                        setattr(self, '_materials_loader_running', False)
 
-                            import threading as _th
-                            _th.Thread(target=_append_batches, daemon=True).start()
-                        else:
+                                import threading as _th
+                                _th.Thread(target=_append_batches, daemon=True).start()
+                            else:
+                                setattr(self, '_materials_loader_running', False)
+                        except Exception:
                             setattr(self, '_materials_loader_running', False)
+
+                    try:
+                        self.after(10, _apply_initial_and_schedule)
                     except Exception:
                         setattr(self, '_materials_loader_running', False)
-
-                try:
-                    self.after(10, _apply_initial_and_schedule)
-                except Exception:
+                except Exception as e:
+                    print(f"원료 비동기 로드 중 오류: {e}")
                     setattr(self, '_materials_loader_running', False)
-            except Exception as e:
-                print(f"원료 비동기 로드 중 오류: {e}")
-                setattr(self, '_materials_loader_running', False)
 
-        import threading
-        threading.Thread(target=_materials_loader, daemon=True).start()
+            import threading
+            threading.Thread(target=_materials_loader, daemon=True).start()
+        except Exception:
+            # Fallback to synchronous load if threading fails
+            try:
+                self.load_clients_to_combobox()
+                self.load_materials()
+            except Exception:
+                pass
 
     def setup_permission_controls(self):
         """사용자 권한에 따라 UI 요소들을 제어합니다."""
@@ -1074,9 +1078,36 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.search_timer = self.after(500, self.load_materials)
 
     def load_materials(self):
-        """DB에서 원료 목록을 비동기적으로 검색하고 Treeview에 표시합니다."""
+        """DB에서 원료 목록을 검색하고 Treeview에 표시합니다."""
         search_term = self.material_search_entry.get().strip()
-        self._load_materials_async(search_term)
+        # 검색 시에는 전성분도 함께 검색하도록 search_ingredients=True로 변경합니다.
+        # 목록 표시에는 전성분 정보가 필요 없으므로 load_ingredients=False로 유지합니다.
+        materials = db_manager.search_materials(search_term, load_ingredients=False, search_ingredients=True)
+        
+        # 1. UI 렌더링 성능 최적화 - 데이터를 먼저 메모리에 리스트로 준비
+        material_data_list = []
+        try:
+            for i, mat in enumerate(materials):
+                supplier_name = mat.supplier.name if mat.supplier else ""
+                tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+                values = (
+                    i + 1, mat.id, mat.code, mat.name,
+                    f"{mat.unit_price:,.0f}" if mat.unit_price is not None else "",
+                    mat.package_unit, supplier_name, mat.manufacturer, mat.hs_code,
+                    mat.origin, mat.name_en or "", mat.nmpa_reg_num or "",
+                )
+                material_data_list.append((values, tag))
+
+            # 2. Treeview를 한번에 업데이트
+            # 기존 모든 행 삭제
+            for item in self.material_tree.get_children():
+                self.material_tree.delete(item)
+            # 메모리에 준비된 데이터로 Treeview 채우기
+            for values, tag in material_data_list:
+                self.material_tree.insert("", "end", tags=(tag,), values=values)
+
+        except Exception as e:
+            print(f"원료 목록 로드 중 오류 발생: {e}")
 
     def load_clients_to_combobox(self):
         """거래처 정보를 콤보박스와 자동완성에 로드합니다 - 개선된 버전"""

@@ -1,4 +1,5 @@
 # modules/quality_management.py
+import os
 import customtkinter as ctk
 from tkinter import messagebox
 from openpyxl import Workbook
@@ -32,16 +33,16 @@ class QualityManagementFrame(ctk.CTkFrame):
 
         # --- 탭 추가 ---
         self.tab_view.add(self.texts['coa'])
-        self.tab_view.add(self.texts['msds'])
-        self.tab_view.add(self.texts['prod_standard'])
-        self.tab_view.add(self.texts['mfg_record'])
+        # self.tab_view.add(self.texts['msds'])
+        # self.tab_view.add(self.texts['prod_standard'])
+        # self.tab_view.add(self.texts['mfg_record'])
         self.tab_view.add(self.texts['ingredient_report'])
 
         # --- 각 탭 UI 설정 ---
         self.setup_coa_tab(self.tab_view.tab(self.texts['coa']))
-        self.setup_placeholder_tab(self.tab_view.tab(self.texts['msds']), self.texts['msds'])
-        self.setup_placeholder_tab(self.tab_view.tab(self.texts['prod_standard']), self.texts['prod_standard'])
-        self.setup_placeholder_tab(self.tab_view.tab(self.texts['mfg_record']), self.texts['mfg_record'])
+        # self.setup_placeholder_tab(self.tab_view.tab(self.texts['msds']), self.texts['msds'])
+        # self.setup_placeholder_tab(self.tab_view.tab(self.texts['prod_standard']), self.texts['prod_standard'])
+        # self.setup_placeholder_tab(self.tab_view.tab(self.texts['mfg_record']), self.texts['mfg_record'])
         self.setup_placeholder_tab(self.tab_view.tab(self.texts['ingredient_report']), self.texts['ingredient_report'])
 
 
@@ -310,7 +311,10 @@ class QualityManagementFrame(ctk.CTkFrame):
 
             if file_path:
                 wb.save(file_path)
-                messagebox.showinfo(self.texts['success'], f"{self.texts['report_saved_success']}:\n{file_path}", parent=self)
+                try:
+                    os.startfile(os.path.abspath(file_path))
+                except Exception:
+                    pass
 
         except Exception as e:
             messagebox.showerror(self.texts['error'], f"{self.texts['report_generation_error']}:\n{e}", parent=self)

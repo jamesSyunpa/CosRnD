@@ -82,8 +82,8 @@ TRANSLATIONS = {
         "client_info": "거래처 정보", "client_search": "거래처 검색", "client_type": "거래처 유형", "is_active": "사용 여부", "client_list": "거래처 목록",
         "client_type_values": ["원료", "OEM/ODM", "부자재", "기타"],
         "client_type_filter_values": ["- 유형 선택 -", "원료", "OEM/ODM", "부자재", "기타"],
-        "client_labels": {"code": "거래처코드(사업자번호)", "unique": "고유코드", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소"},
-        "client_tree_columns": {"id": "ID", "type": "유형", "code": "거래처코드", "unique_code": "고유코드", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소", "active": "사용여부"},
+        "client_labels": {"code": "거래처코드(사업자번호)", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소"},
+        "client_tree_columns": {"id": "ID", "type": "유형", "code": "거래처코드", "name": "거래처명", "ceo": "대표자명", "manager": "담당자명", "contact": "연락처", "fax": "팩스", "email": "이메일", "zip": "우편번호", "address": "주소", "active": "사용여부"},
 
         # Document Management
         "doc_mgt_help_title": "처방 관리 도움말",
@@ -162,7 +162,7 @@ TRANSLATIONS = {
     # Formulation Popup
     "formulation_popup_title": "처방 생성/수정", "formulation_details": "처방 상세 정보", "use_target_info": "타겟 정보 사용",
     "target_sample_name": "타겟 샘플명", "target_ph": "타겟 pH", "today": "당일:", "next_day": "익일:", "target_viscosity": "타겟 점도",
-    "pin_and_machine": "사용핀 및 기계", "target_client": "타겟 거래처", "experiment_name": "실험품명", "experiment_date": "지시일자", "manufacturing_date": "생산일자",
+    "pin_and_machine": "사용핀 및 기계", "target_client": "타겟 거래처", "experiment_name": "실험품명", "experiment_date": "실험년월일",
     "manager_name": "담당자", "manager_code": "담당번호", "lab_no": "LAB NO.", "revision": "차수", "client": "거래처",
     "experiment_results": "실험 결과", "ph": "pH", "viscosity": "점도", "evaluation_and_notes": "품평결과 및 특이사항", "change_history": "변경 이력",
     "formulation_content": "처방 내용", "total_experiment_amount_g": "총 실험량(g):", "to_100": "To 100",
@@ -181,9 +181,8 @@ TRANSLATIONS = {
     "client_error": "거래처 오류", "client_not_found_warning": "엑셀의 거래처 '{name}'를 찾을 수 없습니다.\n거래처를 직접 선택해주세요.",
     "formulation_import_success": "처방 정보를 성공적으로 불러왔습니다.", "import_formulation_confirm_msg": "엑셀 파일에서 처방을 가져옵니다.\n현재 작성 중인 내용은 모두 사라집니다. 계속하시겠습니까?",
 
-    # Add Material Dialog
     "add_material_title": "원료 추가", "material_search": "원료 검색:", "no_ingredients_registered": "등록된 전성분이 없습니다.",
-    "ingredient_report": "원료목록보고 자료",
+    "ingredient_report": "원료목록보고",
     
     # Ingredient Lookup Tab
     "ingredient_lookup": "원료/성분 조회",
@@ -252,8 +251,8 @@ TRANSLATIONS = {
         "client_info": "Client Information", "client_search": "Client Search", "client_type": "Client Type", "is_active": "Is Active", "client_list": "Client List",
         "client_type_values": ["Raw Material", "OEM/ODM", "Packaging", "Other"],
         "client_type_filter_values": ["- Select Type -", "Raw Material", "OEM/ODM", "Packaging", "Other"],
-        "client_labels": {"code": "Client Code(Biz No.)", "unique": "Unique Code", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address"},
-        "client_tree_columns": {"id": "ID", "type": "Type", "code": "Client Code", "unique_code": "Unique Code", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address", "active": "Is Active"},
+        "client_labels": {"code": "Client Code(Biz No.)", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address"},
+        "client_tree_columns": {"id": "ID", "type": "Type", "code": "Client Code", "name": "Client Name", "ceo": "CEO Name", "manager": "Manager Name", "contact": "Contact", "fax": "Fax", "email": "Email", "zip": "Zip Code", "address": "Address", "active": "Is Active"},
 
         # Document Management
         "doc_mgt_help_title": "Formulation Management Help",

@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['C:\\Users\\neon5\\Desktop\\R&D_Flatform_버전관리\\CosRnD_v59\\main.py'],
+    ['launcher.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets\\*', 'assets'), ('data\\*', 'data'), ('database\\*', 'database'), ('modules\\*', 'modules'), ('utils\\*', 'utils'), ('config.ini', '.'), ('VERSION', '.')],
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='화장품연구관리_v59_single',
+    name='launcher',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -35,5 +35,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\Users\\neon5\\Desktop\\R&D_Flatform_버전관리\\CosRnD_v59\\Icon.ico'],
 )
