@@ -72,7 +72,9 @@ class HomeFrame(ctk.CTkFrame):
         for widget in self.cards_frame.winfo_children():
             widget.destroy()
 
-        if not self.recent_actions:
+        valid_actions = [action for action in self.recent_actions if action in self.action_config and action not in ['quality/msds', 'quality/prod_standard', 'quality/mfg_record']]
+
+        if not valid_actions:
             ctk.CTkLabel(self.cards_frame, text="최근 활동이 없습니다.", font=ctk.CTkFont(size=14), text_color="gray").pack(pady=20)
             return
 
@@ -80,7 +82,7 @@ class HomeFrame(ctk.CTkFrame):
         num_columns = 5
         self.cards_frame.grid_columnconfigure(tuple(range(num_columns)), weight=1)
 
-        for i, action in enumerate(self.recent_actions):
+        for i, action in enumerate(valid_actions):
             config = self.action_config.get(action, {"icon": "❓", "title": action})
             card = self.create_action_card(self.cards_frame, config["icon"], config["title"], action)
             card.grid(row=0, column=i, padx=10, pady=10, sticky="nsew")

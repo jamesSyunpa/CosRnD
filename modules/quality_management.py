@@ -1,4 +1,5 @@
 # modules/quality_management.py
+import os
 import customtkinter as ctk
 from tkinter import messagebox
 from openpyxl import Workbook
@@ -84,7 +85,7 @@ class QualityManagementFrame(ctk.CTkFrame):
         tab_frame.grid_columnconfigure(0, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
 
-        self.scrollable_frame = ctk.CTkScrollableFrame(tab_frame, label_text="화장품 원료목록 보고서")
+        self.scrollable_frame = ctk.CTkScrollableFrame(tab_frame, label_text="화장품 원료목록 보고")
         self.scrollable_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         self.scrollable_frame.grid_columnconfigure(0, weight=1)
 
@@ -737,7 +738,10 @@ class QualityManagementFrame(ctk.CTkFrame):
                                         title="엑셀로 저장")
         if file_path:
             wb.save(file_path)
-            messagebox.showinfo("성공", f"엑셀 파일이 성공적으로 저장되었습니다:\n{file_path}", parent=self)
+            try:
+                os.startfile(os.path.abspath(file_path))
+            except Exception:
+                pass
 
     def _export_to_excel(self, usage, custom_content):
         """테이블 데이터를 엑셀로 내보냅니다."""
@@ -809,7 +813,10 @@ class QualityManagementFrame(ctk.CTkFrame):
                                         title="엑셀로 저장")
         if file_path:
             wb.save(file_path)
-            messagebox.showinfo("성공", f"엑셀 파일이 성공적으로 저장되었습니다:\n{file_path}", parent=self)
+            try:
+                os.startfile(os.path.abspath(file_path))
+            except Exception:
+                pass
 
     def setup_coa_tab(self, tab_frame):
         """COA 탭의 UI를 설정합니다."""
@@ -1280,7 +1287,10 @@ class QualityManagementFrame(ctk.CTkFrame):
 
             if file_path:
                 wb.save(file_path)
-                messagebox.showinfo(self.texts['success'], f"{self.texts['report_saved_success']}:\n{file_path}", parent=self)
+                try:
+                    os.startfile(os.path.abspath(file_path))
+                except Exception:
+                    pass
 
         except Exception as e:
             messagebox.showerror(self.texts['error'], f"{self.texts['report_generation_error']}:\n{e}", parent=self)
@@ -1677,7 +1687,10 @@ class QualityManagementFrame(ctk.CTkFrame):
 
             if file_path:
                 wb.save(file_path)
-                messagebox.showinfo("성공", f"보고서가 성공적으로 저장되었습니다:\n{file_path}", parent=self)
+                try:
+                    os.startfile(os.path.abspath(file_path))
+                except Exception:
+                    pass
 
         except Exception as e:
             messagebox.showerror("오류", f"보고서 생성 중 오류가 발생했습니다:\n{e}", parent=self)
@@ -1887,9 +1900,25 @@ class QualityManagementFrame(ctk.CTkFrame):
         label.grid(row=0, column=0, padx=20, pady=20)
 
     def switch_to_tab(self, tab_name):
-        """요청된 이름의 탭으로 화면을 전환합니다."""
-        if tab_name in self.tab_view._name_list: # pylint: disable=protected-access
-            self.tab_view.set(tab_name)
+        # 1. 상단 탭 세그먼트 버튼 숨기기 (공간 확보 및 렉 완화)
+        try:
+            if hasattr(self, 'tab_view') and hasattr(self.tab_view, '_segmented_button'):
+                self.tab_view._segmented_button.grid_forget()
+        except Exception as e:
+            print(f"[UI-Quality] 탭 세그먼트 숨기기 실패: {e}")
+
+        # 2. 영어 식별자 -> 실제 한국어 탭 명칭 매핑
+        tab_name_mapping = {
+            "coa": self.texts.get('coa', 'COA'),
+            "msds": self.texts.get('msds', 'MSDS'),
+            "prod_standard": self.texts.get('prod_standard', 'Product Standard'),
+            "mfg_record": self.texts.get('mfg_record', 'Mfg. Record'),
+            "ingredient_report": self.texts.get('ingredient_report', 'Ingredient Report')
+        }
+        
+        target_tab = tab_name_mapping.get(tab_name, tab_name)
+        if hasattr(self, 'tab_view') and target_tab in self.tab_view._name_list:
+            self.tab_view.set(target_tab)
 
     def refresh_data(self):
         """품질 관리 프레임의 데이터를 새로고침합니다."""

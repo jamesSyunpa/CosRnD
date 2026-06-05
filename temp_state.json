@@ -1,0 +1,13 @@
+{
+    "user_id": 1,
+    "username": "neon545",
+    "timestamp": "2026-06-05T20:34:42.728812",
+    "recent_actions": [
+        "document/production",
+        "document/list",
+        "settings/settings_sub",
+        "document/report",
+        "quality/ingredient_report"
+    ],
+    "frames": {}
+}

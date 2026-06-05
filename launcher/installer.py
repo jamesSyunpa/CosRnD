@@ -42,9 +42,9 @@ class Installer:
         Get default installation path.
         
         Returns:
-            Default installation directory (%LOCALAPPDATA%/CosRnD)
+            Default installation directory (C:\CosRnD)
         """
-        return Path(os.environ.get('ProgramFiles', 'C:\\Program Files')) / "CosRnD"
+        return Path("C:\\CosRnD")
     
     @staticmethod
     def validate_install_path(path: Path) -> bool:
@@ -252,10 +252,12 @@ class Installer:
         try:
             # Check required files exist
             bin_dir = install_path / "bin"
-            main_exe = bin_dir / "main.exe"
+            main_exe = bin_dir / "화장품연구관리_v1.0.exe"
+            if not main_exe.exists():
+                main_exe = bin_dir / "main.exe"
             
             if not main_exe.exists():
-                logger.error("main.exe not found in installation")
+                logger.error("Application executable (화장품연구관리_v1.0.exe or main.exe) not found in installation")
                 return False
             
             # Check directory structure
@@ -312,6 +314,27 @@ class Installer:
         if not self.verify_installation(install_path):
             raise InstallationError("Installation verification failed")
         
+        # 바탕화면 및 시작메뉴 단축아이콘 생성
+        try:
+            bin_dir = install_path / "bin"
+            target_exe = bin_dir / "화장품연구관리_v1.0.exe"
+            if not target_exe.exists():
+                target_exe = bin_dir / "main.exe"
+            
+            icon_path = bin_dir / "Icon.ico"
+            if not icon_path.exists():
+                # 리소스에서 복사 시도
+                import sys
+                src_icon = Path(sys._MEIPASS if hasattr(sys, '_MEIPASS') else '').joinpath('Icon.ico')
+                if not src_icon.exists():
+                    src_icon = Path(__file__).parent.parent / 'Icon.ico'
+                if src_icon.exists():
+                    shutil.copy2(src_icon, icon_path)
+            
+            self.create_shortcuts(target_exe, "화장품연구관리_v1.0", icon_path)
+        except Exception as shortcut_err:
+            logger.error(f"Failed to create shortcuts during installation: {shortcut_err}")
+
         logger.info("Installation completed successfully")
         
         # Return config data
@@ -320,6 +343,101 @@ class Installer:
             "version": version,
             "update_server": update_server
         }
+        
+    def create_shortcuts(self, target_exe: Path, shortcut_name: str, icon_path: Path):
+        """윈도우 바탕화면 및 시작메뉴에 PowerShell을 이용해 단축 아이콘 생성 및 제어판 앱 등록"""
+        try:
+            import subprocess
+            # 바탕화면 경로 가져오기
+            desktop_dir = Path(os.environ["USERPROFILE"]) / "Desktop"
+            # 시작메뉴 경로 가져오기
+            start_menu_dir = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+            
+            for base_dir in [desktop_dir, start_menu_dir]:
+                shortcut_path = base_dir / f"{shortcut_name}.lnk"
+                working_dir = target_exe.parent
+                
+                # PowerShell 스크립트를 작성하여 바로가기 생성
+                ps_script = f"""
+                $WshShell = New-Object -ComObject WScript.Shell
+                $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
+                $Shortcut.TargetPath = "{target_exe}"
+                $Shortcut.WorkingDirectory = "{working_dir}"
+                $Shortcut.IconLocation = "{icon_path}"
+                $Shortcut.Save()
+                """
+                
+                # PowerShell 실행
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps_script],
+                    capture_output=True,
+                    check=True
+                )
+                logger.info(f"Shortcut created successfully at {shortcut_path}")
+            
+            # 윈도우 제어판 '앱 및 기능'(프로그램 추가/제거)에 등록
+            self.register_in_windows_uninstall(target_exe, shortcut_name, icon_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to create shortcut: {e}")
+
+    def register_in_windows_uninstall(self, target_exe: Path, display_name: str, icon_path: Path):
+        """윈도우 레지스트리에 언인스톨 정보를 등록하여 제어판의 설치된 앱 리스트에 노출시킵니다."""
+        if not sys.platform.startswith('win'):
+            return
+        try:
+            import winreg
+            import ctypes
+            
+            # 관리자 권한 실행 여부 확인
+            is_admin = False
+            try:
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+            except Exception:
+                pass
+            
+            # 관리자 권한이면 HKLM(모든 사용자), 권한이 없으면 HKCU(현재 사용자)에 등록
+            hkeys = [winreg.HKEY_CURRENT_USER]
+            if is_admin:
+                hkeys.append(winreg.HKEY_LOCAL_MACHINE)
+            
+            # 64비트 및 32비트 레지스트리 경로 모두 등록 시도 (Wow6432Node 대응)
+            reg_paths = [
+                r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CosRnD",
+                r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\CosRnD"
+            ]
+            
+            install_dir = target_exe.parent.parent # C:\CosRnD
+            uninstall_string = f'"{target_exe.parent / "Setup_화장품연구관리_v1.0.exe"}" --uninstall'
+            if not (target_exe.parent / "Setup_화장품연구관리_v1.0.exe").exists():
+                uninstall_string = f'"{target_exe}" --uninstall'
+            
+            for hkey in hkeys:
+                for reg_path in reg_paths:
+                    try:
+                        # 레지스트리 키 생성 및 열기
+                        key = winreg.CreateKeyEx(hkey, reg_path, 0, winreg.KEY_WRITE)
+                        
+                        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
+                        winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
+                        winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
+                        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "1.0.0")
+                        winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "TaesungChem")
+                        winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
+                        winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)
+                        winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
+                        
+                        winreg.CloseKey(key)
+                        logger.info(f"Registered app in Windows Registry: {'HKLM' if hkey == winreg.HKEY_LOCAL_MACHINE else 'HKCU'} -> {reg_path}")
+                    except PermissionError:
+                        # 관리자 권한이 없어서 HKLM 쓰기에 실패한 경우는 무시하고 계속 진행
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Failed to write registry key {reg_path} on {hkey}: {e}")
+                        
+            logger.info("Control Panel app list registration complete")
+        except Exception as e:
+            logger.error(f"Failed to register in Windows Registry: {e}")
     
     def uninstall(self, install_path: Path, keep_user_data: bool = True) -> bool:
         """

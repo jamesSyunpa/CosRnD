@@ -7,11 +7,10 @@ import configparser
 from sqlalchemy.orm import sessionmaker, joinedload, subqueryload
 from datetime import datetime
 from types import SimpleNamespace
-import json
 
-from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem, ProductionFormulation, ProductionStep, ProductionRun, ProductCodeRule
+from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem, ProductionFormulation, ProductionStep, ProductionRun
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 17
 
 def file_exists_including_hidden(path: str) -> bool:
     """숨김 파일을 포함하여 파일 존재 여부를 확인합니다."""
@@ -33,6 +32,72 @@ def file_exists_including_hidden(path: str) -> bool:
         return True
     except Exception:
         return False
+
+def ensure_file_accessible(path: str):
+    """파일의 읽기 전용, 숨김, 시스템 속성을 해제하여 SQLite가 정상적으로 열 수 있도록 합니다."""
+    if not path:
+        return
+    try:
+        if sys.platform.startswith('win'):
+            import ctypes
+            # 파일이 존재하는 경우 속성을 일반(Normal)으로 재설정
+            if os.path.exists(path):
+                FILE_ATTRIBUTE_NORMAL = 0x80
+                ctypes.windll.kernel32.SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL)
+                print(f"[자가치유] 파일 속성 일반화 완료 (숨김/읽기전용 해제): {path}")
+            else:
+                # 존재하진 않지만 숨김 파일 속성을 확인해 제거 시도
+                attrs = ctypes.windll.kernel32.GetFileAttributesW(path)
+                if attrs != -1:
+                    FILE_ATTRIBUTE_NORMAL = 0x80
+                    ctypes.windll.kernel32.SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL)
+    except Exception as e:
+        print(f"[경고] 파일 속성 변경 실패: {e}")
+
+def discover_database_paths() -> list:
+    """OneDrive, 네트워크 드라이브 등에서 cosmetic.db 파일이 존재하는 위치를 자동으로 스캔하여 검색합니다."""
+    candidates = []
+    
+    # 1. OneDrive 환경 변수 확인 및 스캔
+    onedrive_vars = ['OneDrive', 'OneDriveConsumer', 'OneDriveCommercial']
+    for var in onedrive_vars:
+        od_path = os.environ.get(var)
+        if od_path and os.path.exists(od_path):
+            candidates.append(os.path.normpath(os.path.join(od_path, 'CosRnD_data')))
+            candidates.append(os.path.normpath(os.path.join(od_path, 'Documents', 'CosRnD_data')))
+            candidates.append(os.path.normpath(os.path.join(od_path, 'CosRnD')))
+            candidates.append(os.path.normpath(os.path.join(od_path, 'Data')))
+            
+    # 2. 내 문서(Documents) 경로 내 OneDrive 동기화 폴더 확인
+    user_profile = os.path.expanduser('~')
+    candidates.append(os.path.normpath(os.path.join(user_profile, 'OneDrive', 'Documents', 'CosRnD_data')))
+    candidates.append(os.path.normpath(os.path.join(user_profile, 'OneDrive', 'CosRnD_data')))
+    
+    # 3. 네트워크 드라이브 및 로컬 드라이브 스캔 (D부터 Z까지)
+    if sys.platform.startswith('win'):
+        import ctypes
+        try:
+            for drive_letter in range(ord('D'), ord('Z') + 1):
+                drive = f"{chr(drive_letter)}:\\"
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                if drive_type in (4, 3): # 네트워크 드라이브(4) 또는 기타 로컬 드라이브(3)
+                    candidates.append(os.path.normpath(os.path.join(drive, 'CosRnD_data')))
+                    candidates.append(os.path.normpath(os.path.join(drive, 'CosRnD', 'Data')))
+        except Exception as e:
+            print(f"[경로 검색] 드라이브 스캔 중 에러 (무시): {e}")
+
+    # 실제 파일(cosmetic.db)이 존재하는 폴더만 필터링
+    valid_dirs = []
+    for directory in candidates:
+        if not directory:
+            continue
+        directory = os.path.normpath(directory).replace('\\', '/')
+        db_file = os.path.normpath(os.path.join(directory, 'cosmetic.db')).replace('\\', '/')
+        if file_exists_including_hidden(db_file):
+            print(f"[경로 검색] 유효한 DB 발견: {db_file}")
+            valid_dirs.append(directory)
+            
+    return list(dict.fromkeys(valid_dirs))
 
 class DBManager:
     _instance = None
@@ -101,16 +166,7 @@ class DBManager:
             if file_exists_including_hidden(db_path):
                 file_size = os.path.getsize(db_path)
                 print(f"  * 새 DB 파일 생성됨 ({file_size} bytes)")
-                
-                # Windows에서 숨김 파일로 설정
-                try:
-                    import ctypes
-                    FILE_ATTRIBUTE_HIDDEN = 0x02
-                    ctypes.windll.kernel32.SetFileAttributesW(db_path, FILE_ATTRIBUTE_HIDDEN)
-                    print(f"  * DB 파일을 숨김 파일로 설정함")
-                except Exception as e:
-                    print(f"  * 숨김 파일 설정 실패 (무시): {e}")
-                
+                ensure_file_accessible(db_path)
                 return True
             else:
                 print("  * DB 파일이 생성되지 않았음")
@@ -129,43 +185,42 @@ class DBManager:
             self.config_path = None
 
     def get_db_relative_path(self) -> str:
+        # 기본 fallback 경로는 AppData/CosRnD/Data 로 지정 (OneDrive 동기화 잠금 회피)
+        default_dir = os.path.join(os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')), 'CosRnD', 'Data')
+        
         print("설정 파일 경로:", self.config_path)
         if not self.config_path or not os.path.exists(self.config_path):
-            print("설정 파일이 없음, 기본값 'data' 사용")
-            return 'data'
+            print(f"설정 파일이 없음, 기본값 {default_dir} 사용")
+            return default_dir
             
         try:
             config = configparser.ConfigParser(interpolation=None)
             config.read(self.config_path, encoding='utf-8')
-            db_dir = config.get('Paths', 'database_dir', fallback='data')
+            db_dir = config.get('Paths', 'database_dir', fallback='')
+            if not db_dir:
+                db_dir = default_dir
             print(f"config.ini에서 읽은 database_dir: {db_dir}")
             return db_dir
         except Exception as e:
-            print(f"설정 파일 읽기 실패: {e}, 기본값 'data' 사용")
-            return 'data'
+            print(f"설정 파일 읽기 실패: {e}, 기본값 {default_dir} 사용")
+            return default_dir
 
     def get_local_db_path(self) -> str:
-        if not self.application_path:
-            return None
-        db_dir = os.path.join(self.application_path, self.get_db_relative_path())
-        return os.path.join(db_dir, "cosmetic.db")
-    
-    def get_current_db_path(self) -> str:
-        return getattr(self, 'db_path', None)
-    
-    def get_config_shared_db_file(self) -> str:
+        db_dir = self.get_db_relative_path()
+        target_path = os.path.join(db_dir, "cosmetic.db")
+        
+        # 이전 Documents 경로에서 AppData 경로로 자동 데이터베이스 이전(마이그레이션) 수행
         try:
-            config = configparser.ConfigParser(interpolation=None)
-            config.read(self.config_path, encoding='utf-8')
-            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
-            if not shared_db_path:
-                return None
-            p = shared_db_path.strip().strip('"').strip("'")
-            if p.lower().endswith('.db') or os.path.basename(p).lower() == 'cosmetic.db':
-                return p
-            return os.path.join(p, 'cosmetic.db')
-        except Exception:
-            return None
+            old_db_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'CosRnD', 'Data')
+            old_db_path = os.path.join(old_db_dir, "cosmetic.db")
+            if os.path.exists(old_db_path) and not os.path.exists(target_path):
+                os.makedirs(db_dir, exist_ok=True)
+                shutil.copy2(old_db_path, target_path)
+                print(f"[마이그레이션] 기존 Documents DB({old_db_path})를 AppData 경로({target_path})로 복사 완료")
+        except Exception as mig_err:
+            print(f"[경고] 기존 Documents DB 마이그레이션 실패: {mig_err}")
+            
+        return target_path
 
     def cleanup_db_files(self):
         """WAL, SHM, 백업 파일들을 정리합니다."""
@@ -243,10 +298,30 @@ class DBManager:
         config = configparser.ConfigParser(interpolation=None)
         config.read(self.config_path, encoding='utf-8')
         
-        # 1. 기본 경로 설정
-        local_db_path = os.path.join(application_path, self.get_db_relative_path(), "cosmetic.db")
+        # 1. 기본 경로 설정 (Documents/CosRnD/Data/cosmetic.db)
+        local_db_path = self.get_local_db_path()
         os.makedirs(os.path.dirname(local_db_path), exist_ok=True)
         shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+
+        # 만약 config.ini에 shared_db_path가 없거나 해당 경로가 존재하지 않는 경우, OneDrive 및 네트워크 드라이브 자동 스캔
+        if not shared_db_path or not os.path.exists(shared_db_path):
+            print("[INFO] 유효한 공유 DB 경로가 설정되지 않았습니다. OneDrive 및 네트워크 폴더 자동 스캔을 시도합니다...")
+            discovered_paths = discover_database_paths()
+            if discovered_paths:
+                # 첫 번째 유효한 경로를 자동으로 책정
+                auto_path = discovered_paths[0]
+                shared_db_path = auto_path
+                print(f"[INFO] 자동으로 감지된 DB 경로를 책정합니다: {auto_path}")
+                
+                # config.ini에 자동 감지된 경로 저장
+                try:
+                    if not config.has_section('Paths'):
+                        config.add_section('Paths')
+                    config.set('Paths', 'shared_db_path', auto_path)
+                    with open(config_path, 'w', encoding='utf-8') as configfile:
+                        config.write(configfile)
+                except Exception as save_err:
+                    print(f"[경고] 자동 감지된 경로 저장 실패 (무시): {save_err}")
 
         # Normalize shared_db_path: config stores only the folder. If a full file
         # path was stored, handle gracefully, but prefer folder paths.
@@ -284,26 +359,96 @@ class DBManager:
             except Exception as e:
                 print(f"[경고] 초기 DB 경로 저장 실패: {e}")
         
-        other_to_merge = None
-        chosen_path = None
-        if shared_db_file and file_exists_including_hidden(shared_db_file):
-            chosen_path = shared_db_file
-            if file_exists_including_hidden(local_db_path) and os.path.normpath(local_db_path) != os.path.normpath(shared_db_file):
-                other_to_merge = local_db_path
-            print("[INFO] 경로 선택 정책: 공유 DB 우선")
-        else:
-            chosen_path = local_db_path
-            print("[INFO] 경로 선택 정책: 로컬 DB 사용")
+        # 3. 공유 DB 사용 시도
+        # Try using shared DB file. If folder/file doesn't exist, create it automatically.
+        try:
+            if shared_db_file:
+                db_dir = os.path.dirname(shared_db_file)
+                if not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
+                    print(f"[자가치유] 공유 DB 폴더가 존재하지 않아 새로 생성했습니다: {db_dir}")
+                
+                if not file_exists_including_hidden(shared_db_file):
+                    print(f"[자가치유] 공유 DB 파일이 존재하지 않아 새로 생성합니다: {shared_db_file}")
+                    if not self._create_new_db_file(shared_db_file):
+                        raise RuntimeError("공유 DB 파일 자동 생성 실패")
+                
+                ensure_file_accessible(shared_db_file)
+                print(f"[INFO] 공유 DB 파일 확인: {shared_db_file}")
+                self.db_path = shared_db_file
+
+                # 공유 DB 연결 엔진 생성
+                test_engine = create_engine(
+                    f'sqlite:///{shared_db_file}',
+                    connect_args={
+                        'check_same_thread': False,
+                        'timeout': 60  # 원드라이브/네트워크 동기화 지연 시 잠금 타임아웃
+                    }
+                )
+                db_version = None
+                try:
+                    with test_engine.connect() as conn:
+                        try:
+                            db_version = conn.execute(text("SELECT version FROM _schema_version")).scalar()
+                            print(f"[INFO] 공유 DB 스키마 버전 감지: v{db_version}")
+                        except Exception as schema_e:
+                            print(f"[경고] 공유 DB 스키마 버전 확인 실패: {schema_e} (버전 테이블이 없을 수 있음)")
+                except Exception as conn_e:
+                    print(f"[경고] 공유 DB 연결 테스트 실패: {conn_e}")
+                    test_engine.dispose()
+                    raise
+
+                # 엔진 채택 후 마이그레이션/트리거 보장 진행 (버전 불일치여도 시도)
+                self.engine = test_engine
+                try:
+                    # 신규 DB이면 스키마 생성 및 기초 세팅
+                    Base.metadata.create_all(self.engine)
+                    # 스키마 버전 테이블이 없으면 설정
+                    with self.engine.connect() as conn:
+                        conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
+                        ver_check = conn.execute(text("SELECT version FROM _schema_version")).scalar()
+                        if ver_check is None:
+                            conn.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                            conn.commit()
+                except Exception as base_e:
+                    print(f"[경고] 기본 스키마 생성 실패(무시): {base_e}")
+
+                try:
+                    self._check_and_run_migrations()
+                except Exception as mig_e:
+                    print(f"[경고] 공유 DB 버전/마이그레이션 처리 실패(무시): {mig_e}")
+                    try:
+                        # 최소한 누락 컬럼 보수 시도
+                        self._run_migrations()
+                    except Exception as mig2:
+                        print(f"[경고] 공유 DB 보수 마이그레이션 2차 실패(무시): {mig2}")
+                try:
+                    self.ensure_change_tracking()
+                except Exception as trg_e:
+                    print(f"[경고] 공유 DB 트리거 보장 실패(무시): {trg_e}")
+
+                self.Session = sessionmaker(bind=self.engine)
+                print(f"[INFO] 공유 DB 연결 성공 (마이그레이션/트리거 보장 완료)")
+                self._save_init_state(True)
+                return
+        except Exception as e:
+            print(f"[경고] 공유 DB 연결 및 생성 실패: {e}")
+            if 'test_engine' in locals():
+                try:
+                    test_engine.dispose()
+                except Exception:
+                    pass
         
         # 4. 로컬 DB 사용
-        print("\n=== DB 설정 시작 ===")
+        print("\n=== 로컬 DB 설정 시작 ===")
         try:
             # 1. 초기화
             if self.engine:
                 print("  * 기존 DB 엔진 정리")
                 self.dispose_engine()
             
-            self.db_path = chosen_path
+            self.db_path = local_db_path
+            ensure_file_accessible(self.db_path)
             print(f"  * DB 경로: {self.db_path}")
             
             # 2. DB 파일 처리
@@ -329,7 +474,7 @@ class DBManager:
                     db_url,
                     connect_args={
                         'check_same_thread': False,
-                        'timeout': 30  # 연결 타임아웃 설정
+                        'timeout': 60  # 연결 타임아웃 60초 설정 (원드라이브 잠금 대비)
                     },
                     pool_pre_ping=True,  # 연결 유효성 확인
                     echo=False  # SQL 로그 비활성화
@@ -374,29 +519,6 @@ class DBManager:
                     test_session.execute(text("SELECT 1"))
                 print("  * 세션 팩토리 생성 및 테스트 완료")
                 
-                if other_to_merge and file_exists_including_hidden(other_to_merge):
-                    try:
-                        print(f"[INFO] 이전 DB 병합 시작: {other_to_merge} -> {self.db_path}")
-                        result = self.merge_from_old_db(other_to_merge)
-                        if result.get("ok"):
-                            try:
-                                os.remove(other_to_merge)
-                                print(f"[INFO] 이전 DB 삭제 완료: {other_to_merge}")
-                            except Exception as del_e:
-                                print(f"[경고] 이전 DB 삭제 실패: {del_e}")
-                        else:
-                            print(f"[경고] 이전 DB 병합 실패: {result.get('error')}")
-                    except Exception as merge_e:
-                        print(f"[경고] 이전 DB 병합 중 오류: {merge_e}")
-                # 자동 기본 코드 규칙 보장
-                try:
-                    print("[AUTO-PATCH] 기본 코드 규칙 보장 시작...")
-                    self.ensure_default_code_rules()
-                    print("[AUTO-PATCH] 기본 코드 규칙 보장 완료")
-                    print("[AUTO-PATCH] 기본 코드 규칙 보장 완료")
-                except Exception as e:
-                    print(f"[AUTO-PATCH] 기본 코드 규칙 보장 실패(무시): {e}")
-                
             except Exception as e:
                 if self.engine:
                     self.engine.dispose()
@@ -430,77 +552,6 @@ class DBManager:
         if not self.Session:
             raise RuntimeError("Database is not set up. Call setup_database() first.")
         return self.Session()
-
-    def ensure_default_code_rules(self):
-        """Insert built-in default ProductCodeRule entries if missing.
-        This allows some rules to be provided by the application while still
-        letting users add their own rules via the UI.
-        """
-        try:
-            session = self.get_session()
-        except Exception:
-            # Session not ready
-            return
-
-        try:
-            from database.models import ProductCodeRule
-
-            defaults = [
-                {
-                    'rule_name': '반제품 기본 규칙',
-                    'code_type': 'SEMI',
-                    'prefix': 'S',
-                    'year_format': 'YY',
-                    'separator': '-',
-                    'sequence_length': 4,
-                    'current_sequence': 0,
-                    'suffix': '',
-                    'attribute_schema': json.dumps([
-                        {"key":"TEMP","label":"온도","type":"select","options":["RT","HEAT"],"token_map":{"RT":"R","HEAT":"H"}},
-                        {"key":"EQUIP","label":"장비","type":"select","options":["DISP","HOMOG"],"token_map":{"DISP":"D","HOMOG":"H"}}
-                    ], ensure_ascii=False)
-                },
-                {
-                    'rule_name': '완제품 기본 규칙',
-                    'code_type': 'FINISHED',
-                    'prefix': 'P',
-                    'year_format': 'YY',
-                    'separator': '-',
-                    'sequence_length': 4,
-                    'current_sequence': 0,
-                    'suffix': '',
-                    'attribute_schema': json.dumps([], ensure_ascii=False)
-                }
-            ]
-
-            for d in defaults:
-                exist = session.query(ProductCodeRule).filter_by(code_type=d['code_type']).first()
-                if not exist:
-                    rule = ProductCodeRule(
-                        rule_name=d['rule_name'],
-                        code_type=d['code_type'],
-                        prefix=d['prefix'],
-                        year_format=d['year_format'],
-                        separator=d['separator'],
-                        sequence_length=d['sequence_length'],
-                        current_sequence=d['current_sequence'],
-                        suffix=d['suffix'],
-                        attribute_schema=d['attribute_schema']
-                    )
-                    session.add(rule)
-                    print(f"[AUTO-PATCH] 기본 규칙 생성: {d['code_type']}")
-            session.commit()
-        except Exception as e:
-            try:
-                session.rollback()
-            except Exception:
-                pass
-            print(f"[AUTO-PATCH] 기본 규칙 생성 중 오류: {e}")
-        finally:
-            try:
-                session.close()
-            except Exception:
-                pass
 
     def dispose_engine(self):
         """엔진을 정리하고 관련 파일들을 정리합니다."""
@@ -561,53 +612,6 @@ class DBManager:
 
     def _run_migrations(self):
         print("데이터베이스 스키마 확인 및 업데이트 시작...")
-        
-        # 1. 명시적 컬럼 보정 (자동 감지 실패 대비)
-        with self.engine.connect() as connection:
-            try:
-                # formulations 테이블의 manufacturing_date 컬럼 확인 및 추가
-                try:
-                    connection.execute(text("SELECT manufacturing_date FROM formulations LIMIT 1"))
-                except Exception:
-                    print("[보정] formulations 테이블에 manufacturing_date 컬럼 추가 중...")
-                    with connection.begin() as trans:
-                        connection.execute(text("ALTER TABLE formulations ADD COLUMN manufacturing_date VARCHAR(20)"))
-            except Exception as e:
-                print(f"[오류] manufacturing_date 컬럼 보정 실패: {e}")
-
-            try:
-                # production_runs 테이블의 production_date 컬럼 확인 및 추가
-                try:
-                    connection.execute(text("SELECT production_date FROM production_runs LIMIT 1"))
-                except Exception:
-                    print("[보정] production_runs 테이블에 production_date 컬럼 추가 중...")
-                    with connection.begin() as trans:
-                        connection.execute(text("ALTER TABLE production_runs ADD COLUMN production_date DATE"))
-            except Exception as e:
-                print(f"[오류] production_date 컬럼 보정 실패: {e}")
-
-            try:
-                # users 테이블의 force_password_change 컬럼 확인 및 추가
-                try:
-                    connection.execute(text("SELECT force_password_change FROM users LIMIT 1"))
-                except Exception:
-                    print("[보정] users 테이블에 force_password_change 컬럼 추가 중...")
-                    with connection.begin() as trans:
-                        connection.execute(text("ALTER TABLE users ADD COLUMN force_password_change BOOLEAN DEFAULT 0"))
-            except Exception as e:
-                print(f"[오류] force_password_change 컬럼 보정 실패: {e}")
-            
-            try:
-                # clients 테이블의 unique_code 컬럼 확인 및 추가
-                try:
-                    connection.execute(text("SELECT unique_code FROM clients LIMIT 1"))
-                except Exception:
-                    print("[보정] clients 테이블에 unique_code 컬럼 추가 중...")
-                    with connection.begin() as trans:
-                        connection.execute(text("ALTER TABLE clients ADD COLUMN unique_code VARCHAR(50)"))
-            except Exception as e:
-                print(f"[오류] unique_code 컬럼 보정 실패: {e}")
-
         inspector = inspect(self.engine)
         
         # 기존 DB의 모든 테이블 확인
@@ -666,22 +670,21 @@ class DBManager:
                     result = connection.execute(text("SELECT version FROM _schema_version")).scalar_one_or_none()
                     db_version = result if result is not None else 0
 
-                    # 버전과 관계없이 항상 마이그레이션 실행 (누락된 컬럼 자동 복구)
-                    print(f"[DB] 스키마 검증 및 업데이트 시작 (현재 DB: v{db_version}, 코드: v{SCHEMA_VERSION})")
-                    self._run_migrations()
-
                     if db_version != SCHEMA_VERSION:
                         if db_version > SCHEMA_VERSION:
                             print(f"[경고] DB 스키마 버전이 코드보다 최신입니다 (DB: v{db_version}, 코드: v{SCHEMA_VERSION})")
                             print(f"[정보] 기존 데이터를 유지하며 호환 모드로 실행합니다.")
                         else:
-                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 버전 정보 업데이트.")
+                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 마이그레이션 시작.")
+                        
+                        # 버전과 관계없이 누락된 컬럼 추가 (기존 데이터 보존)
+                        self._run_migrations()
                         
                         # 버전 업데이트 (낮은 버전만)
                         if db_version < SCHEMA_VERSION:
                             connection.execute(text("DELETE FROM _schema_version"))
                             connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
-                            print(f"스키마 버전 업데이트 완료: v{db_version} → v{SCHEMA_VERSION}")
+                            print(f"스키마 버전 업데이트: v{db_version} → v{SCHEMA_VERSION}")
             except Exception as e:
                 print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
 
@@ -925,56 +928,6 @@ class DBManager:
         finally:
             session.close()
 
-    def update_user_password(self, username, new_password):
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(username=username).first()
-            if user:
-                hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
-                user.password = hashed_password.decode('utf-8')
-                user.force_password_change = False # 비밀번호 변경 강제 해제
-                session.commit()
-                print(f"{datetime.now()}: '{username}' 비밀번호 변경 완료")
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            print(f"비밀번호 변경 실패: {e}")
-            return False
-        finally:
-            session.close()
-
-    def reset_user_password(self, username, temp_password):
-        """관리자가 사용자 비밀번호를 강제 초기화 (다음 로그인 시 변경 강제)"""
-        session = self.get_session()
-        try:
-            user = session.query(User).filter_by(username=username).first()
-            if user:
-                hashed_password = bcrypt.hashpw(temp_password.encode('utf-8'), bcrypt.gensalt())
-                user.password = hashed_password.decode('utf-8')
-                user.force_password_change = True # 비밀번호 변경 강제 설정
-                session.commit()
-                print(f"{datetime.now()}: '{username}' 비밀번호 초기화 완료")
-                return True
-            return False
-        except Exception as e:
-            session.rollback()
-            print(f"비밀번호 초기화 실패: {e}")
-            return False
-        finally:
-            session.close()
-
-    def get_all_users(self):
-        """모든 사용자 목록 조회 (관리자용)"""
-        session = self.get_session()
-        try:
-            users = session.query(User).order_by(User.username).all()
-            # Detach objects so they can be used outside session
-            session.expunge_all()
-            return users
-        finally:
-            session.close()
-
     def get_all_clients(self):
         session = self.get_session()
         try:
@@ -1108,57 +1061,4 @@ class DBManager:
         finally:
             session.close()
 
-    def merge_from_old_db(self, old_db_path: str):
-        """기존(이전) DB 파일을 현재 DB로 병합하고, 성공 시 이전 DB를 삭제합니다.
-        - 테이블 공통 컬럼만 병합합니다
-        - 기본키/유니크 충돌은 INSERT OR IGNORE로 우회합니다
-        """
-        if not old_db_path or not os.path.isfile(old_db_path):
-            return {"ok": False, "error": "이전 DB 파일 경로가 올바르지 않습니다."}
-        result = {"ok": True, "copied": [], "skipped": [], "errors": []}
-        try:
-            with self.engine.connect() as conn:
-                try:
-                    conn.execute(text(f"ATTACH DATABASE :old AS olddb"), {"old": old_db_path})
-                except Exception as e:
-                    result["ok"] = False
-                    result["error"] = f"이전 DB 연결 실패: {e}"
-                    return result
-                inspector = inspect(self.engine)
-                new_tables = inspector.get_table_names()
-                for table in new_tables:
-                    try:
-                        exists = conn.execute(text("SELECT name FROM olddb.sqlite_master WHERE type='table' AND name=:t"), {"t": table}).scalar()
-                        if not exists:
-                            result["skipped"].append(table)
-                            continue
-                        new_cols = [r[1] for r in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()]
-                        old_cols = [r[1] for r in conn.execute(text(f"PRAGMA olddb.table_info({table})")).fetchall()]
-                        common = [c for c in new_cols if c in old_cols]
-                        if not common:
-                            result["skipped"].append(table)
-                            continue
-                        col_list = ",".join([f'"{c}"' for c in common])
-                        sql = f'INSERT OR IGNORE INTO "{table}" ({col_list}) SELECT {col_list} FROM olddb."{table}"'
-                        before_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar()
-                        conn.execute(text(sql))
-                        after_cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar()
-                        added = (after_cnt or 0) - (before_cnt or 0)
-                        result["copied"].append({"table": table, "rows_added": added})
-                    except Exception as te:
-                        result["errors"].append({"table": table, "error": str(te)})
-                try:
-                    conn.execute(text("DETACH DATABASE olddb"))
-                except Exception:
-                    pass
-            # 이전 DB 삭제 (병합 수행 후)
-            try:
-                os.remove(old_db_path)
-                result["old_deleted"] = True
-            except Exception as de:
-                result["old_deleted"] = False
-                result["errors"].append({"table": "_delete_old_db", "error": str(de)})
-            return result
-        except Exception as e:
-            return {"ok": False, "error": f"병합 중 오류: {e}", "copied": result.get("copied", []), "errors": result.get("errors", [])}
 db_manager = DBManager()

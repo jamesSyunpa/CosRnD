@@ -9,6 +9,7 @@ class HistoryPopup(ctk.CTkToplevel):
 
     def __init__(self, master, title, items, item_name_key='name', item_code_key=None):
         super().__init__(master)
+        self.withdraw()  # 초기 렌더링 랙 방지를 위해 즉시 숨김
         self.items = items
         self.item_name_key = item_name_key
         self.item_code_key = item_code_key
@@ -18,7 +19,6 @@ class HistoryPopup(ctk.CTkToplevel):
         self.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
         self.minsize(600, 500)  # 최소 크기만 제한
         # self.transient(master)  # 최대화 버튼을 활성화하기 위해 transient 제거
-        self.grab_set()
         self.after(100, lambda: print(f"[WINDOW SIZE] {title} | geometry: {self.winfo_width()}x{self.winfo_height()} | requested: 800x700"))
 
         self.grid_columnconfigure(0, weight=1)
@@ -46,6 +46,7 @@ class HistoryPopup(ctk.CTkToplevel):
             x = parent_x + (parent_w - win_w) // 2
             y = parent_y + (parent_h - win_h) // 2
             self.geometry(f"+{x}+{y}")
+        self.deiconify()  # 정렬 완료 후 화면 노출
 
     def setup_ui(self):
         """UI 기본 구조를 설정합니다."""

@@ -7,21 +7,25 @@ import sys
 class LegalNoticeDialog(ctk.CTkToplevel):
     def __init__(self, parent, version_str, on_agree, config_path, already_agreed=False):
         super().__init__(parent)
+        self.withdraw()  # 초기 드로잉 깜빡임 및 크기 드드득 현상 제거
         self.title("일반사항 및 법적고지")
-        self.geometry("800x600")
+        
+        # 1. 렌더링 전 모니터 해상도를 감지하여 크기와 정확한 중앙 배치 좌표를 geometry로 즉시 고정
         self.resizable(False, False)
         self.parent = parent
         self.on_agree_callback = on_agree
-        self.version_str = version_str
+        self.version_str = version_str or "v61"
         self.config_path = config_path
         self.already_agreed = already_agreed
         
-        # Center the window
         try:
-            from utils import center_window_on_mouse_display
-            center_window_on_mouse_display(self, 800, 600)
-        except:
-            self.eval('tk::PlaceWindow . center')
+            screen_width = self.winfo_screenwidth()
+            screen_height = self.winfo_screenheight()
+            x = int((screen_width - 800) / 2)
+            y = int((screen_height - 600) / 2)
+            self.geometry(f"800x600+{x}+{y}")
+        except Exception:
+            self.geometry("800x600+100+100")
 
         self.attributes("-topmost", True)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -69,12 +73,6 @@ class LegalNoticeDialog(ctk.CTkToplevel):
     ** 3.2 데이터 입력 책임 **
     본 프로그램에 입력되는 모든 데이터(성분명, 함량, 배합비, 수치 정보 등)의 정확성에 대한 책임은 사용자에게 있습니다. 사용자의 입력 오류 또는 관리 부주의로 인해 발생한 문제에 대해서는 개발자가 책임을 지지 않습니다.
 
-    ** 3.3 기기 귀속 및 복제 금지 동의 (Node-Locking) **
-    본 프로그램은 보안을 위해 최초 실행된 PC의 하드웨어 정보 및 사용자 계정 정보와 결합되어 해당 기기에 귀속(박제)됩니다.
-    - 사용자는 프로그램이 설치된 PC 외의 다른 기기로 무단 복제하여 실행할 수 없음에 동의합니다.
-    - 무단 복제, 배포, 또는 보안 로직 우회 시도 시 프로그램 실행이 영구적으로 차단될 수 있습니다.
-    - 기기 변경이나 포맷 등으로 인해 재설치가 필요한 경우, 관리자에게 문의하여 적절한 절차를 밟아야 합니다.
-
 0.4 사용자 동의 및 고지
     0.4.1 이용 고지
         본 프로그램은 최초 로그인 시 다음 사항에 대한 고지를 제공하며, 사용자는 이에 동의한 후 프로그램을 사용할 수 있습니다.
@@ -116,7 +114,6 @@ class LegalNoticeDialog(ctk.CTkToplevel):
         self.checkbox.pack(pady=(20, 10))
         
         if already_agreed:
-            self.checkbox.select() # 이미 동의한 경우 체크 상태 강제 설정
             self.checkbox.configure(state="disabled")
 
         # Buttons
@@ -207,6 +204,8 @@ class LegalNoticeDialog(ctk.CTkToplevel):
         except Exception:
             pass
 
+        self.deiconify()  # 화면 배치 완료 후 표시
+
     def _set_focus_and_grab(self):
         # Guard against calling focus/grab on a destroyed widget (packaged exe timing differences)
         # Cancel further scheduled focus attempts if widget no longer exists.
@@ -276,8 +275,11 @@ class LegalNoticeDialog(ctk.CTkToplevel):
                 if 'Legal' not in cfg:
                     cfg['Legal'] = {}
                 # Normalize stored version to 'vX' form when possible
-                agreed_to = str(self.version_str).strip() if self.version_str else ''
-                if agreed_to and not agreed_to.startswith('v'):
+                agreed_to = str(self.version_str).strip() if self.version_str else 'agreed'
+                if not agreed_to or '?' in agreed_to:
+                    agreed_to = 'agreed'
+                
+                if agreed_to and agreed_to != 'agreed' and not agreed_to.startswith('v'):
                     import re as _re
                     if _re.match(r'^\d+(?:\.\d+)*$', agreed_to):
                         agreed_to = 'v' + agreed_to

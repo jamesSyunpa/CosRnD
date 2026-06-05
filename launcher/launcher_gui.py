@@ -276,6 +276,16 @@ class InstallationWizard(QMainWindow):
         self.setWindowTitle("CosRnD 설치 마법사")
         self.setMinimumSize(600, 400)
         
+        # Set Window Icon
+        try:
+            icon_path = Path(sys._MEIPASS if hasattr(sys, '_MEIPASS') else '').joinpath('Icon.ico')
+            if not icon_path.exists():
+                icon_path = Path(__file__).parent.parent / 'Icon.ico'
+            if icon_path.exists():
+                self.setWindowIcon(QIcon(str(icon_path)))
+        except Exception as e:
+            logger.error(f"Failed to set wizard icon: {e}")
+        
         # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -487,8 +497,18 @@ class LauncherMainWindow(QMainWindow):
         self.init_ui()
     
     def init_ui(self):
-        self.setWindowTitle("CosRnD 런처")
+        self.setWindowTitle("화장품 연구소 관리 시스템 런처")
         self.setMinimumSize(400, 300)
+        
+        # Set Window Icon
+        try:
+            icon_path = Path(sys._MEIPASS if hasattr(sys, '_MEIPASS') else '').joinpath('Icon.ico')
+            if not icon_path.exists():
+                icon_path = Path(__file__).parent.parent / 'Icon.ico'
+            if icon_path.exists():
+                self.setWindowIcon(QIcon(str(icon_path)))
+        except Exception as e:
+            logger.error(f"Failed to set launcher icon: {e}")
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -535,13 +555,15 @@ class LauncherMainWindow(QMainWindow):
                 QMessageBox.critical(self, "오류", "설치 경로를 찾을 수 없습니다!")
                 return
             
-            app_path = install_path / "bin" / "main.exe"
+            app_path = install_path / "bin" / "화장품연구관리_v1.0.exe"
+            if not app_path.exists():
+                app_path = install_path / "bin" / "main.exe"
             
             if not app_path.exists():
                 QMessageBox.critical(
                     self,
                     "오류",
-                    f"다음 위치에서 애플리케이션을 찾을 수 없습니다:\n{app_path}"
+                    f"다음 위치에서 애플리케이션을 찾을 수 없습니다:\n{install_path / 'bin' / '화장품연구관리_v1.0.exe'}"
                 )
                 return
             
