@@ -1029,13 +1029,14 @@ class App(ctk.CTk):
         splash.update()
 
         # Patch Logic Import
+        # Ensure project root is in sys.path to find build_scripts
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
         try:
             from build_scripts import apply_patches
-        except ImportError:
-            try:
-                import apply_patches
-            except ImportError as e:
-                print(f"[Patch] 패치 모듈을 로드할 수 없어 건너뜁니다: {e}")
+        except ImportError as e:
+            print(f"[Patch] 패치 모듈을 로드할 수 없어 건너뜁니다: {e}")
 
         def init_database():
             try:

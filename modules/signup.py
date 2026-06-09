@@ -1,6 +1,8 @@
 # modules/signup.py
 import customtkinter as ctk
 import tkinter
+import os
+import re
 from tkinter import messagebox
 import bcrypt
 from database.db_manager import db_manager
@@ -16,7 +18,7 @@ class SignupWindow(ctk.CTkToplevel):
 
         self.title("회원가입")
 
-        self.geometry("450x720")  # 높이 증가
+        self.geometry("450x750")  # 높이 증가
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()
@@ -65,6 +67,7 @@ class SignupWindow(ctk.CTkToplevel):
             "비밀번호": "password",
             "비밀번호 확인": "password_confirm",
             "직책": "position",
+            "담당번호": "manager_code",
             "연락처": "contact",
             "우편번호": "zip_code",
             "주소": "address"
@@ -294,6 +297,7 @@ class SignupWindow(ctk.CTkToplevel):
                 real_name=self.entries["real_name"].get().strip(),
                 password=hashed_password.decode('utf-8'),
                 position=position,
+                manager_code=self.entries["manager_code"].get().strip(),
                 contact=contact,
                 zip_code=zip_code,
                 address=address,

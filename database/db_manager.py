@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 from database.models import Base, User, Client, Material, Ingredient, Formulation, FormulationItem, ProductionFormulation, ProductionStep, ProductionRun
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 def file_exists_including_hidden(path: str) -> bool:
     """숨김 파일을 포함하여 파일 존재 여부를 확인합니다."""
@@ -612,13 +612,14 @@ class DBManager:
 
     def _run_migrations(self):
         print("데이터베이스 스키마 확인 및 업데이트 시작...")
-        inspector = inspect(self.engine)
-        
-        # 기존 DB의 모든 테이블 확인
-        existing_tables = set(inspector.get_table_names())
-        print(f"[정보] 기존 테이블: {', '.join(sorted(existing_tables)) if existing_tables else '없음'}")
         
         with self.engine.connect() as connection:
+            inspector = inspect(self.engine)
+            
+            # 기존 DB의 모든 테이블 확인
+            existing_tables = set(inspector.get_table_names())
+            print(f"[정보] 기존 테이블: {', '.join(sorted(existing_tables)) if existing_tables else '없음'}")
+            
             for table_name, table in Base.metadata.tables.items():
                 try:
                     if table_name not in existing_tables:
@@ -628,28 +629,72 @@ class DBManager:
                         print(f"[완료] 테이블 '{table_name}' 생성 완료")
                         continue
                     
-                    # 테이블이 있으면 컬럼 비교
-                    existing_columns = {c['name'] for c in inspector.get_columns(table_name)}
+                    # 테이블이 있으면 컬럼 비교 - PRAGMA로 직접 확인
+                    cursor = connection.execute(text(f"PRAGMA table_info({table_name})"))
+                    existing_columns = {row[1] for row in cursor.fetchall()}
                     
+                    print(f"[정보] {table_name} 테이블 기존 컬럼: {', '.join(sorted(existing_columns))}")
+                    
+                    # 필요한 컬럼 확인 및 추가
                     for column in table.c:
                         if column.name not in existing_columns:
                             try:
-                                from sqlalchemy.schema import CreateColumn
-                                # 기본값 처리
-                                column.default = None
+                                print(f"[정보] {table_name}.{column.name} 컬럼 추가 중...")
                                 
-                                # SQLite에서는 ALTER TABLE ... ADD COLUMN 구문 사용
-                                col_def = str(CreateColumn(column).compile(self.engine))
-                                # "CREATE TABLE ... (" 부분 제거하고 순수 컬럼 정의만 추출
-                                col_def = col_def.replace('CREATE TABLE ', '').replace(f'{table_name} (', '').rstrip(')')
+                                # 트랜잭션 시작
+                                trans = connection.begin()
                                 
-                                alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_def}"
-                                with connection.begin() as trans:
+                                # 각 컬럼별로 직접 ALTER TABLE 실행
+                                if table_name == 'clients':
+                                    if column.name == 'name_en':
+                                        connection.execute(text("ALTER TABLE clients ADD COLUMN name_en VARCHAR(100)"))
+                                    elif column.name == 'change_log':
+                                        connection.execute(text("ALTER TABLE clients ADD COLUMN change_log TEXT"))
+                                elif table_name == 'materials':
+                                    if column.name == 'name_en':
+                                        connection.execute(text("ALTER TABLE materials ADD COLUMN name_en VARCHAR(255)"))
+                                    elif column.name == 'origin':
+                                        connection.execute(text("ALTER TABLE materials ADD COLUMN origin VARCHAR(100)"))
+                                    elif column.name == 'supplier_id':
+                                        connection.execute(text("ALTER TABLE materials ADD COLUMN supplier_id INTEGER"))
+                                    elif column.name == 'change_log':
+                                        connection.execute(text("ALTER TABLE materials ADD COLUMN change_log TEXT"))
+                                    elif column.name == 'updated_at':
+                                        connection.execute(text("ALTER TABLE materials ADD COLUMN updated_at DATETIME"))
+                                else:
+                                    # 기타 테이블은 기존 방식 사용
+                                    from sqlalchemy.schema import CreateColumn
+                                    column.default = None
+                                    col_def = str(CreateColumn(column).compile(self.engine))
+                                    col_def = col_def.replace('CREATE TABLE ', '').replace(f'{table_name} (', '').rstrip(')')
+                                    alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_def}"
                                     connection.execute(text(alter_sql))
-                                    print(f"[완료] 테이블 '{table_name}'에 컬럼 '{column.name}' 추가")
+                                
+                                trans.commit()
+                                print(f"[완료] 테이블 '{table_name}'에 컬럼 '{column.name}' 추가")
+                                
                             except Exception as col_e:
                                 # 컬럼 추가 실패는 경고만 출력 (이미 있거나 호환 불가)
                                 print(f"[경고] 컬럼 '{table_name}.{column.name}' 추가 실패: {col_e}")
+                                try:
+                                    trans.rollback()
+                                except:
+                                    pass
+                    
+                    # materials 테이블의 경우 기존 client_id를 supplier_id로 복사
+                    if table_name == 'materials':
+                        try:
+                            # supplier_id 컬럼이 있고, client_id 컬럼이 있으면 데이터 복사
+                            cursor = connection.execute(text("PRAGMA table_info(materials)"))
+                            mat_cols = {row[1] for row in cursor.fetchall()}
+                            if 'supplier_id' in mat_cols and 'client_id' in mat_cols:
+                                print(f"[정보] materials.client_id 데이터를 supplier_id로 복사 중...")
+                                trans = connection.begin()
+                                connection.execute(text("UPDATE materials SET supplier_id = client_id WHERE supplier_id IS NULL AND client_id IS NOT NULL"))
+                                trans.commit()
+                                print(f"[완료] 데이터 복사 완료")
+                        except Exception as e:
+                            print(f"[경고] 데이터 복사 실패: {e}")
                     
                     # DB에만 있고 코드에 없는 컬럼 확인 (정보성)
                     code_columns = {c.name for c in table.c}
@@ -670,23 +715,19 @@ class DBManager:
                     result = connection.execute(text("SELECT version FROM _schema_version")).scalar_one_or_none()
                     db_version = result if result is not None else 0
 
+                    print(f"스키마 버전 확인: DB=v{db_version}, 코드=v{SCHEMA_VERSION}")
+                    
+                    # 항상 마이그레이션 실행 (누락된 컬럼 확인 및 추가)
+                    self._run_migrations()
+                    
+                    # 버전 업데이트
                     if db_version != SCHEMA_VERSION:
-                        if db_version > SCHEMA_VERSION:
-                            print(f"[경고] DB 스키마 버전이 코드보다 최신입니다 (DB: v{db_version}, 코드: v{SCHEMA_VERSION})")
-                            print(f"[정보] 기존 데이터를 유지하며 호환 모드로 실행합니다.")
-                        else:
-                            print(f"스키마 버전 불일치 (DB: v{db_version}, 코드: v{SCHEMA_VERSION}). 마이그레이션 시작.")
-                        
-                        # 버전과 관계없이 누락된 컬럼 추가 (기존 데이터 보존)
-                        self._run_migrations()
-                        
-                        # 버전 업데이트 (낮은 버전만)
-                        if db_version < SCHEMA_VERSION:
-                            connection.execute(text("DELETE FROM _schema_version"))
-                            connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
-                            print(f"스키마 버전 업데이트: v{db_version} → v{SCHEMA_VERSION}")
+                        connection.execute(text("DELETE FROM _schema_version"))
+                        connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                        print(f"스키마 버전 업데이트: v{db_version} → v{SCHEMA_VERSION}")
             except Exception as e:
                 print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
+                # 오류가 발생해도 계속 실행
 
     def ensure_change_tracking(self):
         """변경 추적용 change_log 테이블과 트리거를 생성합니다 (존재하지 않으면)."""

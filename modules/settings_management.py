@@ -366,12 +366,9 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 # Handlers require the full target DB file path for file operations.
                 handler(target_db_file, new_excel_path)
         
-        elif db_path_changed:  # Non-admin user
-            # For non-admins just save the directory (handled inside _save_and_restart)
-            self._save_and_restart(target_db_file, new_excel_path, "DB 경로가 변경되었습니다. 프로그램을 재시작합니다.")
-        
-        else:  # Only excel path changed or no change
-            self._save_excel_path_only(new_excel_path)
+        else:  # DB 경로 변경 없거나 일반 사용자, 또는 둘 다 변경
+            # 둘 다 저장하고 재시작
+            self._save_and_restart(target_db_file, new_excel_path, "경로가 저장되었습니다. 프로그램을 재시작합니다.")
 
     def _save_and_restart(self, new_db_path, new_excel_path, message):
         try:
@@ -973,7 +970,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
         excel_handler.export_template(headers, "거래처_템플릿.xlsx")
 
     def export_user_template(self):
-        headers = ["사용자 ID", "비밀번호", "직책", "연락처", "우편번호", "주소", "관리자여부(True/False)"]
+        headers = ["사용자 ID", "비밀번호", "실명", "담당번호", "직책", "연락처", "우편번호", "주소", "관리자여부(True/False)"]
         excel_handler.export_template(headers, "사용자_템플릿.xlsx")
 
     def confirm_reset(self, reset_type: str):

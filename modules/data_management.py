@@ -480,6 +480,7 @@ class DataManagementFrame(ctk.CTkFrame):
         self.client_tree.heading("type", text=tree_columns['type']); self.client_tree.column("type", width=80, anchor="center")
         self.client_tree.heading("code", text=tree_columns['code']); self.client_tree.column("code", width=120)
         self.client_tree.heading("name", text=tree_columns['name']); self.client_tree.column("name", width=150)
+        self.client_tree.heading("name_en", text=tree_columns['name_en']); self.client_tree.column("name_en", width=150)
         self.client_tree.heading("ceo", text=tree_columns['ceo']); self.client_tree.column("ceo", width=100)
         self.client_tree.heading("manager", text=tree_columns['manager']); self.client_tree.column("manager", width=100)
         self.client_tree.heading("contact", text=tree_columns['contact']); self.client_tree.column("contact", width=120)
@@ -510,11 +511,12 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("정보", "내보낼 사용자 데이터가 없습니다.")
             return
 
-        headers = ["사용자 ID", "실명", "직책", "연락처", "우편번호", "주소", "관리자여부", "생성일"]
+        headers = ["사용자 ID", "실명", "담당번호", "직책", "연락처", "우편번호", "주소", "관리자여부", "생성일"]
         data_rows = [
             (
                 user.username,
                 user.real_name or "",
+                user.manager_code or "",
                 user.position,
                 user.contact,
                 user.zip_code,
@@ -548,6 +550,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 hashed_password = bcrypt.hashpw(str(password).encode('utf-8'), bcrypt.gensalt())
                 user.password = hashed_password.decode('utf-8')
                 user.real_name = get_val(row, "실명", "real_name")
+                user.manager_code = get_val(row, "담당번호", "manager_code")
                 user.position = get_val(row, "직책", "position")
                 user.contact = get_val(row, "연락처", "contact")
                 user.zip_code = get_val(row, "우편번호", "zip_code")
@@ -577,12 +580,13 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showinfo("정보", "내보낼 거래처 데이터가 없습니다.")
             return
 
-        headers = ["거래처 유형", "거래처코드(사업자번호)", "거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부(Y/N)"]
+        headers = ["거래처 유형", "거래처코드(사업자번호)", "거래처명", "영문거래처명", "대표자명", "담당자명", "연락처", "팩스", "이메일", "우편번호", "주소", "사용여부(Y/N)"]
         data_rows = [
             (
                 client.client_type or "기타",
                 client.business_number,
                 client.name,
+                client.name_en or "",
                 getattr(client, 'ceo_name', ''),
                 client.manager_name,
                 client.phone,
@@ -620,6 +624,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 else:
                     prev = {
                         'name': client.name or '',
+                        'name_en': getattr(client, 'name_en', '') or '',
                         'client_type': client.client_type or '',
                         'ceo_name': getattr(client, 'ceo_name', '') or '',
                         'manager_name': client.manager_name or '',
@@ -634,6 +639,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 # 값 업데이트
                 client.client_type = get_val(row, "거래처 유형", "client_type") or "기타" # noqa
                 client.name = get_val(row, "거래처명", "name")
+                client.name_en = get_val(row, "영문거래처명", "name_en")
                 setattr(client, 'ceo_name', get_val(row, "대표자명", "ceo_name"))
                 client.manager_name = get_val(row, "담당자명", "manager_name")
                 client.phone = get_val(row, "연락처", "phone")
@@ -663,6 +669,7 @@ class DataManagementFrame(ctk.CTkFrame):
 
                     if is_new:
                         add_nonempty("거래처명", client.name)
+                        add_nonempty("영문거래처명", client.name_en)
                         add_nonempty("사업자번호", client.business_number)
                         add_nonempty("유형", client.client_type)
                         add_nonempty("연락처", client.phone)
@@ -671,6 +678,7 @@ class DataManagementFrame(ctk.CTkFrame):
                         add_nonempty("사용여부", "Y" if client.is_active else "N")
                     else:
                         add_change("거래처명", prev['name'], client.name or '')
+                        add_change("영문거래처명", prev['name_en'], client.name_en or '')
                         add_change("유형", prev['client_type'], client.client_type or '')
                         add_change("대표자명", prev['ceo_name'], getattr(client, 'ceo_name', '') or '')
                         add_change("담당자명", prev['manager_name'], client.manager_name or '')
@@ -1088,6 +1096,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 client.client_type or "", 
                 client.business_number or "",
                 client.name or "",
+                client.name_en or "",
                 getattr(client, 'ceo_name', '') or "",
                 client.manager_name or "", 
                 client.phone or "", 
@@ -1117,6 +1126,7 @@ class DataManagementFrame(ctk.CTkFrame):
             self.client_type_combobox.set(client.client_type or "기타")
             set_entry_value("code", client.business_number)
             set_entry_value("name", client.name)
+            set_entry_value("name_en", client.name_en)
             set_entry_value("ceo", getattr(client, 'ceo_name', ""))
             set_entry_value("manager", client.manager_name)
             set_entry_value("contact", client.phone)
@@ -1143,6 +1153,7 @@ class DataManagementFrame(ctk.CTkFrame):
     def save_client(self):
         code = self.client_entries["code"].get()
         name = self.client_entries["name"].get()
+        name_en = self.client_entries["name_en"].get()
         if not code or not name:
             messagebox.showwarning("입력 오류", "거래처코드와 거래처명은 필수 항목입니다.")
             return
@@ -1171,6 +1182,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 "거래처 유형": self.client_type_combobox.get(),
                 "거래처코드": code,
                 "거래처명": name,
+                "영문거래처명": name_en,
                 "대표자명": self.client_entries["ceo"].get(),
                 "담당자명": self.client_entries["manager"].get(),
                 "연락처": self.client_entries["contact"].get(),
@@ -1194,6 +1206,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 add_nonempty("거래처 유형", new_values["거래처 유형"])
                 add_nonempty("거래처코드", new_values["거래처코드"])
                 add_nonempty("거래처명", new_values["거래처명"])
+                add_nonempty("영문거래처명", new_values["영문거래처명"])
                 add_nonempty("담당자명", new_values["담당자명"])
                 add_nonempty("연락처", new_values["연락처"])
                 add_nonempty("이메일", new_values["이메일"])
@@ -1207,6 +1220,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 log_change("거래처 유형", client.client_type or "", new_values["거래처 유형"])
                 log_change("거래처코드", client.business_number or "", new_values["거래처코드"])
                 log_change("거래처명", client.name or "", new_values["거래처명"])
+                log_change("영문거래처명", getattr(client, 'name_en', '') or "", new_values["영문거래처명"])
                 log_change("담당자명", client.manager_name or "", new_values["담당자명"])
                 log_change("연락처", client.phone or "", new_values["연락처"])
                 log_change("이메일", client.email or "", new_values["이메일"])
@@ -1215,6 +1229,7 @@ class DataManagementFrame(ctk.CTkFrame):
             client.client_type = new_values["거래처 유형"]
             client.business_number = code
             client.name = name
+            client.name_en = name_en
             client.ceo_name = new_values["대표자명"]
             client.manager_name = new_values["담당자명"]
             client.phone = new_values["연락처"]

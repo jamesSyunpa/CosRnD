@@ -100,6 +100,7 @@ class Client(Base):
     
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)  # 거래처명
+    name_en = Column(String(100))               # 영문거래처명
     business_number = Column(String(20))        # 사업자번호
     client_type = Column(String(50))            # 거래처 유형 (예: '원료', 'OEM/ODM', '부자재')
     
@@ -205,6 +206,9 @@ class Formulation(Base):
     oem_odm_client_id = Column(Integer, ForeignKey('clients.id'))
     oem_odm_client = relationship("Client", foreign_keys=[oem_odm_client_id])
 
+    # 견적 이윤율 (기본값 15%)
+    profit_margin = Column(Float, default=15.0)
+
     change_log = Column(Text, nullable=True) # 변경 이력을 저장할 컬럼
 
     sample_sent_count = Column(Integer, default=0) # 샘플 발송 횟수
@@ -256,6 +260,7 @@ class ProductionFormulation(Base):
     approved_by_user_id = Column(Integer, ForeignKey('users.id'))
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    client_name = Column(String(255))  # 업체명 (타겟 거래처 또는 OEM/ODM 거래처)
 
     # 레시피 스냅샷(JSON): order, phase, code, name, ratio, amount 등 고정 저장
     items_snapshot = Column(Text)
