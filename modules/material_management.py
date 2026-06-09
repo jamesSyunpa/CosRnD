@@ -434,13 +434,13 @@ class MaterialManagementFrame(ctk.CTkFrame):
                 supplier_name, mat.manufacturer, mat.hs_code, mat.origin, mat.name_en, mat.nmpa_reg_num, "Y" if mat.is_active else "N"
             ))
 
-        ing_headers = ["원료코드", "한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "HS CODE", "NMPA등록번호", "비고"]
+        ing_headers = ["원료코드", "한글전성분", "INGREDIENT", "CAS NO.", "조성비(%)", "기능", "EWG등급", "EWG등급데이터", "비고"]
         ing_rows = []
         for mat in materials:
             for ing in mat.ingredients:
                 ing_rows.append((
                     mat.code, ing.name_ko, ing.name_en, ing.cas_no, ing.composition_ratio,
-                    ing.function, ing.ewg_grade, ing.ewg_data, ing.hs_code, ing.nmpa_reg_num, ing.remark
+                    ing.function, ing.ewg_grade, ing.ewg_data, ing.remark
                 ))
         
         session.close()
@@ -763,8 +763,8 @@ class MaterialManagementFrame(ctk.CTkFrame):
                             'function': get_val(ing_row, "기능", "function") or "",
                             'ewg_grade': get_val(ing_row, "EWG등급", "ewg_grade") or "",
                             'ewg_data': get_val(ing_row, "EWG등급데이터", "ewg_data") or "",
-                            'hs_code': get_val(ing_row, "HS CODE", "hs_code") or "",
-                            'nmpa_reg_num': get_val(ing_row, "NMPA등록번호", "nmpa_reg_num") or "",
+                            'hs_code': "",  # 전성분에서는 HS CODE 사용하지 않음
+                            'nmpa_reg_num': "",  # 전성분에서는 NMPA등록번호 사용하지 않음
                             'remark': get_val(ing_row, "비고", "remark") or ""
                         }                        
                         

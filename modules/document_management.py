@@ -459,6 +459,11 @@ class DocumentManagementFrame(ctk.CTkFrame):
             current_view = self.current_view
             current_folder = self.current_folder_name
 
+            # Reset to client view level to avoid empty folder issues when Formulation client changed
+            self.current_view_level = "client"
+            self.current_client_id = None
+            self.current_client_name = None
+
             # 데이터 새로고침
             self.load_formulations(maintain_position=True) # 폴더 또는 파일 뷰 새로고침 (위치 유지)
             self.load_lab_journal()    # 실험일지 탭 새로고침
@@ -1673,25 +1678,33 @@ class DocumentManagementFrame(ctk.CTkFrame):
         calculation_frame.grid(row=3, column=0, padx=10, pady=10, sticky="e")
         calculation_frame.grid_columnconfigure(1, weight=1)
 
+        # 이윤율 설정
+        ctk.CTkLabel(calculation_frame, text="이윤율 (%)", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.quotation_profit_margin_entry = ctk.CTkEntry(calculation_frame, width=100, justify="right", font=("", 12))
+        self.quotation_profit_margin_entry.insert(0, "15.0")
+        self.quotation_profit_margin_entry.bind("<KeyRelease>", lambda e: self._on_profit_margin_changed())
+        self.quotation_profit_margin_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
+
         # 총 함량
-        ctk.CTkLabel(calculation_frame, text=self.texts['total_ratio'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(calculation_frame, text=self.texts['total_ratio'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.quotation_total_ratio_label = ctk.CTkLabel(calculation_frame, text="0.0000 %", font=ctk.CTkFont(size=14), anchor="e")
-        self.quotation_total_ratio_label.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
+        self.quotation_total_ratio_label.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
         # 총 원료 원가
-        ctk.CTkLabel(calculation_frame, text=self.texts['total_raw_cost'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(calculation_frame, text=self.texts['total_raw_cost'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.total_raw_cost_label = ctk.CTkLabel(calculation_frame, text="0 원", font=ctk.CTkFont(size=14), anchor="e")
-        self.total_raw_cost_label.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+        self.total_raw_cost_label.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
         # VAT 10% 포함가
-        ctk.CTkLabel(calculation_frame, text=self.texts['price_with_vat'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(calculation_frame, text=self.texts['price_with_vat'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=3, column=0, padx=10, pady=5, sticky="w")
         self.price_with_vat_label = ctk.CTkLabel(calculation_frame, text="0 원", font=ctk.CTkFont(size=14), anchor="e")
-        self.price_with_vat_label.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        self.price_with_vat_label.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
-        # 이윤 15% 포함가
-        ctk.CTkLabel(calculation_frame, text=self.texts['price_with_profit'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        # 이윤 포함가 (label text will be dynamic based on margin)
+        self.price_with_profit_text_label = ctk.CTkLabel(calculation_frame, text="이윤 포함가", font=ctk.CTkFont(size=14, weight="bold"))
+        self.price_with_profit_text_label.grid(row=4, column=0, padx=10, pady=5, sticky="w")
         self.price_with_profit_label = ctk.CTkLabel(calculation_frame, text="0 원", font=ctk.CTkFont(size=14), anchor="e")
-        self.price_with_profit_label.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
+        self.price_with_profit_label.grid(row=4, column=1, padx=10, pady=5, sticky="ew")
 
         # 인라인 편집용 Entry 초기화
         self.quotation_edit_entry = None
@@ -1709,6 +1722,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
         try:
             formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
             if not formulation: return
+
+            # Load profit margin
+            profit_margin = formulation.profit_margin if formulation.profit_margin is not None else 15.0
+            self.quotation_profit_margin_entry.delete(0, "end")
+            self.quotation_profit_margin_entry.insert(0, f"{profit_margin:.1f}")
+            self.price_with_profit_text_label.configure(text=f"이윤 ({profit_margin:.0f}%) 포함가")
 
             # item.order를 기준으로 처방 항목을 정렬합니다. None인 경우 마지막으로 보냅니다.
             sorted_items = sorted(formulation.items, key=lambda i: i.order if i.order is not None else float('inf'))
@@ -1833,7 +1852,46 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.quotation_total_ratio_label.configure(text=f"{total_ratio:.4f} %")
         self.total_raw_cost_label.configure(text=f"{total_raw_cost:,.2f} 원") # 기준 중량에 대한 총 원가
         self.price_with_vat_label.configure(text=f"{total_raw_cost * 1.1:,.2f} 원") # VAT 포함가
-        self.price_with_profit_label.configure(text=f"{total_raw_cost * 1.15:,.2f} 원") # 이윤 포함가
+        
+        # Get profit margin
+        try:
+            profit_margin = float(self.quotation_profit_margin_entry.get().strip())
+        except (ValueError, TypeError):
+            profit_margin = 15.0
+        # Calculate price with profit: (1 + profit_margin/100) * (price with vat?) Wait, wait let's check original!
+        # Original was total_raw_cost * 1.15, which includes VAT? Wait no wait let's check original!
+        # Original code: 
+        # price_with_vat = total_raw_cost * 1.1
+        # price_with_profit = total_raw_cost * 1.15 → which is 15% profit ON TOP OF raw cost, not including VAT?
+        # Okay let's keep the same logic: profit margin is on total raw cost!
+        profit_factor = 1.0 + (profit_margin / 100.0)
+        self.price_with_profit_label.configure(text=f"{total_raw_cost * profit_factor:,.2f} 원")
+
+    def _on_profit_margin_changed(self):
+        """When profit margin entry changes, save to Formulation and recalculate"""
+        try:
+            profit_margin = float(self.quotation_profit_margin_entry.get().strip())
+        except (ValueError, TypeError):
+            return
+        
+        # Update label text
+        self.price_with_profit_text_label.configure(text=f"이윤 ({profit_margin:.0f}%) 포함가")
+        
+        # Save to Formulation if selected
+        if self._selected_formulation_id:
+            session = db_manager.get_session()
+            try:
+                formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
+                if formulation:
+                    formulation.profit_margin = profit_margin
+                    session.commit()
+            except Exception as e:
+                print(f"[Error] Saving profit margin: {e}")
+            finally:
+                session.close()
+        
+        # Recalculate
+        self.recalculate_quotation()
 
     def open_add_material_for_quotation(self):
         """견적용 원료 추가 다이얼로그를 엽니다."""
@@ -2032,6 +2090,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
             finally:
                 session.close()
 
+        # Get profit margin for summary label
+        try:
+            profit_margin = float(self.quotation_profit_margin_entry.get().strip())
+        except (ValueError, TypeError):
+            profit_margin = 15.0
+        
         quotation_data = {
             "details": {
                 "실험품명": formulation_name,
@@ -2044,7 +2108,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 "총 함량": self.quotation_total_ratio_label.cget("text"),
                 "총 원료 원가": self.total_raw_cost_label.cget("text"),
                 "VAT(10%) 포함가": self.price_with_vat_label.cget("text"),
-                "이윤(15%) 포함가": self.price_with_profit_label.cget("text"),
+                f"이윤({profit_margin:.0f}%) 포함가": self.price_with_profit_label.cget("text"),
             }
         }
         
@@ -3125,7 +3189,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             
             # Phase별 공정/검사 매핑 (기존 로직 준용)
             phase_map = {}
-            prefixes = ('- ', '* ', '• ', '■ ', '□ ', '○ ', '◎ ')
+            prefixes = ("시간", "온도", "HE/M", "H/M", "P/M", "HE/M:", "H/M:", "P/M:")
             for st in steps:
                 ph = (st.phase or "").strip()
                 if not ph: continue
@@ -3184,6 +3248,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     "원료명": it.get('material_name') or "",
                     "함량(%)": ratio,
                     "생산량(kg)": calc_kg,
+                    "계량량(kg)": calc_kg,
                     "제조공정": process_text,
                     "공정검사": inspection_text,
                 })
@@ -3300,24 +3365,53 @@ class DocumentManagementFrame(ctk.CTkFrame):
             win.grab_set()
             win.after(100, lambda: print(f"[WINDOW SIZE] 생산처방 편집 | geometry: {win.winfo_width()}x{win.winfo_height()} | requested: 700x500"))
 
-            # 상단 정보 + 버튼
+            # 상단 정보 + 버튼 (편집 가능)
             top = ctk.CTkFrame(win, fg_color="transparent")
             top.pack(fill="x", padx=15, pady=(12,8))
             
-            # 왼쪽: 제품 정보
+            # 왼쪽: 제품 정보 (편집 가능)
             info_left = ctk.CTkFrame(top, fg_color="transparent")
             info_left.pack(side="left", fill="x", expand=True)
             
-            meta_line1 = f"제품명: {prod.product_name or ''} | 차수: {prod.revision or ''} | 생산코드: {prod.production_code or ''}"
-            meta_line2 = f"생산량(kg): {((prod.base_weight_g or 0)/1000):.1f} | 제조일: {prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else ''}"
+            # 행 1: 제품명, 차수, 생산코드, 업체명
+            row1 = ctk.CTkFrame(info_left, fg_color="transparent")
+            row1.pack(anchor="w", fill="x", pady=2)
             
-            ctk.CTkLabel(info_left, text=meta_line1, font=ctk.CTkFont(size=12)).pack(anchor="w")
+            ctk.CTkLabel(row1, text="제품명: ", font=ctk.CTkFont(size=11)).pack(side="left")
+            product_name_entry = ctk.CTkEntry(row1, width=200)
+            product_name_entry.insert(0, prod.product_name or "")
+            product_name_entry.pack(side="left", padx=2)
             
-            # Line 2 Frame (Info + Status ComboBox)
-            line2_frame = ctk.CTkFrame(info_left, fg_color="transparent")
-            line2_frame.pack(anchor="w", fill="x", pady=(2,0))
+            ctk.CTkLabel(row1, text=" 차수: ", font=ctk.CTkFont(size=11)).pack(side="left")
+            revision_entry = ctk.CTkEntry(row1, width=80)
+            revision_entry.insert(0, prod.revision or "")
+            revision_entry.pack(side="left", padx=2)
             
-            ctk.CTkLabel(line2_frame, text=meta_line2, font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
+            ctk.CTkLabel(row1, text=" 생산코드: ", font=ctk.CTkFont(size=11)).pack(side="left")
+            production_code_entry = ctk.CTkEntry(row1, width=120)
+            production_code_entry.insert(0, prod.production_code or "")
+            production_code_entry.pack(side="left", padx=2)
+            
+            ctk.CTkLabel(row1, text=" 업체명: ", font=ctk.CTkFont(size=11)).pack(side="left")
+            client_name_entry = ctk.CTkEntry(row1, width=150)
+            client_name_entry.insert(0, prod.client_name or "")
+            client_name_entry.pack(side="left", padx=2)
+            
+            # 행 2: 생산량, 제조일, 상태
+            row2 = ctk.CTkFrame(info_left, fg_color="transparent")
+            row2.pack(anchor="w", fill="x", pady=2)
+            
+            ctk.CTkLabel(row2, text="생산량(kg): ", font=ctk.CTkFont(size=11)).pack(side="left")
+            base_weight_entry = ctk.CTkEntry(row2, width=80)
+            base_weight_kg = ((prod.base_weight_g or 0)/1000)
+            base_weight_entry.insert(0, f"{base_weight_kg:.1f}")
+            base_weight_entry.pack(side="left", padx=2)
+            
+            ctk.CTkLabel(row2, text=" 제조일: ", font=ctk.CTkFont(size=11)).pack(side="left")
+            effective_date_entry = DateEntry(row2, date_pattern='yyyy-mm-dd', state='normal', width=100)
+            if prod.effective_date:
+                effective_date_entry.set_date(prod.effective_date)
+            effective_date_entry.pack(side="left", padx=2)
 
             # Status ComboBox Logic
             try:
@@ -3404,10 +3498,49 @@ class DocumentManagementFrame(ctk.CTkFrame):
             btn_right = ctk.CTkFrame(top, fg_color="transparent")
             btn_right.pack(side="right")
             
+            def save_edits():
+                session_save = db_manager.get_session()
+                try:
+                    p_update = session_save.query(ProductionFormulation).filter_by(id=prod.id).first()
+                    if p_update:
+                        p_update.product_name = product_name_entry.get().strip() or p_update.product_name
+                        p_update.revision = revision_entry.get().strip() or p_update.revision
+                        p_update.production_code = production_code_entry.get().strip() or p_update.production_code
+                        p_update.client_name = client_name_entry.get().strip() or p_update.client_name
+                        try:
+                            new_kg = float(base_weight_entry.get().strip())
+                            p_update.base_weight_g = new_kg * 1000.0
+                        except Exception:
+                            pass
+                        try:
+                            new_date = effective_date_entry.get_date()
+                            p_update.effective_date = new_date
+                        except Exception:
+                            pass
+                        session_save.commit()
+                        prod.product_name = p_update.product_name
+                        prod.revision = p_update.revision
+                        prod.production_code = p_update.production_code
+                        prod.client_name = p_update.client_name
+                        prod.base_weight_g = p_update.base_weight_g
+                        prod.effective_date = p_update.effective_date
+                        messagebox.showinfo("성공", "생산처방 정보가 저장되었습니다.", parent=win)
+                        self.refresh_production_list()
+                        populate_recipe_items()
+                    else:
+                        messagebox.showerror("오류", "데이터를 찾을 수 없습니다.", parent=win)
+                except Exception as e:
+                    session_save.rollback()
+                    messagebox.showerror("오류", f"저장 실패: {e}", parent=win)
+                finally:
+                    session_save.close()
+            
             def quick_export():
                 self.export_selected_production_to_excel()
 
             # 일반 미리보기는 제거하고, 인쇄 미리보기만 제공
+            ctk.CTkButton(btn_right, text="💾 저장", width=100, fg_color="blue",
+                         command=save_edits).pack(side="left", padx=3)
             ctk.CTkButton(btn_right, text="🖨 인쇄 미리보기", width=120,
                          command=self.print_preview_selected_production).pack(side="left", padx=3)
             ctk.CTkButton(btn_right, text="📊 엑셀 내보내기", width=130, fg_color="green",
@@ -3882,7 +4015,11 @@ class DocumentManagementFrame(ctk.CTkFrame):
             prodcode_e = add_row(2, "생산코드")
             rev_e = add_row(3, "차수")
             rev_e.insert(0, src.revision or "")
-            base_e = add_row(4, "생산량(kg)")
+            # 업체명: 타겟 거래처 텍스트 우선, 없으면 OEM/ODM 거래처명
+            client_e = add_row(4, "업체명")
+            initial_client_name = (src.target_client_id or "").strip() or ((src.oem_odm_client.name or "") if src.oem_odm_client else "")
+            client_e.insert(0, initial_client_name)
+            base_e = add_row(5, "생산량(kg)")
             try:
                 qv = float(self.quotation_weight_entry.get())
                 base_e.insert(0, f"{qv/1000:.1f}")
@@ -4033,6 +4170,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                         production_code=prodcode_e.get().strip() or None,
                         lab_no=lab_e.get().strip() or src.lab_no,
                         revision=rev_e.get().strip() or src.revision,
+                        client_name=client_e.get().strip() or None,
                         base_weight_g=base_w_kg * 1000.0,
                         status=status_var.get(),
                         effective_date=eff_date,
@@ -4044,6 +4182,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     session.commit()
                     messagebox.showinfo("완료", "생산처방이 생성되었습니다.", parent=dlg)
                     dlg.destroy()
+                    # Reset production view to client level to ensure new formulation is visible
+                    self.show_production_folder_view()
+                    # Also ensure refresh is called
                     self.refresh_production_list()
                 except Exception as ex:
                     session.rollback()
@@ -4153,12 +4294,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
             except Exception:
                 approver_name = ""
 
-            # 거래처명 계산 (타겟 거래처 텍스트 우선, 없으면 OEM/ODM 거래처명)
+            # 거래처명 계산 (생산처방에 저장된 값 우선, 없으면 소스 처방에서 가져오기)
             client_name = ""
             try:
-                sf = prod.source_formulation
-                if sf:
-                    client_name = (sf.target_client_id or "").strip() or ((sf.oem_odm_client.name or "") if sf.oem_odm_client else "")
+                client_name = (prod.client_name or "").strip()
+                if not client_name:
+                    sf = prod.source_formulation
+                    if sf:
+                        client_name = (sf.target_client_id or "").strip() or ((sf.oem_odm_client.name or "") if sf.oem_odm_client else "")
             except Exception:
                 client_name = ""
 
@@ -4385,12 +4528,14 @@ class DocumentManagementFrame(ctk.CTkFrame):
             except Exception:
                 approver_name = ""
 
-            # 거래처명 계산
+            # 거래처명 계산 (생산처방에 저장된 값 우선, 없으면 소스 처방에서 가져오기)
             client_name = ""
             try:
-                sf = prod.source_formulation
-                if sf:
-                    client_name = (sf.target_client_id or "").strip() or ((sf.oem_odm_client.name or "") if sf.oem_odm_client else "")
+                client_name = (prod.client_name or "").strip()
+                if not client_name:
+                    sf = prod.source_formulation
+                    if sf:
+                        client_name = (sf.target_client_id or "").strip() or ((sf.oem_odm_client.name or "") if sf.oem_odm_client else "")
             except Exception:
                 client_name = ""
 
@@ -5406,12 +5551,18 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
         except Exception:
             pass
         try:
+            # Get profit margin
+            try:
+                profit_margin = float(self.quotation_profit_margin_entry.get().strip())
+            except (ValueError, TypeError):
+                profit_margin = 15.0
+            
             quotation_snapshot["items"] = [self.quotation_tree.item(item, "values") for item in self.quotation_tree.get_children()]
             quotation_snapshot["summary"] = {
                 "총 함량": self.quotation_total_ratio_label.cget("text"),
                 "총 원료 원가": self.total_raw_cost_label.cget("text"),
                 "VAT(10%) 포함가": self.price_with_vat_label.cget("text"),
-                "이윤(15%) 포함가": self.price_with_profit_label.cget("text"),
+                f"이윤({profit_margin:.0f}%) 포함가": self.price_with_profit_label.cget("text"),
             }
         except Exception:
             pass
@@ -6076,7 +6227,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                         inci_name_val = single_ing.name_en or ""
                         name_ko_val = single_ing.name_ko or name
 
-                    # 컬럼 순서: no, material_name, inci_name, name_ko, rm_ratio, ing_ratio, actual_wt, cas_no, function, hs_code, origin, material_name_en, nmpa_reg_num, remark
+                    # 컬럼 순서: no, material_name, inci_name, name_ko, rm_ratio, ing_ratio, actual_wt, cas_no, function, hs_code, origin, material_name_en, nmpa_reg_num, supplier, supplier_en, remark
                     values = [
                         material_no, 
                         material.name if material else name, 
@@ -6092,6 +6243,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                         (material.name_en or "") if material else "", # material_name_en (원료)
                         (material.nmpa_reg_num or "") if material else "", # nmpa_reg_num (원료)
                         (material.supplier.name or "") if (material and material.supplier) else "", # supplier (원료)
+                        (material.supplier.name_en or "") if (material and material.supplier) else "", # supplier_en (원료)
                         "" # remark
                     ]
 
@@ -6124,6 +6276,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                             (material.name_en or "") if is_first else "",       # material_name_en (Material)
                             (material.nmpa_reg_num or "") if is_first else "",  # nmpa_reg_num (Material)
                             (material.supplier.name or "") if (is_first and material and material.supplier) else "", # supplier (Material)
+                            (material.supplier.name_en or "") if (is_first and material and material.supplier) else "", # supplier_en (Material)
                             ing.remark or ""                                    # remark
                         ]
                         
@@ -6703,7 +6856,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             # Build raw material data as dict rows keyed by complex_ing_cols keys.
             col_order = [
                 'no', 'material_name', 'inci_name', 'name_ko', 'rm_ratio', 'ing_ratio', 'actual_wt',
-                'cas_no', 'function', 'hs_code', 'origin', 'material_name_en', 'nmpa_reg_num', 'supplier', 'remark'
+                'cas_no', 'function', 'hs_code', 'origin', 'material_name_en', 'nmpa_reg_num', 'supplier', 'supplier_en', 'remark'
             ]
 
             raw_rows = []
@@ -6762,6 +6915,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                         'material_name_en': material.name_en if material else "",
                         'nmpa_reg_num': (material.nmpa_reg_num or "") if material else "",
                         'supplier': (material.supplier.name or "") if (material and material.supplier) else "",
+                        'supplier_en': (material.supplier.name_en or "") if (material and material.supplier) else "",
                         'remark': ""
                     }
                     raw_rows_decimal.append(row)
@@ -6786,6 +6940,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                                 'material_name_en': material.name_en if material else "",
                                 'nmpa_reg_num': (material.nmpa_reg_num or "") if material else "",
                                 'supplier': (material.supplier.name or "") if (material and material.supplier) else "",
+                                'supplier_en': (material.supplier.name_en or "") if (material and material.supplier) else "",
                                 'remark': ing.remark or ""
                             }
                         else:
@@ -6804,6 +6959,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                                 'material_name_en': material.name_en if material else "",
                                 'nmpa_reg_num': (material.nmpa_reg_num or "") if material else "",
                                 'supplier': "",
+                                'supplier_en': "",
                                 'remark': ing.remark or ""
                             }
                         raw_rows_decimal.append(row)
