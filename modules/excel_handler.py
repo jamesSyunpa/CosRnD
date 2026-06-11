@@ -13,6 +13,9 @@ import time
 import shutil
 import tempfile
 
+# 프로젝트 루트 경로
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # --- 경로 설정을 읽기 위한 설정 ---
 def _get_excel_config_path(app_dir_name: str = 'CosRnD') -> str:
     appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), app_dir_name)
@@ -301,74 +304,98 @@ def export_production_formulation_revised_to_excel(
         ws = wb.active
         ws.title = "생산처방"
 
-        # 1) 제목: A1:F2 병합 (ui.py 준용)
-        ws.merge_cells('A1:F2')
+        # Get details first!
+        details = production_data.get('details', {})
+        
+        # 1) a1:e2 (생산지시서) merged
         tcell = ws['A1']
         tcell.value = "생산지시서"
         tcell.font = title_font
         tcell.alignment = center
+        # Set borders on all cells in A1:E2 first
+        for row in [1,2]:
+            for col in ['A','B','C','D','E']:
+                ws[f"{col}{row}"].border = thin_border
         ws.row_dimensions[1].height = 30
         ws.row_dimensions[2].height = 22
-
-        # 2) 결재란: G1:H2 영역에 승인 스탬프 이미지를 삽입(오른쪽 정렬 폭에 맞춤)
-        #    - 왼쪽에 '결' '재' 세로 라벨, 상단에 '작성/검토/승인', 하단 서명칸
-        # 결재 이미지는 컬럼 폭이 확정된 뒤 추가해야 정확히 맞출 수 있으므로 여기서는 생성 함수만 정의합니다.
-
-        # 3) 기본정보 (ui.py 배치 준용)
-        details = production_data.get('details', {})
-        # Row 3: 제품명(A3 라벨, B3:D3 값 병합), 생산코드(E3:F3), 제조자(G3:H3)
+        # Now merge
+        ws.merge_cells('A1:E2')
+        
+        # 2) f1:f2 (결제방) merged
+        f1_cell = ws['F1']
+        f1f2_value = details.get('결제방','')
+        if f1f2_value:
+            f1_cell.value = "결제방: " + f1f2_value
+        else:
+            f1_cell.value = "결제방"
+        f1_cell.font = label_font
+        f1_cell.fill = label_fill
+        f1_cell.alignment = center
+        f1_cell.border = thin_border
+        # Set borders on F1 and F2
+        ws['F2'].border = thin_border
+        # Now merge F1:F2
+        ws.merge_cells('F1:F2')
+        
+        # 3) g1 (작성) g2 (빈칸)
+        ws['G1'].value = '작성'; ws['G1'].font = label_font; ws['G1'].fill = label_fill; ws['G1'].alignment = center; ws['G1'].border = thin_border
+        ws['G2'].border = thin_border
+        # 4) h1 (검토) h2 (빈칸)
+        ws['H1'].value = '검토'; ws['H1'].font = label_font; ws['H1'].fill = label_fill; ws['H1'].alignment = center; ws['H1'].border = thin_border
+        ws['H2'].border = thin_border
+        # 5) i1 (승인) i2 (빈칸)
+        ws['I1'].value = '승인'; ws['I1'].font = label_font; ws['I1'].fill = label_fill; ws['I1'].alignment = center; ws['I1'].border = thin_border
+        ws['I2'].border = thin_border
+        
+        # Row 3
         prod_name = details.get('제품명', '')
-        # A3 라벨
+        # A3 라벨, B3:D3 병합 (제품명)
         ws['A3'].value = '제품명'; ws['A3'].font = label_font; ws['A3'].fill = label_fill; ws['A3'].alignment = center; ws['A3'].border = thin_border
-        # B3:D3 병합 값
-        ws.merge_cells('B3:D3')
         ws['B3'].value = prod_name
-        ws['B3'].font = default_font
-        ws['B3'].alignment = left
-        # 개별 셀 테두리 유지
-        ws['B3'].border = thin_border
-        ws['C3'].border = thin_border
-        ws['D3'].border = thin_border
+        ws['B3'].font = default_font; ws['B3'].alignment = center; ws['B3'].border = thin_border
+        for col in ['C','D']:
+            ws[f"{col}3"].border = thin_border
+        ws.merge_cells('B3:D3')
+        # 6. e3 (생산코드 label) f3:g3 (merged, 생산실제코드)
         ws['E3'].value = '생산코드'; ws['E3'].font = label_font; ws['E3'].fill = label_fill; ws['E3'].alignment = center; ws['E3'].border = thin_border
-        # 생산코드 값셀 F3를 G3까지 병합하여 빈칸 제거
-        ws.merge_cells('F3:G3')
-        ws['F3'].value = details.get('생산코드', ''); ws['F3'].font = default_font; ws['F3'].alignment = left; ws['F3'].border = thin_border
+        ws['F3'].value = details.get('생산코드',''); ws['F3'].font = default_font; ws['F3'].alignment = center; ws['F3'].border = thin_border
         ws['G3'].border = thin_border
-        # 제조자를 한 칸 오른쪽으로 이동: H3 라벨, I3 값
+        ws.merge_cells('F3:G3')
+        # 7. h3 (제조자 label) i3 (빈칸)
         ws['H3'].value = '제조자'; ws['H3'].font = label_font; ws['H3'].fill = label_fill; ws['H3'].alignment = center; ws['H3'].border = thin_border
-        ws['I3'].value = details.get('제조자', ''); ws['I3'].font = default_font; ws['I3'].alignment = left; ws['I3'].border = thin_border
-        # 라벨/값 셀 테두리 보강
-        for c in ['A','B','C','D']:
-            ws[f"{c}3"].border = thin_border
+        ws['I3'].border = thin_border
+        
         ws.row_dimensions[3].height = 20
-
-        # Row 4: 지시일/제조일/생산량/수득량
+        
+        # Row 4
         ws['A4'].value = '지시일'; ws['A4'].font = label_font; ws['A4'].fill = label_fill; ws['A4'].alignment = center; ws['A4'].border = thin_border
-        # 지시일에서 날짜만 추출 (시간 제거)
         instruction_date_raw = details.get('지시일', details.get('출력일시',''))
         if instruction_date_raw and ' ' in str(instruction_date_raw):
-            instruction_date = str(instruction_date_raw).split(' ')[0]  # 날짜 부분만
+            instruction_date = str(instruction_date_raw).split(' ')[0] 
         else:
             instruction_date = instruction_date_raw
-        ws['B4'].value = instruction_date; ws['B4'].font = default_font; ws['B4'].alignment = left; ws['B4'].border = thin_border
+        ws['B4'].value = instruction_date; ws['B4'].font = default_font; ws['B4'].alignment = center; ws['B4'].border = thin_border
         ws['C4'].value = '제조일'; ws['C4'].font = label_font; ws['C4'].fill = label_fill; ws['C4'].alignment = center; ws['C4'].border = thin_border
-        ws['D4'].value = details.get('제조일',''); ws['D4'].font = default_font; ws['D4'].alignment = left; ws['D4'].border = thin_border
+        ws['D4'].value = details.get('제조일',''); ws['D4'].font = default_font; ws['D4'].alignment = center; ws['D4'].border = thin_border
         ws['E4'].value = '생산량(kg)'; ws['E4'].font = label_font; ws['E4'].fill = label_fill; ws['E4'].alignment = center; ws['E4'].border = thin_border
-        # 생산량 값셀 F4를 G4까지 병합하여 빈칸 제거
-        ws.merge_cells('F4:G4')
-        ws['F4'].value = details.get('생산량(kg)',''); ws['F4'].font = default_font; ws['F4'].alignment = right; ws['F4'].border = thin_border
+        ws['F4'].value = details.get('생산량(kg)',''); ws['F4'].font = default_font; ws['F4'].alignment = center; ws['F4'].border = thin_border
         ws['G4'].border = thin_border
-        # 수득량을 한 칸 오른쪽으로 이동: H4 라벨, I4 값
+        ws.merge_cells('F4:G4')
+        # 8. h4 (수득량 label) i4 (빈칸)
         ws['H4'].value = '수득량'; ws['H4'].font = label_font; ws['H4'].fill = label_fill; ws['H4'].alignment = center; ws['H4'].border = thin_border
-        ws['I4'].value = details.get('수득량',''); ws['I4'].font = default_font; ws['I4'].alignment = right; ws['I4'].border = thin_border
+        ws['I4'].border = thin_border
+        
         ws.row_dimensions[4].height = 20
 
-        # Row 5: 빈 줄(여백)
+        # Row 5: 비고 or empty
         ws.row_dimensions[5].height = 6
 
-        # 4) 테이블 헤더 (UI 기준 A..I) - '계량량(kg)'을 생산량 옆에 추가
+        # Row 6: 빈 줄(여백)
+        ws.row_dimensions[6].height = 6
+
+        # 4) 테이블 헤더 (UI 기준 A..J) - '계량량(kg)'을 생산량 옆에 추가
         headers = ["Ph", "구분", "코드", "원료명", "함량(%)", "생산량(kg)", "계량량(kg)", "제조공정", "공정검사"]
-        header_row = 6
+        header_row = 7
         ws.row_dimensions[header_row].height = 22
         for c_idx, h in enumerate(headers, 1):
             hc = ws.cell(row=header_row, column=c_idx, value=h)
@@ -543,7 +570,7 @@ def export_production_formulation_revised_to_excel(
         sum_row = current
         ws.row_dimensions[sum_row].height = 22
         # 전체 셀 채움/테두리 적용
-        for col in range(1, 10):
+        for col in range(1, 10):  # A..I for table
             c = ws.cell(row=sum_row, column=col)
             c.fill = table_header_fill
             c.border = medium_border
@@ -564,40 +591,17 @@ def export_production_formulation_revised_to_excel(
 
         # 8) 컬럼 폭 고정
         fixed_widths = {
-            'A': 8, 'B': 10, 'C': 15, 'D': 45, 'E': 12, 'F': 12, 'G': 12, 'H': 26, 'I': 22
+            'A': 8, 'B': 10, 'C': 15, 'D': 45, 'E': 12, 'F': 12, 
+            'G': 12, 'H': 12, 'I': 12, 'J': 12, 'K': 12, 'L': 12, 'M': 12
         }
         for col, w in fixed_widths.items():
             ws.column_dimensions[col].width = w
-
-    # 컬럼 폭 확정 이후 결재 이미지 처리: 기본은 페이지 머리글 '중앙'에 이미지로 삽입(Excel COM),
-    # COM 불가 시 워크시트에 직접 삽입(A1)으로 폴백.
-        ap_img_path = None
-        approval_img_width = None
+            
+        # Define variables for later use
         use_com_header = False
-        try:
-            # COM 사용 가능 여부 확인
-            import win32com.client as _win32  # type: ignore
-            use_com_header = True
-        except Exception:
-            use_com_header = False
-        try:
-            # 전체 페이지 폭(A~I) 기준으로 결재 이미지를 생성해 헤더 중앙에 넣는다
-            total_width_px = 0
-            for col_idx in range(1, 10):  # A..I
-                col_letter = get_column_letter(col_idx)
-                col_w = ws.column_dimensions[col_letter].width or 8
-                total_width_px += col_w * 7
-            approval_img_width = int(total_width_px)
-            ap_img_path, approval_img_height = create_approval_image_v2(approval_img_width)
-            if not use_com_header:
-                ap_img = XLImage(ap_img_path)
-                ap_img.anchor = "A1"
-                ws.add_image(ap_img)
-                # 상단 영역 높이 확보(이미지 높이 ≈ 140px)
-                ws.row_dimensions[1].height = 90
-                ws.row_dimensions[2].height = 150
-        except Exception:
-            pass
+        approval_img_width = None
+        approval_img_height = None
+        ap_img_path = None
 
         # 9) 인쇄 설정 (세로 + 여백 축소) + 머리글/바닥글 + 타이틀 행 반복/인쇄 영역
         try:
@@ -607,10 +611,8 @@ def export_production_formulation_revised_to_excel(
             ws.sheet_properties.pageSetUpPr.fitToPage = True
             ws.print_options.horizontalCentered = True
             ws.page_margins.left = 0.3; ws.page_margins.right = 0.3
-            # 위쪽 여백: 1.5cm, 겹치면 2cm로 자동 조정 (approval_img_height는 px)
-            px_per_cm = 96 / 2.54
-            margin_top = 2.0 / 2.54 if approval_img_height > 1.5 * px_per_cm else 1.5 / 2.54
-            ws.page_margins.top = margin_top; ws.page_margins.bottom = 0.4  # cm -> inch
+            ws.page_margins.top = 1.5 / 2.54
+            ws.page_margins.bottom = 0.4
             # 머리글/바닥글: 날짜/시간, 문서명, 페이지 번호
             try:
                 ws.header_footer.left_header = "&D &T"
@@ -854,6 +856,7 @@ def export_production_formulation_original_to_excel(
             ("차수", details.get("차수", "")),
             ("생산량(kg)", details.get("생산량(kg)", "")),
             ("상태", details.get("상태", "")),
+            ("결제방", details.get("결제방", "")),
             ("출력일시", details.get("출력일시", "")),
         ]
         r = 4
@@ -865,7 +868,7 @@ def export_production_formulation_original_to_excel(
                 lc.font = label_font; lc.fill = label_fill; lc.alignment = center; lc.border = thin_border
                 ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=5)
                 vc = ws.cell(row=r, column=2, value=value)
-                vc.font = default_font; vc.alignment = left; vc.border = thin_border
+                vc.font = default_font; vc.alignment = center; vc.border = thin_border
                 for c in range(2,6): ws.cell(row=r, column=c).border = thin_border
             else:
                 for c in range(1,6): ws.cell(row=r, column=c).border = thin_border
@@ -874,7 +877,7 @@ def export_production_formulation_original_to_excel(
                 rc = ws.cell(row=r, column=7, value=label)
                 rc.font = label_font; rc.fill = label_fill; rc.alignment = center; rc.border = thin_border
                 rv = ws.cell(row=r, column=8, value=value)
-                rv.font = default_font; rv.alignment = left; rv.border = thin_border
+                rv.font = default_font; rv.alignment = center; rv.border = thin_border
             else:
                 for c in range(7,9): ws.cell(row=r, column=c).border = thin_border
             ws.cell(row=r, column=6).border = thin_border
@@ -887,7 +890,7 @@ def export_production_formulation_original_to_excel(
             nl.font = label_font; nl.fill = label_fill; nl.alignment = center; nl.border = thin_border
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=8)
             nv = ws.cell(row=r, column=2, value=details.get('비고'))
-            nv.font = default_font; nv.alignment = left; nv.border = thin_border
+            nv.font = default_font; nv.alignment = center; nv.border = thin_border
             for c in range(2,9): ws.cell(row=r, column=c).border = thin_border
             r += 1
 

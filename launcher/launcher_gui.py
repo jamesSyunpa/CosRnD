@@ -555,7 +555,7 @@ class LauncherMainWindow(QMainWindow):
                 QMessageBox.critical(self, "오류", "설치 경로를 찾을 수 없습니다!")
                 return
             
-            app_path = install_path / "bin" / "화장품연구관리_v1.0.exe"
+            app_path = install_path / "bin" / "화장품연구관리_v1.0.3.exe"
             if not app_path.exists():
                 app_path = install_path / "bin" / "main.exe"
             
@@ -563,7 +563,7 @@ class LauncherMainWindow(QMainWindow):
                 QMessageBox.critical(
                     self,
                     "오류",
-                    f"다음 위치에서 애플리케이션을 찾을 수 없습니다:\n{install_path / 'bin' / '화장품연구관리_v1.0.exe'}"
+                    f"다음 위치에서 애플리케이션을 찾을 수 없습니다:\n{install_path / 'bin' / '화장품연구관리_v1.0.3.exe'}"
                 )
                 return
             

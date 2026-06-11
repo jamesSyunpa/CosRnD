@@ -229,8 +229,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.data_loading = False  # 데이터 로딩 중 플래그
 
         self.title(self.texts['formulation_popup_title'])
-        # 창 크기: 메인 창보다 작게 조정
-        self.geometry("1450x750")
+        # 창 크기: 적절한 크기로 축소 조정
+        self.geometry("1280x760")
         # self.transient(master)  # 최대화 버튼을 활성화하기 위해 transient 제거
         self.resizable(True, True) # 크기 조절 및 최대화 버튼 활성화
         self.minsize(800, 600)
@@ -240,14 +240,14 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
         
         # 창 크기 정보 출력
-        self.after(100, lambda: print(f"[WINDOW SIZE] {self.title()} | geometry: {self.winfo_width()}x{self.winfo_height()} | requested: 1450x750"))
+        self.after(100, lambda: print(f"[WINDOW SIZE] {self.title()} | geometry: {self.winfo_width()}x{self.winfo_height()} | requested: 1280x760"))
 
         # UI 구성
         self.setup_ui()
         
         # UI 생성 후 창 크기 강제 설정
         self.update_idletasks()
-        self.geometry("1450x750")
+        self.geometry("1280x760")
         self.update()
         
         # 데이터 로딩 (UI 구성 완료 후 지연 실행)
@@ -309,9 +309,16 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 인스턴스 메서드로 노출
         self.safe_insert = _safe_insert
 
-        # 1. 메인 컨테이너 (상세정보 폼과 처방내용을 담는 분할 조절 바)
-        main_container = ttk.PanedWindow(self, orient="horizontal")
+        # 1. 메인 컨테이너 (상세정보 폼과 처방내용을 담음)
+        main_container = ctk.CTkFrame(self, fg_color="transparent")
         main_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
+        
+        # Column 0(상세정보)은 픽셀 기반 강제 제어를 위해 weight=0으로 두고 초기 너비는 약 61%인 768px로 설정
+        # Column 2(처방내용)는 남은 화면 전체를 채우도록 weight=1로 설정
+        main_container.grid_columnconfigure(0, weight=0, minsize=768) # 좌측: 처방 상세 정보
+        main_container.grid_columnconfigure(1, weight=0)  # 중간: 스플리터 조절 바
+        main_container.grid_columnconfigure(2, weight=1)  # 우측: 처방 내용
+        main_container.grid_rowconfigure(0, weight=1)
 
         # 팝업 루트의 grid 가중치 설정: 0번 행(메인 컨테이너)은 크기가 늘어나며, 1번 행(하단 버튼 프레임)은 고정 높이
         self.grid_rowconfigure(0, weight=1)
@@ -320,17 +327,39 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
         # 2. 좌측: 처방 상세 정보 폼
         form_container_pane = ctk.CTkFrame(main_container, fg_color="transparent")
+        form_container_pane.grid(row=0, column=0, sticky="nsew", padx=(0, 2))
         form_container_pane.grid_rowconfigure(0, weight=1)
         form_container_pane.grid_columnconfigure(0, weight=1)
         self.form_pane = ctk.CTkScrollableFrame(form_container_pane, label_text=self.texts['formulation_details'])
         self.form_pane.grid(row=0, column=0, sticky="nsew")
 
+        # 2.5 중간: 마우스 드래그로 폭을 조절하는 스플리터 바 추가
+        drag_bar = ctk.CTkFrame(main_container, width=6, fg_color="#555555", corner_radius=0)
+        drag_bar.grid(row=0, column=1, sticky="ns", padx=1)
+        
+        # 커서 변경
+        drag_bar.bind("<Enter>", lambda e: drag_bar.configure(cursor="size_we"))
+        drag_bar.bind("<Leave>", lambda e: drag_bar.configure(cursor=""))
+        
+        # 드래그 동작 정의 (마우스 포인터의 x좌표와 좌측 영역의 가로 픽셀을 1:1로 일치시킴)
+        def on_splitter_drag(event):
+            container_x = event.x_root - main_container.winfo_rootx()
+            total_width = main_container.winfo_width()
+            
+            # 최소 너비 300px, 최대 너비는 (전체 너비 - 250px)로 제한하여 UI 깨짐 방지
+            if total_width > 550:
+                min_w = 300
+                max_w = total_width - 250
+                target_w = max(min_w, min(container_x, max_w))
+                main_container.grid_columnconfigure(0, minsize=target_w)
+                    
+        drag_bar.bind("<B1-Motion>", on_splitter_drag)
+
         # 3. 우측: 처방 내용(원료 목록)
         content_pane = ctk.CTkFrame(main_container)
-        
-        # PanedWindow에 추가
-        main_container.add(form_container_pane, weight=68)
-        main_container.add(content_pane, weight=32)
+        content_pane.grid(row=0, column=2, sticky="nsew", padx=(2, 0))
+
+
 
         # --- form_pane 내부 UI 구성 ---
         self.form_pane.grid_columnconfigure((1, 3), weight=1)
@@ -412,30 +441,29 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.safe_insert(self.exp_manager_entry, self.current_user.real_name or self.current_user.username)
 
         ctk.CTkLabel(experiment_info_frame, text=self.texts['manager_code']).grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.exp_code_entry = ctk.CTkEntry(experiment_info_frame, width=90)
+        self.exp_code_entry = ctk.CTkEntry(experiment_info_frame, width=90, state="disabled")
         self.exp_code_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
-        self.exp_code_entry.bind("<KeyRelease>", self.update_lab_no)
-
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['revision']).grid(row=2, column=2, padx=10, pady=5, sticky="w")
-        self.revision_entry = ctk.CTkEntry(experiment_info_frame, width=90)
-        self.revision_entry.grid(row=2, column=3, padx=10, pady=5, sticky="ew")
-        self.revision_entry.bind("<KeyRelease>", self.update_lab_no)
 
         ctk.CTkLabel(experiment_info_frame, text=self.texts['lab_no']).grid(row=3, column=0, padx=10, pady=5, sticky="w")
         self.lab_no_entry = ctk.CTkEntry(experiment_info_frame, state="disabled") # 읽기 전용으로 설정
-        self.lab_no_entry.grid(row=3, column=1, columnspan=3, padx=10, pady=5, sticky="ew")
+        self.lab_no_entry.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
-        # --- OEM/ODM 거래처 선택 (별도 행으로 분리하여 전체 폭 사용) ---
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['client']).grid(row=4, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(experiment_info_frame, text=self.texts['revision']).grid(row=3, column=2, padx=10, pady=5, sticky="w")
+        self.revision_entry = ctk.CTkEntry(experiment_info_frame, width=90)
+        self.revision_entry.grid(row=3, column=3, padx=10, pady=5, sticky="ew")
+        self.revision_entry.bind("<KeyRelease>", self.update_lab_no)
+
+        # --- OEM/ODM 거래처 선택 ---
+        ctk.CTkLabel(experiment_info_frame, text=self.texts['client']).grid(row=2, column=2, padx=10, pady=5, sticky="w")
         
         client_selection_frame = ctk.CTkFrame(experiment_info_frame, fg_color="transparent")
-        client_selection_frame.grid(row=4, column=1, columnspan=3, padx=10, pady=5, sticky="ew")
+        client_selection_frame.grid(row=2, column=3, padx=10, pady=5, sticky="ew")
         client_selection_frame.grid_columnconfigure(1, weight=1)
 
         all_client_types = [self.texts['select_type']] + db_manager.get_unique_client_types()
         self.formulation_client_type_combo = CustomDropdown(client_selection_frame, values=all_client_types, width=120, command=self.update_formulation_client_combo)
         self.formulation_client_type_combo.grid(row=0, column=0, padx=(0, 5), sticky="ew")
-        self.formulation_client_name_combo = CustomDropdown(client_selection_frame, values=[self.texts['select_client']], command=self.on_client_select, width=200)
+        self.formulation_client_name_combo = CustomDropdown(client_selection_frame, values=[self.texts['select_client']], command=self.on_client_select, width=180)
         self.formulation_client_name_combo.grid(row=0, column=1, sticky="ew")
 
         # 선택된 거래처의 상세 정보를 표시할 라벨
@@ -443,7 +471,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             experiment_info_frame, text="", justify="left",
             font=ctk.CTkFont(size=11), text_color="gray"
         )
-        self.client_details_label.grid(row=5, column=1, columnspan=3, padx=10, pady=(0, 5), sticky="w")
+        self.client_details_label.grid(row=4, column=3, padx=10, pady=(0, 5), sticky="w")
 
         # --- 3. 실험 결과 섹션 (form_pane에 추가) ---
         exp_result_frame = ctk.CTkFrame(self.form_pane)
@@ -528,11 +556,11 @@ class FormulationEditPopup(ctk.CTkToplevel):
         formulation_item_cols = self.texts['formulation_item_tree_columns']
         # columns 인자에는 딕셔너리의 키 리스트를 명시적으로 전달해야 합니다.
         self.formulation_item_tree = ttk.Treeview(content_pane, columns=list(formulation_item_cols.keys()), show="headings", selectmode="browse")
-        self.formulation_item_tree.heading("phase", text=formulation_item_cols['phase']); self.formulation_item_tree.column("phase", width=60, anchor="center")
-        self.formulation_item_tree.heading("code", text=formulation_item_cols['code']); self.formulation_item_tree.column("code", width=80)
-        self.formulation_item_tree.heading("name", text=formulation_item_cols['name']); self.formulation_item_tree.column("name", width=120, stretch=True)
-        self.formulation_item_tree.heading("ratio", text=formulation_item_cols['ratio']); self.formulation_item_tree.column("ratio", width=65, anchor="e")
-        self.formulation_item_tree.heading("amount", text=formulation_item_cols['amount']); self.formulation_item_tree.column("amount", width=65, anchor="e")
+        self.formulation_item_tree.heading("phase", text=formulation_item_cols['phase']); self.formulation_item_tree.column("phase", width=80, anchor="center")
+        self.formulation_item_tree.heading("code", text=formulation_item_cols['code']); self.formulation_item_tree.column("code", width=100)
+        self.formulation_item_tree.heading("name", text=formulation_item_cols['name']); self.formulation_item_tree.column("name", width=150, stretch=True)
+        self.formulation_item_tree.heading("ratio", text=formulation_item_cols['ratio']); self.formulation_item_tree.column("ratio", width=80, anchor="e")
+        self.formulation_item_tree.heading("amount", text=formulation_item_cols['amount']); self.formulation_item_tree.column("amount", width=80, anchor="e")
         self.formulation_item_tree.grid(row=1, column=0, padx=10, pady=(0, 5), sticky="nsew")
         self.formulation_item_tree.bind("<Double-1>", self.on_treeview_double_click)
         self.formulation_item_tree.bind("<Up>", self.move_item_up)
@@ -588,6 +616,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.cancel_button = ctk.CTkButton(bottom_button_frame, text=self.texts['close'], width=100, fg_color="gray50", hover_color="gray35", command=self.destroy)
         self.cancel_button.pack(side="left", padx=5)
 
+
+
         # 초기 상태 설정
         self.toggle_target_info()
         
@@ -615,6 +645,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     
         except Exception as e:
             print(f"이벤트 바인딩 중 오류: {e}")
+
+
 
     def update_lab_no(self, event=None):
         """고유번호, 실험일, 차수가 모두 있을 때만 LAB NO.를 자동으로 생성합니다."""
@@ -662,11 +694,15 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.exp_date_entry.set_date(datetime.now())
         self.exp_manager_entry.delete(0, "end")
         self.safe_insert(self.exp_manager_entry, self.current_user.real_name or self.current_user.username)
-        self.exp_code_entry.delete(0, "end")
         self.revision_entry.delete(0, "end")
         # 현재 사용자의 담당번호 자동 입력 (속성이 없을 수 있으므로 안전하게 접근)
         manager_code = getattr(self.current_user, 'manager_code', "")
+        # Disable된 entry에 값을 넣으려면 잠시 enable 시켜야 함
+        self.exp_code_entry.configure(state="normal")
+        self.exp_code_entry.delete(0, "end")
         self.safe_insert(self.exp_code_entry, manager_code)
+        self.exp_code_entry.configure(state="disabled")
+        self.update_lab_no()
 
         # 본 실험 결과 정보
         self.exp_ph_initial_entry.delete(0, "end")
@@ -761,11 +797,16 @@ class FormulationEditPopup(ctk.CTkToplevel):
             # 담당번호 로드 및 처리
             manager_code = self.get_manager_code_from_form(form, session)
             if manager_code:
+                self.exp_code_entry.configure(state="normal")
                 self.exp_code_entry.insert(0, str(manager_code))
+                self.exp_code_entry.configure(state="disabled")
                 
             # 차수 로드
             if form.revision:
                 self.revision_entry.insert(0, str(form.revision))
+                
+            # LAB NO. 업데이트
+            self.update_lab_no()
 
             # 본 실험 결과 정보 로드
             if form.experiment_ph_initial:
@@ -823,7 +864,6 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 본 실험 정보 클리어
         self.exp_name_entry.delete(0, "end")
         self.exp_manager_entry.delete(0, "end")
-        self.exp_code_entry.delete(0, "end")
         self.revision_entry.delete(0, "end")
         
         # 실험 결과 클리어
@@ -1021,6 +1061,11 @@ class FormulationEditPopup(ctk.CTkToplevel):
         exp_name = self.exp_name_entry.get().strip()
         if not exp_name:
             messagebox.showwarning(self.texts['input_error'], self.texts['experiment_name_required'], parent=self)
+            return
+
+        manager_code = self.exp_code_entry.get().strip()
+        if not manager_code:
+            messagebox.showwarning(self.texts['input_error'], "담당번호는 필수 입력 항목입니다. 회원 정보에서 담당번호를 설정하거나 관리자에게 문의하세요.", parent=self)
             return
 
         session = db_manager.get_session()

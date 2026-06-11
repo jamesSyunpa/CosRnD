@@ -252,12 +252,12 @@ class Installer:
         try:
             # Check required files exist
             bin_dir = install_path / "bin"
-            main_exe = bin_dir / "화장품연구관리_v1.0.exe"
+            main_exe = bin_dir / "화장품연구관리_v1.0.3.exe"
             if not main_exe.exists():
                 main_exe = bin_dir / "main.exe"
             
             if not main_exe.exists():
-                logger.error("Application executable (화장품연구관리_v1.0.exe or main.exe) not found in installation")
+                logger.error("Application executable (화장품연구관리_v1.0.3.exe or main.exe) not found in installation")
                 return False
             
             # Check directory structure
@@ -317,7 +317,7 @@ class Installer:
         # 바탕화면 및 시작메뉴 단축아이콘 생성
         try:
             bin_dir = install_path / "bin"
-            target_exe = bin_dir / "화장품연구관리_v1.0.exe"
+            target_exe = bin_dir / "화장품연구관리_v1.0.3.exe"
             if not target_exe.exists():
                 target_exe = bin_dir / "main.exe"
             
@@ -331,7 +331,7 @@ class Installer:
                 if src_icon.exists():
                     shutil.copy2(src_icon, icon_path)
             
-            self.create_shortcuts(target_exe, "화장품연구관리_v1.0", icon_path)
+            self.create_shortcuts(target_exe, "화장품연구관리_v1.0.3", icon_path)
         except Exception as shortcut_err:
             logger.error(f"Failed to create shortcuts during installation: {shortcut_err}")
 
@@ -408,8 +408,8 @@ class Installer:
             ]
             
             install_dir = target_exe.parent.parent # C:\CosRnD
-            uninstall_string = f'"{target_exe.parent / "Setup_화장품연구관리_v1.0.exe"}" --uninstall'
-            if not (target_exe.parent / "Setup_화장품연구관리_v1.0.exe").exists():
+            uninstall_string = f'"{target_exe.parent / "Setup_화장품연구관리_v1.0.3.exe"}" --uninstall'
+            if not (target_exe.parent / "Setup_화장품연구관리_v1.0.3.exe").exists():
                 uninstall_string = f'"{target_exe}" --uninstall'
             
             for hkey in hkeys:
@@ -421,7 +421,7 @@ class Installer:
                         winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
                         winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
                         winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
-                        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "1.0.0")
+                        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "1.0.3")
                         winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "TaesungChem")
                         winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
                         winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)

@@ -22,7 +22,7 @@ CONTENT_H = PAGE_H - MARGIN_T - MARGIN_B
 # Fixed column widths mapping from revised export (A..H)
 COLS = ['A','B','C','D','E','F','G','H']
 # '계량량(kg)' 열을 생산량 옆에 추가: A..I (Ph, 구분, 코드, 원료명, 함량, 생산량, 계량량, 제조공정, 공정검사)
-COL_WIDTHS = [8, 10, 15, 45, 12, 12, 12, 26, 22]
+COL_WIDTHS = [8, 10, 15, 45, 12, 12, 12, 12, 12, 12, 15, 15, 15]
 COL_SUM = sum(COL_WIDTHS)
 COL_PIX = [int(CONTENT_W * (w / COL_SUM)) for w in COL_WIDTHS]
 
@@ -154,39 +154,47 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
     img, draw = new_page()
     y = MARGIN_T
     x = MARGIN_L
+    details = production_data.get('details', {})
 
-    # 1) Title A1:F2 (left area merged)
-    title_w = sum(COL_PIX[:6])
+    # 1) a1:e2 (생산지시서) merged
+    title_w = sum(COL_PIX[:5])  # A-E is indices 0-4
     draw.rectangle([x, y, x + title_w, y + TITLE_H], outline=GRID_COLOR, width=1)
     _draw_text_center(draw, (x, y, x + title_w, y + TITLE_H), "생산지시서", TITLE_FONT)
 
-    # 2) Approval G1:H2: 스탬프 그리드(왼쪽 '결/재' + 상단 '작성/검토/승인' + 하단 서명칸)
-    appr_x = x + title_w
-    appr_w = CONTENT_W - title_w  # G+H 폭
-    # 바깥 테두리
-    draw.rectangle([appr_x, y, appr_x + appr_w, y + TITLE_H], outline=GRID_COLOR, width=2)
-    # 왼쪽 라벨 영역 폭
-    left_w = max(28, int(appr_w * 0.12))
-    # 세로 구분선 (왼쪽 라벨/3분할)
-    draw.line([appr_x + left_w, y, appr_x + left_w, y + TITLE_H], fill=GRID_COLOR, width=2)
-    # 3분할
-    col_w = (appr_w - left_w) // 3
-    draw.line([appr_x + left_w + col_w, y, appr_x + left_w + col_w, y + TITLE_H], fill=GRID_COLOR, width=2)
-    draw.line([appr_x + left_w + col_w*2, y, appr_x + left_w + col_w*2, y + TITLE_H], fill=GRID_COLOR, width=2)
-    # 헤더/서명 구분선: 왼쪽 라벨 칸은 위 칸과 병합되도록 선을 비켜서 그림
-    header_h = int(TITLE_H * 0.55)
-    draw.line([appr_x + left_w, y + header_h, appr_x + appr_w, y + header_h], fill=GRID_COLOR, width=2)
-    # 내부 구분선 없이, 왼쪽 라벨 전체 높이를 반으로 나눠 각 절반의 가운데 정렬
-    _draw_text_center(draw, (appr_x, y, appr_x + left_w, y + TITLE_H//2), '결', BOLD_FONT)
-    _draw_text_center(draw, (appr_x, y + TITLE_H//2, appr_x + left_w, y + TITLE_H), '재', BOLD_FONT)
-    # 헤더 텍스트
-    for i, txt in enumerate(["작성","검토","승인"]):
-        cx0 = appr_x + left_w + i*col_w
-        _draw_text_center(draw, (cx0, y, cx0 + col_w, y + header_h), txt, BOLD_FONT)
+    # 2) f1:f2 (결제방) merged
+    fy1 = y
+    fy2 = y + TITLE_H
+    fx0 = x + sum(COL_PIX[:5])  # F is index 5
+    fx1 = x + sum(COL_PIX[:6])
+    draw.rectangle([fx0, fy1, fx1, fy2], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    f1f2_value = str(details.get('결제방','') or '')
+    if f1f2_value:
+        _draw_text_center(draw, (fx0, fy1, fx1, fy2), "결제방: " + f1f2_value, BOLD_FONT)
+    else:
+        _draw_text_center(draw, (fx0, fy1, fx1, fy2), "결제방", BOLD_FONT)
+    
+    # 3) g1 (작성) g2 (빈칸)
+    gy1_top = y
+    gy1_mid = y + TITLE_H // 2
+    gy1_bottom = y + TITLE_H
+    gx0 = x + sum(COL_PIX[:6])  # G is index 6
+    gx1 = x + sum(COL_PIX[:7])
+    draw.rectangle([gx0, gy1_top, gx1, gy1_mid], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (gx0, gy1_top, gx1, gy1_mid), "작성", BOLD_FONT)
+    draw.rectangle([gx0, gy1_mid, gx1, gy1_bottom], outline=GRID_COLOR, width=1)
+    # 4) h1 (검토) h2 (빈칸)
+    hx0 = x + sum(COL_PIX[:7])  # H is index7
+    hx1 = x + sum(COL_PIX[:8])
+    draw.rectangle([hx0, gy1_top, hx1, gy1_mid], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (hx0, gy1_top, hx1, gy1_mid), "검토", BOLD_FONT)
+    draw.rectangle([hx0, gy1_mid, hx1, gy1_bottom], outline=GRID_COLOR, width=1)
+    #5) i1 (승인) i2 (빈칸)
+    ix0 = x + sum(COL_PIX[:8])  # I is index8
+    ix1 = x + sum(COL_PIX[:9])
+    draw.rectangle([ix0, gy1_top, ix1, gy1_mid], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (ix0, gy1_top, ix1, gy1_mid), "승인", BOLD_FONT)
+    draw.rectangle([ix0, gy1_mid, ix1, gy1_bottom], outline=GRID_COLOR, width=1)
     y += TITLE_H
-
-    # 3) Basic info per revised layout
-    details = production_data.get('details', {})
 
     def ensure_page_space(min_height: int):
         nonlocal img, draw, y
@@ -194,63 +202,62 @@ def render_production_preview_pages(production_data: dict) -> List[Image.Image]:
             pages.append(img)
             img, draw = new_page()
             y = MARGIN_T
-    # Row 3 (제품명 A3:D3, 생산코드 E3:F3+G3 merged, 제조자 H3:I3)
+    # Row3
     ensure_page_space(INFO_ROW_H)
-    # A3 라벨 셀
-    a0 = x + sum(COL_PIX[:0]); a1 = x + sum(COL_PIX[:1])
-    draw.rectangle([a0, y, a1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (a0, y, a1, y + INFO_ROW_H), '제품명', BOLD_FONT)
-    # B3:D3 병합 값 영역
-    bd0 = x + sum(COL_PIX[:1]); bd1 = x + sum(COL_PIX[:4])
-    draw.rectangle([bd0, y, bd1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    # A3: 제품명 label, B3:D3: product name
+    a3x0 = x + sum(COL_PIX[:0]); a3x1 = x + sum(COL_PIX[:1])
+    draw.rectangle([a3x0, y, a3x1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (a3x0, y, a3x1, y + INFO_ROW_H), '제품명', BOLD_FONT)
+    b3x0 = x + sum(COL_PIX[:1]); b3x1 = x + sum(COL_PIX[:4])  # B-D (1-3)
+    draw.rectangle([b3x0, y, b3x1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
     prod_name = str(details.get('제품명','') or '')
-    _draw_text_left_vcenter(draw, (bd0, y, bd1, y + INFO_ROW_H), prod_name, NORMAL_FONT)
-    # E3:F3(+G3 병합) 생산코드
-    e0 = x + sum(COL_PIX[:4]); e1 = x + sum(COL_PIX[:5])
-    draw.rectangle([e0, y, e1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (e0, y, e1, y + INFO_ROW_H), '생산코드', BOLD_FONT)
-    f0 = x + sum(COL_PIX[:5]); g1 = x + sum(COL_PIX[:7])
-    draw.rectangle([f0, y, g1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (f0, y, g1, y + INFO_ROW_H), str(details.get('생산코드','') or ''), NORMAL_FONT)
-    # H3:I3 제조자 (오른쪽으로 1칸 이동)
-    h0 = x + sum(COL_PIX[:7]); h1 = x + sum(COL_PIX[:8])
-    draw.rectangle([h0, y, h1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (h0, y, h1, y + INFO_ROW_H), '제조자', BOLD_FONT)
-    i0 = x + sum(COL_PIX[:8]); i1 = x + sum(COL_PIX[:9])
-    draw.rectangle([i0, y, i1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (i0, y, i1, y + INFO_ROW_H), str(details.get('제조자','') or ''), NORMAL_FONT)
+    _draw_text_left_vcenter(draw, (b3x0, y, b3x1, y + INFO_ROW_H), prod_name, NORMAL_FONT)
+    #6. e3 (생산코드) f3:g3 (생산실제코드)
+    e3x0 = x + sum(COL_PIX[:4]); e3x1 = x + sum(COL_PIX[:5])
+    draw.rectangle([e3x0, y, e3x1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (e3x0, y, e3x1, y + INFO_ROW_H), '생산코드', BOLD_FONT)
+    f3x0 = x + sum(COL_PIX[:5]); f3x1 = x + sum(COL_PIX[:7])  # F-G (5-6)
+    draw.rectangle([f3x0, y, f3x1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    _draw_text_left_vcenter(draw, (f3x0, y, f3x1, y + INFO_ROW_H), str(details.get('생산코드','') or ''), NORMAL_FONT)
+    #7. h3 (제조자) i3 (빈칸)
+    h3x0 = x + sum(COL_PIX[:7]); h3x1 = x + sum(COL_PIX[:8])
+    draw.rectangle([h3x0, y, h3x1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (h3x0, y, h3x1, y + INFO_ROW_H), '제조자', BOLD_FONT)
+    i3x0 = x + sum(COL_PIX[:8]); i3x1 = x + sum(COL_PIX[:9])
+    draw.rectangle([i3x0, y, i3x1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
     y += INFO_ROW_H
 
-    # Row 4: 지시일/제조일/생산량(kg)/수득량
+    # Row4
     ensure_page_space(INFO_ROW_H)
-    # A4 라벨/값
-    ax0 = x + sum(COL_PIX[:0]); ax1 = x + sum(COL_PIX[:1])
-    draw.rectangle([ax0, y, ax1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (ax0, y, ax1, y + INFO_ROW_H), '지시일', BOLD_FONT)
-    bx0 = x + sum(COL_PIX[:1]); bx1 = x + sum(COL_PIX[:2])
-    draw.rectangle([bx0, y, bx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (bx0, y, bx1, y + INFO_ROW_H), str(details.get('지시일', details.get('출력일시','')) or ''), NORMAL_FONT)
-    # C/D
-    cx0 = x + sum(COL_PIX[:2]); cx1 = x + sum(COL_PIX[:3])
-    draw.rectangle([cx0, y, cx1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (cx0, y, cx1, y + INFO_ROW_H), '제조일', BOLD_FONT)
-    dx0 = x + sum(COL_PIX[:3]); dx1 = x + sum(COL_PIX[:4])
-    draw.rectangle([dx0, y, dx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (dx0, y, dx1, y + INFO_ROW_H), str(details.get('제조일','') or ''), NORMAL_FONT)
-    # E/F(+G 병합)
-    ex0 = x + sum(COL_PIX[:4]); ex1 = x + sum(COL_PIX[:5])
-    draw.rectangle([ex0, y, ex1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (ex0, y, ex1, y + INFO_ROW_H), '생산량(kg)', BOLD_FONT)
-    fx0 = x + sum(COL_PIX[:5]); gx1 = x + sum(COL_PIX[:7])
-    draw.rectangle([fx0, y, gx1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (fx0, y, gx1, y + INFO_ROW_H), str(details.get('생산량(kg)','') or ''), NORMAL_FONT)
-    # H/I (수득량을 오른쪽으로 1칸 이동)
-    hx0 = x + sum(COL_PIX[:7]); hx1 = x + sum(COL_PIX[:8])
-    draw.rectangle([hx0, y, hx1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
-    _draw_text_center(draw, (hx0, y, hx1, y + INFO_ROW_H), '수득량', BOLD_FONT)
-    ix0 = x + sum(COL_PIX[:8]); ix1 = x + sum(COL_PIX[:9])
-    draw.rectangle([ix0, y, ix1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
-    _draw_text_left_vcenter(draw, (ix0, y, ix1, y + INFO_ROW_H), str(details.get('수득량','') or ''), NORMAL_FONT)
+    a4x0 = x + sum(COL_PIX[:0]); a4x1 = x + sum(COL_PIX[:1])
+    draw.rectangle([a4x0, y, a4x1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (a4x0, y, a4x1, y + INFO_ROW_H), '지시일', BOLD_FONT)
+    b4x0 = x + sum(COL_PIX[:1]); b4x1 = x + sum(COL_PIX[:2])
+    draw.rectangle([b4x0, y, b4x1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    instruction_date_raw = details.get('지시일', details.get('출력일시',''))
+    if instruction_date_raw and ' ' in str(instruction_date_raw):
+        instruction_date = str(instruction_date_raw).split(' ')[0] 
+    else:
+        instruction_date = instruction_date_raw
+    _draw_text_left_vcenter(draw, (b4x0, y, b4x1, y + INFO_ROW_H), str(instruction_date or ''), NORMAL_FONT)
+    c4x0 = x + sum(COL_PIX[:2]); c4x1 = x + sum(COL_PIX[:3])
+    draw.rectangle([c4x0, y, c4x1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (c4x0, y, c4x1, y + INFO_ROW_H), '제조일', BOLD_FONT)
+    d4x0 = x + sum(COL_PIX[:3]); d4x1 = x + sum(COL_PIX[:4])
+    draw.rectangle([d4x0, y, d4x1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    _draw_text_left_vcenter(draw, (d4x0, y, d4x1, y + INFO_ROW_H), str(details.get('제조일','') or ''), NORMAL_FONT)
+    e4x0 = x + sum(COL_PIX[:4]); e4x1 = x + sum(COL_PIX[:5])
+    draw.rectangle([e4x0, y, e4x1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (e4x0, y, e4x1, y + INFO_ROW_H), '생산량(kg)', BOLD_FONT)
+    f4x0 = x + sum(COL_PIX[:5]); f4x1 = x + sum(COL_PIX[:7])  # F-G merged
+    draw.rectangle([f4x0, y, f4x1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
+    _draw_text_left_vcenter(draw, (f4x0, y, f4x1, y + INFO_ROW_H), str(details.get('생산량(kg)','') or ''), NORMAL_FONT)
+    #8. h4 (수득량) i4 (빈칸)
+    h4x0 = x + sum(COL_PIX[:7]); h4x1 = x + sum(COL_PIX[:8])
+    draw.rectangle([h4x0, y, h4x1, y + INFO_ROW_H], fill=LABEL_FILL, outline=GRID_COLOR, width=1)
+    _draw_text_center(draw, (h4x0, y, h4x1, y + INFO_ROW_H), '수득량', BOLD_FONT)
+    i4x0 = x + sum(COL_PIX[:8]); i4x1 = x + sum(COL_PIX[:9])
+    draw.rectangle([i4x0, y, i4x1, y + INFO_ROW_H], outline=GRID_COLOR, width=1)
     y += INFO_ROW_H
 
     # Spacer

@@ -28,7 +28,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Setup_화장품연구관리_v1.0',
+    name='Setup_화장품연구관리_v1.0.3',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
