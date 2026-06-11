@@ -631,7 +631,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
         lookup_h_scroll.grid(row=1, column=0, sticky='ew')
 
         # 원료명 검색용 스크롤 프레임 (콤보박스 포함)
-        self.lookup_material_frame = ctk.CTkScrollableFrame(result_frame, label_text="")
+        self.lookup_material_frame = ctk.CTkScrollableFrame(result_frame, label_text="", height=400)
         self.lookup_material_frame.grid_columnconfigure(0, weight=0)  # 검색어
         self.lookup_material_frame.grid_columnconfigure(1, weight=0)  # 코드
         self.lookup_material_frame.grid_columnconfigure(2, weight=1)  # 원료명
@@ -784,9 +784,15 @@ class DocumentManagementFrame(ctk.CTkFrame):
         """성분 검색 결과를 검색어별 콤보박스로 표시 (보완 정보: 한글→영문/CAS/기능, 영문→한글/CAS/기능)"""
         self._show_lookup_material_frame()
         
-        # 기존 위젯 제거
+        # 기존 위젯 제거 (CTkComboBox.destroy() 버그 우회: try/except 처리)
         for widget in self.lookup_material_frame.winfo_children():
-            widget.destroy()
+            try:
+                widget.destroy()
+            except Exception:
+                try:
+                    widget.tk.call('destroy', widget._w)
+                except Exception:
+                    pass
             
         session = db_manager.get_session()
         try:
@@ -795,7 +801,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             
             # 헤더 생성
             ctk.CTkLabel(self.lookup_material_frame, text="검색어", font=ctk.CTkFont(weight="bold"), width=150).grid(row=0, column=0, padx=5, pady=5, sticky="w")
-            ctk.CTkLabel(self.lookup_material_frame, text="검색 결과 선택", font=ctk.CTkFont(weight="bold"), width=500).grid(row=0, column=1, padx=5, pady=5, sticky="w")
+            ctk.CTkLabel(self.lookup_material_frame, text="검색 결과 선택", font=ctk.CTkFont(weight="bold"), width=350).grid(row=0, column=1, padx=5, pady=5, sticky="w")
             
             row_idx = 1
             found_count_total = 0
@@ -834,9 +840,11 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 
                 if unique_ingredients:
                     # 콤보박스 값 생성 (검색 유형에 따라 보완 정보 표시)
+                    # 드롭다운 폭 자동 확장 방지: 표시 텍스트를 최대 50자로 제한
+                    _MAX_DISPLAY = 50
                     combo_values = []
-                    combo_data_map = {}  # 콤보박스 텍스트 -> 원본 데이터 매핑
-                    
+                    combo_data_list = []  # 인덱스 기반 원본 데이터 리스트
+
                     for ing in unique_ingredients:
                         if search_type == "성분명(한글)":
                             # 한글 검색 → 영문, CAS, 기능 표시
@@ -847,30 +855,35 @@ class DocumentManagementFrame(ctk.CTkFrame):
                         else:
                             # 전체/CAS No 검색 → 모든 정보 표시
                             display_text = f"{ing.name_ko or '-'} | {ing.name_en or '-'} | CAS: {ing.cas_no or '-'} | 기능: {ing.function or '-'}"
-                        
+
+                        # 표시 텍스트 길이 제한 (드롭다운 폭 고정 목적)
+                        if len(display_text) > _MAX_DISPLAY:
+                            display_text = display_text[:_MAX_DISPLAY] + "…"
+
                         combo_values.append(display_text)
-                        combo_data_map[display_text] = {
+                        combo_data_list.append({
                             "name_ko": ing.name_ko or "",
                             "name_en": ing.name_en or "",
                             "cas_no": ing.cas_no or "",
                             "function": ing.function or ""
-                        }
-                    
-                    combo = ctk.CTkComboBox(self.lookup_material_frame, values=combo_values, width=500)
+                        })
+
+                    combo = ctk.CTkComboBox(self.lookup_material_frame, values=combo_values, width=350)
                     combo.set(combo_values[0])
                     combo.grid(row=row_idx, column=1, padx=5, pady=3, sticky="w")
                     found_count_total += len(unique_ingredients)
-                    
-                    # 내보내기용 저장 (콤보박스 참조 + 데이터 맵)
+
+                    # 내보내기용 저장 (콤보박스 참조 + 인덱스 기반 데이터 리스트)
                     self.lookup_grouped_rows.append({
                         "search_term": term,
                         "combo": combo,
-                        "data_map": combo_data_map,
+                        "combo_values": combo_values,
+                        "data_list": combo_data_list,
                         "has_result": True
                     })
                 else:
                     # 검색 결과 없음
-                    ctk.CTkLabel(self.lookup_material_frame, text="(검색 결과 없음)", text_color="gray", width=500).grid(row=row_idx, column=1, padx=5, pady=3, sticky="w")
+                    ctk.CTkLabel(self.lookup_material_frame, text="(검색 결과 없음)", text_color="gray", width=350).grid(row=row_idx, column=1, padx=5, pady=3, sticky="w")
                     
                     self.lookup_grouped_rows.append({
                         "search_term": term,
@@ -998,7 +1011,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     combo = ctk.CTkComboBox(
                         combo_frame, 
                         values=combo_values, 
-                        width=250,
+                        width=200,
                         state="normal",  # 편집 가능
                         command=lambda val, cl=code_label, nl=name_label: self._on_material_combo_select(val, cl, nl)
                     )
@@ -1026,7 +1039,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     search_combo = ctk.CTkComboBox(
                         search_frame,
                         values=[],
-                        width=250,
+                        width=200,
                         state="normal"  # 편집 가능
                     )
                     search_combo.set(term)  # 기존 검색어를 기본값으로
@@ -1208,11 +1221,16 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     row_num += 1
                     search_term = row_info.get("search_term", "")
                     
-                    if row_info.get("has_result") and row_info.get("combo") and row_info.get("data_map"):
-                        # 콤보박스에서 선택된 값 가져오기
+                    if row_info.get("has_result") and row_info.get("combo") and row_info.get("data_list"):
+                        # 콤보박스에서 선택된 값 가져오기 (인덱스 기반 원본 데이터 조회)
                         selected_value = row_info["combo"].get()
-                        # data_map에서 원본 데이터 조회
-                        ing_data = row_info["data_map"].get(selected_value, {})
+                        combo_values_ref = row_info.get("combo_values", [])
+                        data_list_ref = row_info.get("data_list", [])
+                        try:
+                            idx = combo_values_ref.index(selected_value)
+                            ing_data = data_list_ref[idx]
+                        except (ValueError, IndexError):
+                            ing_data = {}
                         
                         if search_type == "성분명(한글)":
                             # 한글 검색 → 영문, CAS, 기능 내보내기
@@ -2202,7 +2220,6 @@ class DocumentManagementFrame(ctk.CTkFrame):
             # 문제 시 기본 노출 (이후 내부에서 한 번 더 권한 체크)
             ctk.CTkButton(header, text="생산처방 생성", width=90, command=self.create_production_formulation, font=("", 11)).pack(side="left")
         ctk.CTkButton(header, text="공정(제법) 편집", width=100, command=self.edit_production_process, font=("", 11)).pack(side="left", padx=(5,0))
-        ctk.CTkButton(header, text="내보내기", width=75, command=self.export_selected_production_to_excel, font=("", 11)).pack(side="left", padx=(5,0))
 
         # 관리자 이상만 보이는 삭제 버튼 (버튼 군과 같이 좌측에 배치)
         try:
@@ -2631,6 +2648,21 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 ))
         finally:
             session.close()
+        
+        # 첫 번째 항목 선택 및 생산 이력 로드
+        children = self.production_tree.get_children()
+        if children:
+            first_item = children[0]
+            self.production_tree.selection_set(first_item)
+            self.production_tree.see(first_item)
+            # on_production_tree_select를 호출하거나 직접 refresh
+            sel = self.production_tree.selection()
+            if sel:
+                try:
+                    self._selected_production_id = int(sel[0])
+                except Exception:
+                    self._selected_production_id = None
+                self.refresh_production_runs()
 
     def search_production_list(self):
         """단일 검색창(업체/생산코드/제품명)으로 전역 검색합니다."""
@@ -2698,6 +2730,21 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 ))
         finally:
             session.close()
+        
+        # 첫 번째 항목 선택 및 생산 이력 로드
+        children = self.production_tree.get_children()
+        if children:
+            first_item = children[0]
+            self.production_tree.selection_set(first_item)
+            self.production_tree.see(first_item)
+            # on_production_tree_select를 호출하거나 직접 refresh
+            sel = self.production_tree.selection()
+            if sel:
+                try:
+                    self._selected_production_id = int(sel[0])
+                except Exception:
+                    self._selected_production_id = None
+                self.refresh_production_runs()
 
     def clear_production_search(self):
         """검색 입력을 초기화하고 폴더 뷰로 복귀"""
@@ -2909,25 +2956,29 @@ class DocumentManagementFrame(ctk.CTkFrame):
         visc_init_e = ctk.CTkEntry(frm)
         visc_init_e.grid(row=5, column=1, sticky='ew', pady=4)
         
-        ctk.CTkLabel(frm, text='점도(익일)').grid(row=6, column=0, sticky='w', pady=4)
-        visc_next_e = ctk.CTkEntry(frm)
-        visc_next_e.grid(row=6, column=1, sticky='ew', pady=4)
-        
         # pH (당일/익일)
-        ctk.CTkLabel(frm, text='pH(당일)').grid(row=7, column=0, sticky='w', pady=4)
+        ctk.CTkLabel(frm, text='pH(당일)').grid(row=6, column=0, sticky='w', pady=4)
         ph_init_e = ctk.CTkEntry(frm)
-        ph_init_e.grid(row=7, column=1, sticky='ew', pady=4)
+        ph_init_e.grid(row=6, column=1, sticky='ew', pady=4)
+        
+        ctk.CTkLabel(frm, text='점도(익일)').grid(row=7, column=0, sticky='w', pady=4)
+        visc_next_e = ctk.CTkEntry(frm)
+        visc_next_e.grid(row=7, column=1, sticky='ew', pady=4)
         
         ctk.CTkLabel(frm, text='pH(익일)').grid(row=8, column=0, sticky='w', pady=4)
         ph_next_e = ctk.CTkEntry(frm)
         ph_next_e.grid(row=8, column=1, sticky='ew', pady=4)
 
-        ctk.CTkLabel(frm, text='비고').grid(row=9, column=0, sticky='nw', pady=4)
+        ctk.CTkLabel(frm, text='결제방').grid(row=9, column=0, sticky='w', pady=4)
+        payment_room_e = ctk.CTkEntry(frm)
+        payment_room_e.grid(row=9, column=1, sticky='ew', pady=4)
+
+        ctk.CTkLabel(frm, text='비고').grid(row=10, column=0, sticky='nw', pady=4)
         notes_t = ctk.CTkTextbox(frm, height=80)
-        notes_t.grid(row=9, column=1, sticky='nsew', pady=4)
+        notes_t.grid(row=10, column=1, sticky='nsew', pady=4)
 
         btns = ctk.CTkFrame(frm, fg_color='transparent')
-        btns.grid(row=10, column=0, columnspan=2, sticky='e', pady=(10,0))
+        btns.grid(row=11, column=0, columnspan=2, sticky='e', pady=(10,0))
 
         def save_run():
             session = db_manager.get_session()
@@ -2951,6 +3002,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     viscosity_next_day=visc_next_e.get().strip() or None,
                     ph_initial=ph_init_e.get().strip() or None,
                     ph_next_day=ph_next_e.get().strip() or None,
+                    payment_room=payment_room_e.get().strip() or None,
                     notes=notes_t.get('1.0','end').strip() or None,
                 )
                 session.add(r)
@@ -3078,29 +3130,34 @@ class DocumentManagementFrame(ctk.CTkFrame):
             visc_init_e.grid(row=5, column=1, sticky='ew', pady=4)
             visc_init_e.insert(0, run.viscosity_initial or '')
             
-            ctk.CTkLabel(frm, text='점도(익일)').grid(row=6, column=0, sticky='w', pady=4)
-            visc_next_e = ctk.CTkEntry(frm)
-            visc_next_e.grid(row=6, column=1, sticky='ew', pady=4)
-            visc_next_e.insert(0, run.viscosity_next_day or '')
-            
             # pH (당일/익일)
-            ctk.CTkLabel(frm, text='pH(당일)').grid(row=7, column=0, sticky='w', pady=4)
+            ctk.CTkLabel(frm, text='pH(당일)').grid(row=6, column=0, sticky='w', pady=4)
             ph_init_e = ctk.CTkEntry(frm)
-            ph_init_e.grid(row=7, column=1, sticky='ew', pady=4)
+            ph_init_e.grid(row=6, column=1, sticky='ew', pady=4)
             ph_init_e.insert(0, run.ph_initial or '')
+            
+            ctk.CTkLabel(frm, text='점도(익일)').grid(row=7, column=0, sticky='w', pady=4)
+            visc_next_e = ctk.CTkEntry(frm)
+            visc_next_e.grid(row=7, column=1, sticky='ew', pady=4)
+            visc_next_e.insert(0, run.viscosity_next_day or '')
             
             ctk.CTkLabel(frm, text='pH(익일)').grid(row=8, column=0, sticky='w', pady=4)
             ph_next_e = ctk.CTkEntry(frm)
             ph_next_e.grid(row=8, column=1, sticky='ew', pady=4)
             ph_next_e.insert(0, run.ph_next_day or '')
 
-            ctk.CTkLabel(frm, text='비고').grid(row=9, column=0, sticky='nw', pady=4)
+            ctk.CTkLabel(frm, text='결제방').grid(row=9, column=0, sticky='w', pady=4)
+            payment_room_e = ctk.CTkEntry(frm)
+            payment_room_e.grid(row=9, column=1, sticky='ew', pady=4)
+            payment_room_e.insert(0, run.payment_room or '')
+
+            ctk.CTkLabel(frm, text='비고').grid(row=10, column=0, sticky='nw', pady=4)
             notes_t = ctk.CTkTextbox(frm, height=80)
-            notes_t.grid(row=9, column=1, sticky='nsew', pady=4)
+            notes_t.grid(row=10, column=1, sticky='nsew', pady=4)
             notes_t.insert('1.0', run.notes or '')
 
             btns = ctk.CTkFrame(frm, fg_color='transparent')
-            btns.grid(row=10, column=0, columnspan=2, sticky='e', pady=(10,0))
+            btns.grid(row=11, column=0, columnspan=2, sticky='e', pady=(10,0))
 
             def save_edit():
                 try:
@@ -3121,6 +3178,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     run.viscosity_next_day = visc_next_e.get().strip() or None
                     run.ph_initial = ph_init_e.get().strip() or None
                     run.ph_next_day = ph_next_e.get().strip() or None
+                    run.payment_room = payment_room_e.get().strip() or None
                     run.notes = notes_t.get('1.0','end').strip() or None
                     
                     session.commit()
@@ -3284,6 +3342,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 "LAB NO.": prod.lab_no or "",
                 "차수": prod.revision or "",
                 "거래처": client_name or "",
+                "결제방": run.payment_room or prod.payment_room or "",
                 "생산량(kg)": f"{run_qty_kg:,.1f} kg",
                 "제조일": run.run_date.strftime('%Y-%m-%d') if run.run_date else "",
                 "상태": prod.status or "",
@@ -3358,12 +3417,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             win = ctk.CTkToplevel(self)
             win.title(f"생산처방 편집 - {prod.product_name or ''} ({prod.revision or ''})")
-            win.geometry("700x500")  # 933 * 3/4 = 700 (너비를 1/4 더 축소)
-            win.resizable(True, True)  # 크기 조절 및 최대화 버튼 활성화
-            win.minsize(600, 400)  # 최소 크기만 제한
-            # win.transient(self)  # 최대화 버튼을 활성화하기 위해 transient 제거
+            win.geometry("1100x650")  # 창 크기를 키워서 모든 요소가 보이게 함
+            win.resizable(True, True)
+            win.minsize(950, 550)  # 최소 크기 키우기
             win.grab_set()
-            win.after(100, lambda: print(f"[WINDOW SIZE] 생산처방 편집 | geometry: {win.winfo_width()}x{win.winfo_height()} | requested: 700x500"))
 
             # 상단 정보 + 버튼 (편집 가능)
             top = ctk.CTkFrame(win, fg_color="transparent")
@@ -3413,6 +3470,62 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 effective_date_entry.set_date(prod.effective_date)
             effective_date_entry.pack(side="left", padx=2)
 
+            # 행 3: 결제방 + 버튼들
+            row3 = ctk.CTkFrame(info_left, fg_color="transparent")
+            row3.pack(anchor="w", fill="x", pady=2)
+            
+            ctk.CTkLabel(row3, text="결제방: ", font=ctk.CTkFont(size=11)).pack(side="left")
+            payment_room_entry = ctk.CTkEntry(row3, width=200)
+            payment_room_entry.insert(0, prod.payment_room or "")
+            payment_room_entry.pack(side="left", padx=2)
+            
+            # 버튼들
+            def save_edits():
+                session_save = db_manager.get_session()
+                try:
+                    p_update = session_save.query(ProductionFormulation).filter_by(id=prod.id).first()
+                    if p_update:
+                        p_update.product_name = product_name_entry.get().strip() or p_update.product_name
+                        p_update.revision = revision_entry.get().strip() or p_update.revision
+                        p_update.production_code = production_code_entry.get().strip() or p_update.production_code
+                        p_update.client_name = client_name_entry.get().strip() or p_update.client_name
+                        p_update.payment_room = payment_room_entry.get().strip() or p_update.payment_room
+                        try:
+                            new_kg = float(base_weight_entry.get().strip())
+                            p_update.base_weight_g = new_kg * 1000.0
+                        except Exception:
+                            pass
+                        try:
+                            new_date = effective_date_entry.get_date()
+                            p_update.effective_date = new_date
+                        except Exception:
+                            pass
+                        session_save.commit()
+                        prod.product_name = p_update.product_name
+                        prod.revision = p_update.revision
+                        prod.production_code = p_update.production_code
+                        prod.client_name = p_update.client_name
+                        prod.payment_room = p_update.payment_room
+                        prod.base_weight_g = p_update.base_weight_g
+                        prod.effective_date = p_update.effective_date
+                        messagebox.showinfo("성공", "생산처방 정보가 저장되었습니다.", parent=win)
+                        self.refresh_production_list()
+                        populate_recipe_items()
+                    else:
+                        messagebox.showerror("오류", "데이터를 찾을 수 없습니다.", parent=win)
+                except Exception as e:
+                    session_save.rollback()
+                    messagebox.showerror("오류", f"저장 실패: {e}", parent=win)
+                finally:
+                    session_save.close()
+            
+            ctk.CTkButton(row3, text="💾 저장", width=100, fg_color="blue",
+                         command=save_edits).pack(side="left", padx=(15, 3))
+            ctk.CTkButton(row3, text="🖨 인쇄 미리보기", width=120,
+                         command=self.print_preview_selected_production).pack(side="left", padx=3)
+            ctk.CTkButton(row3, text="닫기", width=80, fg_color="gray",
+                         command=win.destroy).pack(side="left", padx=3)
+
             # Status ComboBox Logic
             try:
                 # 1. Determine allowed status options based on role
@@ -3448,7 +3561,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 if not final_options:
                     final_options = [current_status]
 
-                ctk.CTkLabel(line2_frame, text=" | 상태: ", font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
+                ctk.CTkLabel(row2, text=" | 상태: ", font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
                 
                 def on_status_change(choice):
                     if choice == current_status:
@@ -3486,67 +3599,15 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     finally:
                         session_update.close()
 
-                status_combo = ctk.CTkComboBox(line2_frame, values=final_options, width=100, height=22, font=("", 11), command=on_status_change)
+                status_combo = ctk.CTkComboBox(row2, values=final_options, width=100, height=22, font=("", 11), command=on_status_change)
                 status_combo.set(current_status)
                 status_combo.pack(side="left", padx=(5,0))
                 
             except Exception as e:
                 print(f"Status Combo Error: {e}")
-                ctk.CTkLabel(line2_frame, text=f" | 상태: {prod.status or ''}", font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
+                ctk.CTkLabel(row2, text=f" | 상태: {prod.status or ''}", font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
             
-            # 오른쪽: 액션 버튼
-            btn_right = ctk.CTkFrame(top, fg_color="transparent")
-            btn_right.pack(side="right")
-            
-            def save_edits():
-                session_save = db_manager.get_session()
-                try:
-                    p_update = session_save.query(ProductionFormulation).filter_by(id=prod.id).first()
-                    if p_update:
-                        p_update.product_name = product_name_entry.get().strip() or p_update.product_name
-                        p_update.revision = revision_entry.get().strip() or p_update.revision
-                        p_update.production_code = production_code_entry.get().strip() or p_update.production_code
-                        p_update.client_name = client_name_entry.get().strip() or p_update.client_name
-                        try:
-                            new_kg = float(base_weight_entry.get().strip())
-                            p_update.base_weight_g = new_kg * 1000.0
-                        except Exception:
-                            pass
-                        try:
-                            new_date = effective_date_entry.get_date()
-                            p_update.effective_date = new_date
-                        except Exception:
-                            pass
-                        session_save.commit()
-                        prod.product_name = p_update.product_name
-                        prod.revision = p_update.revision
-                        prod.production_code = p_update.production_code
-                        prod.client_name = p_update.client_name
-                        prod.base_weight_g = p_update.base_weight_g
-                        prod.effective_date = p_update.effective_date
-                        messagebox.showinfo("성공", "생산처방 정보가 저장되었습니다.", parent=win)
-                        self.refresh_production_list()
-                        populate_recipe_items()
-                    else:
-                        messagebox.showerror("오류", "데이터를 찾을 수 없습니다.", parent=win)
-                except Exception as e:
-                    session_save.rollback()
-                    messagebox.showerror("오류", f"저장 실패: {e}", parent=win)
-                finally:
-                    session_save.close()
-            
-            def quick_export():
-                self.export_selected_production_to_excel()
 
-            # 일반 미리보기는 제거하고, 인쇄 미리보기만 제공
-            ctk.CTkButton(btn_right, text="💾 저장", width=100, fg_color="blue",
-                         command=save_edits).pack(side="left", padx=3)
-            ctk.CTkButton(btn_right, text="🖨 인쇄 미리보기", width=120,
-                         command=self.print_preview_selected_production).pack(side="left", padx=3)
-            ctk.CTkButton(btn_right, text="📊 엑셀 내보내기", width=130, fg_color="green",
-                         command=quick_export).pack(side="left", padx=3)
-            ctk.CTkButton(btn_right, text="닫기", width=80, fg_color="gray",
-                         command=win.destroy).pack(side="left", padx=3)
 
             # 메인 컨테이너: 레시피만 표시 (통합 뷰)
             main_container = ctk.CTkFrame(win)
@@ -3757,12 +3818,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
             populate_recipe_items()
             
-            # UI 생성 후 창 크기 강제 설정 및 메인 창 중앙 배치
+            # UI 생성 후 메인 창 중앙 배치
             win.update_idletasks()
-            win.geometry("700x500")
-            win.update()
-            
-            # 메인 창 중앙에 배치
             parent = self
             parent_x = parent.winfo_rootx()
             parent_y = parent.winfo_rooty()
@@ -4414,6 +4471,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 "LAB NO.": prod.lab_no or "",
                 "차수": prod.revision or "",
                 "거래처": client_name or "",
+                "결제방": prod.payment_room or "",
                 "생산량(kg)": f"{(base_w/1000):,.1f} kg" if isinstance(base_w, (int, float)) else (base_w or ""),
                 "제조일": prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else "",
                 "상태": prod.status or "",
@@ -4642,6 +4700,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 "LAB NO.": prod.lab_no or "",
                 "차수": prod.revision or "",
                 "거래처": client_name or "",
+                "결제방": prod.payment_room or "",
                 "생산량(kg)": f"{(base_w/1000):,.1f} kg" if isinstance(base_w, (int, float)) else (base_w or ""),
                 "제조일": prod.effective_date.strftime('%Y-%m-%d') if prod.effective_date else "",
                 "상태": prod.status or "",
@@ -7712,8 +7771,31 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             else:
                 # === 아이템별 폴더 표시 (특정 업체 선택됨) ===
                 self._load_item_folders(session, search_term)
+        except Exception as db_err:
+            # 동기화 직후 DB 연결 문제 등으로 오류 발생 시 안내 표시
+            print(f"[처방폴더] load_folders DB 오류: {db_err}")
+            try:
+                # 폴더 뷰 초기화 후 안내 메시지 표시
+                for widget in self.folder_view.winfo_children():
+                    try:
+                        widget.destroy()
+                    except Exception:
+                        pass
+                import customtkinter as ctk
+                ctk.CTkLabel(
+                    self.folder_view,
+                    text="⚠️ 데이터베이스 연결이 일시적으로 불안정합니다.\n잠시 후 다시 시도해주세요.",
+                    font=ctk.CTkFont(size=14),
+                    text_color="orange"
+                ).pack(pady=50)
+            except Exception:
+                pass
         finally:
-            session.close()
+            try:
+                session.close()
+            except Exception:
+                pass
+
     
     def _load_client_folders(self, session, search_term=""):
         """업체별 폴더 표시"""
@@ -8139,6 +8221,12 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
 
         session = db_manager.get_session()
         try:
+            # 삭제 전 현재 상태 기록
+            current_view = self.current_view
+            current_folder_name = self.current_folder_name
+            current_client_id = self.current_client_id
+            current_view_level = self.current_view_level
+            
             # 삭제 전 관련 데이터 확인
             related_data = []
             backup_data = []
@@ -8217,6 +8305,26 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             if not messagebox.askyesno(self.texts['delete_confirm'], confirm_msg, parent=self):
                 return
             
+            # 삭제 전 현재 폴더/업체에 남아있을 처방 개수 예측
+            # selected_ids 중에서 현재 폴더/업체에 속한 것만 세기
+            if current_view == "files" and current_folder_name:
+                # 현재 폴더/업체에 있는 모든 처방의 ID를 가져오기
+                pre_delete_query = session.query(Formulation.id).filter_by(experiment_name=current_folder_name)
+                if current_client_id:
+                    pre_delete_query = pre_delete_query.filter_by(oem_odm_client_id=current_client_id)
+                else:
+                    pre_delete_query = pre_delete_query.filter(
+                        or_(
+                            Formulation.oem_odm_client_id == None,
+                            Formulation.oem_odm_client_id == 0
+                        )
+                    )
+                current_form_ids = [id for (id,) in pre_delete_query.all()]
+                # 선택된 ID 중에서 현재 폴더에 속한 개수 세기
+                delete_count_in_folder = sum(1 for id in selected_ids if id in current_form_ids)
+                pre_delete_count = len(current_form_ids)
+                expected_remaining = pre_delete_count - delete_count_in_folder
+            
             # 백업 수행
             if backup_data:
                 import os
@@ -8252,7 +8360,25 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             messagebox.showinfo(self.texts['success'], success_msg, parent=self)
             self._selected_formulation_id = None # ID 초기화
             self.update_button_states() # 버튼 상태 업데이트
-            self.load_formulations()
+            
+            # 삭제 후 처리: 현재 뷰가 files 이고 해당 폴더에 더이상 처방이 없으면 상위 폴더로 돌아가기
+            if current_view == "files" and current_folder_name:
+                if expected_remaining <= 0:
+                    # 남아있는 처방이 없으면 상위 뷰로 돌아가기
+                    self.current_view = "folders"
+                    self.show_folder_view()
+                    
+                    # 상위 뷰 로드
+                    if current_view_level == "item":
+                        self.load_folders(is_initial_load=False)
+                    else:
+                        self.load_folders(is_initial_load=False)
+                else:
+                    # 남아있는 처방이 있으면 그냥 리프레시
+                    self.load_formulations(maintain_position=True)
+            else:
+                # 폴더 뷰일 경우 그냥 리프레시
+                self.load_formulations(maintain_position=True)
 
         except Exception as e:
             session.rollback()

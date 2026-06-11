@@ -261,6 +261,7 @@ class ProductionFormulation(Base):
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     client_name = Column(String(255))  # 업체명 (타겟 거래처 또는 OEM/ODM 거래처)
+    payment_room = Column(String(255))  # 결제방
 
     # 레시피 스냅샷(JSON): order, phase, code, name, ratio, amount 등 고정 저장
     items_snapshot = Column(Text)
@@ -297,6 +298,7 @@ class ProductionRun(Base):
     lot_no = Column(String(100))
     quantity_g = Column(Float)
     notes = Column(Text)
+    payment_room = Column(String(255))  # 결제방
     
     # 물성치 필드 추가
     specific_gravity = Column(String(50))  # 비중

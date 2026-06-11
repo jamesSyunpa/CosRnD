@@ -284,6 +284,7 @@ def get_persistent_config_path(app_dir_name: str = 'CosRnD') -> str:
                 default_content = f"""[Paths]
 excel_dir = {default_excel_dir}
 shared_db_path = {default_db_dir}
+database_dir = {default_db_dir}
 
 [Database]
 initialized = False
@@ -316,6 +317,7 @@ def safe_import_modules():
     """빌드 환경에서 안전하게 모듈을 임포트합니다."""
     global get_texts, _translation, LoginWindow, SettingsManagementFrame
     global QualityManagementFrame, DataManagementFrame, HomeFrame
+    global DocumentManagementFrame
     
     try:
         # 경로 설정 (빌드 환경 고려)
@@ -333,6 +335,7 @@ def safe_import_modules():
         from modules.quality_management import QualityManagementFrame
         from modules.data_management import DataManagementFrame
         from modules.home_frame import HomeFrame
+        from modules.document_management import DocumentManagementFrame
         
         print("[DEBUG] 모든 모듈 임포트 성공")
         return True
@@ -350,7 +353,8 @@ def safe_import_modules():
                 ('settings_management', 'SettingsManagementFrame'),
                 ('quality_management', 'QualityManagementFrame'),
                 ('data_management', 'DataManagementFrame'),
-                ('home_frame', 'HomeFrame')
+                ('home_frame', 'HomeFrame'),
+                ('document_management', 'DocumentManagementFrame')
             ]
             
             for module_name, class_name in modules_to_import:
@@ -1046,6 +1050,10 @@ class App(ctk.CTk):
                 if self.handle_restart_db_sync():
                     print("=== 재시작 DB 동기화 완료 ===")
                 
+                # 재시작 시 DB 이동 처리
+                if self.handle_restart_db_move():
+                    print("=== 재시작 DB 이동 완료 ===")
+                
                 db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)
                 print("=== 데이터베이스 초기화 완료 ===\n")
                 return True
@@ -1105,6 +1113,20 @@ class App(ctk.CTk):
                     self.show_sync_completed_message = True
                 else:
                     self.show_sync_completed_message = False
+                
+                # DB 작업 완료/오류 알림 확인
+                if os.environ.get('DB_OPERATION_ERROR'):
+                    self.db_operation_error = os.environ['DB_OPERATION_ERROR']
+                    del os.environ['DB_OPERATION_ERROR']
+                else:
+                    self.db_operation_error = None
+                
+                if os.environ.get('DB_OPERATION_COMPLETED'):
+                    self.db_operation_message = os.environ['DB_OPERATION_MESSAGE']
+                    del os.environ['DB_OPERATION_COMPLETED']
+                    del os.environ['DB_OPERATION_MESSAGE']
+                else:
+                    self.db_operation_message = None
                 
                 # 항상 로그인 창 표시 (사용자가 직접 회원가입 버튼 클릭)
                 self.show_login_window()
@@ -1346,6 +1368,24 @@ class App(ctk.CTk):
                         parent=self
                     ))
                     self.show_sync_completed_message = False
+                
+                # DB 작업 완료 메시지 표시
+                if hasattr(self, 'db_operation_message') and self.db_operation_message:
+                    self.after(1000, lambda: messagebox.showinfo(
+                        "작업 완료", 
+                        self.db_operation_message, 
+                        parent=self
+                    ))
+                    self.db_operation_message = None
+                
+                # DB 작업 오류 메시지 표시
+                if hasattr(self, 'db_operation_error') and self.db_operation_error:
+                    self.after(1000, lambda: messagebox.showerror(
+                        "작업 오류", 
+                        f"데이터베이스 작업 중 오류가 발생했습니다:\n{self.db_operation_error}", 
+                        parent=self
+                    ))
+                    self.db_operation_error = None
                 
                 if self.current_user.is_admin:
                     self.start_db_sync_check()
@@ -1883,6 +1923,9 @@ class App(ctk.CTk):
         tab_name = None
         if '/' in name:
             frame_name, tab_name = name.split('/', 1)
+        
+        # 현재 선택된 프레임과 탭 기록
+        self.current_frame = name
 
         # 지연 초기화(Lazy Loading) 적용
         frame = self.get_or_create_frame(frame_name)
@@ -2302,6 +2345,139 @@ class App(ctk.CTk):
             print(f"[재시작-DB동기화] 처리 중 오류: {e}")
             return False
 
+    def handle_restart_db_move(self):
+        """재시작 시 DB를 새 경로로 이동하는 작업을 처리합니다"""
+        try:
+            move_required = os.environ.get('DB_MOVE_REQUIRED')
+            new_db_path = os.environ.get('DB_MOVE_TARGET_DB')
+            new_excel_path = os.environ.get('DB_MOVE_TARGET_EXCEL')
+            
+            if move_required == 'True' and new_db_path and new_excel_path:
+                print(f"[재시작-DB이동] DB 이동 처리 시작: {new_db_path}, Excel: {new_excel_path}")
+                
+                # 환경 변수 정리
+                for key in ['DB_MOVE_REQUIRED', 'DB_MOVE_TARGET_DB', 'DB_MOVE_TARGET_EXCEL']:
+                    if key in os.environ:
+                        del os.environ[key]
+                
+                current_db_path = db_manager.db_path
+                db_backup_path = f"{current_db_path}.backup"
+                
+                # 기존 DB 연결 해제
+                try:
+                    db_manager.dispose_engine()
+                    print("[재시작-DB이동] 기존 DB 연결 해제 완료")
+                except Exception as e:
+                    print(f"[재시작-DB이동] DB 연결 해제 중 오류: {e}")
+                
+                # 잠시 대기 (파일 잠금 해제)
+                import time
+                import shutil
+                time.sleep(1.5)
+                
+                # 백업 생성
+                shutil.copy2(current_db_path, db_backup_path)
+                print(f"[재시작-DB이동] 백업 생성 완료: {db_backup_path}")
+                
+                # 대상 디렉토리 생성
+                target_dir = os.path.dirname(new_db_path)
+                os.makedirs(target_dir, exist_ok=True)
+                print(f"[재시작-DB이동] 대상 디렉토리 생성 완료: {target_dir}")
+                
+                # 파일 이동 (copy + delete)
+                shutil.copy2(current_db_path, new_db_path)
+                print(f"[재시작-DB이동] DB 파일 복사 완료: {new_db_path}")
+                
+                # 원본 파일 삭제
+                os.remove(current_db_path)
+                print(f"[재시작-DB이동] 원본 DB 파일 삭제 완료")
+                
+                # 파일 속성 정상화 (읽기 전용/숨김 파일 해제)
+                from database.db_manager import ensure_file_accessible
+                ensure_file_accessible(new_db_path)
+                print("[재시작-DB이동] 새 DB 파일 속성 정상화 완료")
+                
+                # 설정 저장 (database_dir와 shared_db_path 둘 다 설정)
+                config = configparser.ConfigParser(interpolation=None)
+                config.read(CONFIG_FILE_PATH, encoding='utf-8')
+                if not config.has_section('Paths'):
+                    config.add_section('Paths')
+                config.set('Paths', 'database_dir', target_dir)
+                config.set('Paths', 'shared_db_path', target_dir)
+                config.set('Paths', 'excel_dir', new_excel_path)
+                with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
+                    config.write(f)
+                
+                print("[재시작-DB이동] 설정 저장 완료")
+                
+                # 백업 삭제
+                if os.path.exists(db_backup_path):
+                    try:
+                        os.remove(db_backup_path)
+                        print("[재시작-DB이동] 백업 파일 삭제 완료")
+                    except Exception:
+                        pass
+                
+                os.environ['DB_OPERATION_COMPLETED'] = 'move'
+                os.environ['DB_OPERATION_MESSAGE'] = f"DB가 새 경로로 이동되었습니다: {new_db_path}"
+                
+                return True
+                
+            return False
+        except Exception as e:
+            print(f"[재시작-DB이동] 처리 중 오류: {e}")
+            os.environ['DB_OPERATION_ERROR'] = str(e)
+            return False
+
+    def restart_app(self, save_state=False, **env_vars):
+        """현재 상태를 저장한 뒤 프로그램을 재시작합니다 (환경변수로 작업 전달)
+        
+        Args:
+            save_state: 작업 상태를 저장하고 복원할지 여부 (기본값: False)
+        """
+        try:
+            print(f"[Restart] 프로그램 재시작 준비 중... 환경변수: {env_vars}")
+            
+            # 1. 필요시 현재 상태 저장
+            if save_state:
+                self.save_working_state()
+            
+            # 2. DB 연결 해제
+            db_manager.dispose_engine()
+            print("[Restart] DB 연결 해제 완료")
+            
+            # 3. 현재 사용자 정보 저장 (자동 로그인용)
+            if self.current_user:
+                os.environ['APP_RESTARTING'] = 'True'
+                os.environ['RESTART_USER_ID'] = str(self.current_user.id)
+                if save_state:
+                    os.environ['RESTORE_STATE'] = 'True'
+            
+            # 4. 전달받은 환경변수 설정
+            for key, value in env_vars.items():
+                os.environ[key] = str(value)
+            
+            # 5. 새 프로세스 시작
+            import subprocess
+            import sys
+            
+            if getattr(sys, 'frozen', False):
+                # PyInstaller로 빌드된 경우
+                exe_path = sys.executable
+                print(f"[Restart] 실행 파일 경로: {exe_path}")
+                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path))
+            else:
+                # 개발 환경 (Python 스크립트)
+                print(f"[Restart] Python 스크립트 재시작: {sys.argv}")
+                subprocess.Popen([sys.executable] + sys.argv, cwd=os.path.dirname(os.path.abspath(__file__)))
+            
+            # 6. 현재 프로세스 종료
+            self.after(100, self.destroy)
+            
+        except Exception as e:
+            print(f"[Restart] 재시작 중 오류: {e}")
+            messagebox.showerror("재시작 오류", f"프로그램을 재시작할 수 없습니다:\n{e}", parent=self)
+
     def save_working_state(self):
         """현재 화면 상태와 입력값을 로컬에 백업합니다."""
         if not self.current_user:
@@ -2313,6 +2489,7 @@ class App(ctk.CTk):
                 "username": self.current_user.username,
                 "timestamp": datetime.now().isoformat(),
                 "recent_actions": list(self.recent_actions),
+                "current_frame": getattr(self, 'current_frame', FRAME_HOME),
                 "frames": {}
             }
             # 각 프레임이 상태 저장을 지원하는 경우 상태 정보를 수집
@@ -2326,12 +2503,22 @@ class App(ctk.CTk):
             state_file = os.path.join(application_path, 'temp_state.json')
             with open(state_file, 'w', encoding='utf-8') as f:
                 json.dump(state, f, ensure_ascii=False, indent=4)
-            print(f"[State] 현재 작업 상태 백업 완료: {state_file}")
+            print(f"[State] 현재 작업 상태 백업 완료: {state_file}, 프레임: {state['current_frame']}")
         except Exception as e:
             print(f"[State] 작업 상태 백업 중 오류: {e}")
 
     def restore_working_state(self) -> bool:
-        """이전 저장된 작업 상태를 복구합니다."""
+        """이전 저장된 작업 상태를 복구합니다 (RESTORE_STATE 환경변수가 True일 때만)"""
+        if os.environ.get('RESTORE_STATE') != 'True':
+            state_file = os.path.join(application_path, 'temp_state.json')
+            if os.path.exists(state_file):
+                try:
+                    os.remove(state_file)
+                    print("[State] 기존 상태 파일 삭제 (RESTORE_STATE가 False이므로)")
+                except Exception:
+                    pass
+            return False
+        
         state_file = os.path.join(application_path, 'temp_state.json')
         if not os.path.exists(state_file):
             return False
@@ -2353,12 +2540,16 @@ class App(ctk.CTk):
             # 각 프레임 상태를 지연 복원하기 위해 변수에 저장
             self.pending_frame_states = state.get("frames", {})
             
-            # 시작은 무조건 홈 화면에서 시작하도록 설정
-            self.select_frame_by_name(FRAME_HOME)
+            # 저장된 프레임으로 복원 (after로 지연 실행)
+            saved_frame = state.get("current_frame", FRAME_HOME)
+            print(f"[State] 저장된 프레임으로 복원 예정: {saved_frame}")
+            self.after(100, lambda: self.select_frame_by_name(saved_frame))
                 
             # 복구 완료 후 파일 삭제
             try:
                 os.remove(state_file)
+                if 'RESTORE_STATE' in os.environ:
+                    del os.environ['RESTORE_STATE']
             except Exception as e:
                 print(f"[State] 임시 상태 파일 삭제 실패: {e}")
                 
@@ -2369,11 +2560,8 @@ class App(ctk.CTk):
 
     def on_closing(self):
         """프로그램이 종료될 때 호출되는 함수입니다."""
-        print(f"{datetime.now()}: 프로그램 종료 중... 활동 기록 저장 및 상태 백업")
+        print(f"{datetime.now()}: 프로그램 종료 중...")
         try:
-            # 0. 현재 상태 로컬 백업
-            self.save_working_state()
-
             # 1. DB 동기화 타이머 중지
             self.stop_db_sync_check()
             
@@ -2600,7 +2788,7 @@ class App(ctk.CTk):
                     return
                 
                 # 2. 현재 버전 정보 획득
-                current_version = "v61"  # 현재 버전 상수
+                current_version = "v1.0.3"  # 현재 버전 상수
                 try:
                     version_path = os.path.join(application_path, 'VERSION')
                     if os.path.exists(version_path):
@@ -3432,7 +3620,7 @@ if __name__ == "__main__":
     # 윈도우 작업표시줄 아이콘 정합성을 위한 AppUserModelID 설정
     try:
         import ctypes
-        myappid = 'TaesungChem.CosRnD.MainApp.v1.0'
+        myappid = 'TaesungChem.CosRnD.MainApp.v1.0.3'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception as appid_err:
         print(f"[STARTUP] AppUserModelID 설정 실패: {appid_err}")

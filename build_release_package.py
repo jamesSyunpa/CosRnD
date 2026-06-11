@@ -12,20 +12,26 @@ def run_pyinstaller(spec_path):
     print(f"[Build] PyInstaller finished for: {spec_path}")
 
 def main():
-    print("=== CosRnD v1.0 Packaging Build Starting ===")
+    print("=== CosRnD v1.0.3 Packaging Build Starting ===")
     
     current_dir = os.path.dirname(os.path.abspath(__file__))
     dist_dir = os.path.join(current_dir, "dist")
     
     # 1. Build main application
-    main_spec = os.path.join(current_dir, "build_scripts", "화장품연구관리_v1.0.spec")
+    main_spec = os.path.join(current_dir, "build_scripts", "화장품연구관리_v1.0.3.spec")
     run_pyinstaller(main_spec)
     
-    app_folder = os.path.join(dist_dir, "화장품연구관리_v1.0")
+    app_folder = os.path.join(dist_dir, "화장품연구관리_v1.0.3")
     if not os.path.exists(app_folder):
         print(f"[Error] Built folder not found: {app_folder}")
         return
         
+    # 복사: 빌드 폴더 내에 VERSION 파일이 포함되도록 shutil.copy2 처리
+    version_src = os.path.join(current_dir, "VERSION")
+    if os.path.exists(version_src):
+        print(f"[Processing] Copying VERSION to {app_folder}")
+        shutil.copy2(version_src, os.path.join(app_folder, "VERSION"))
+
     # 2. Compress the built app folder to app.zip
     zip_path = os.path.join(dist_dir, "app.zip")
     print(f"[Processing] Packaging {zip_path}...")
@@ -42,11 +48,11 @@ def main():
                 
     print(f"[Success] Compression complete: {zip_path}")
     
-    # 3. Build Setup_화장품연구관리_v1.0.exe
+    # 3. Build Setup_화장품연구관리_v1.0.3.exe
     setup_spec = os.path.join(current_dir, "build_scripts", "setup_installer.spec")
     run_pyinstaller(setup_spec)
     
-    setup_exe = os.path.join(dist_dir, "Setup_화장품연구관리_v1.0.exe")
+    setup_exe = os.path.join(dist_dir, "Setup_화장품연구관리_v1.0.3.exe")
     if not os.path.exists(setup_exe):
         print(f"[Error] Setup exe not found: {setup_exe}")
         return
@@ -57,8 +63,8 @@ def main():
         shutil.rmtree(release_dir)
     os.makedirs(release_dir, exist_ok=True)
     
-    # Copy Setup_화장품연구관리_v1.0.exe
-    dest_setup = os.path.join(release_dir, "Setup_화장품연구관리_v1.0.exe")
+    # Copy Setup_화장품연구관리_v1.0.3.exe
+    dest_setup = os.path.join(release_dir, "Setup_화장품연구관리_v1.0.3.exe")
     shutil.copy2(setup_exe, dest_setup)
     
     print("\n=======================================================")

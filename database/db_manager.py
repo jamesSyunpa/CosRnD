@@ -198,8 +198,16 @@ class DBManager:
             config.read(self.config_path, encoding='utf-8')
             db_dir = config.get('Paths', 'database_dir', fallback='')
             if not db_dir:
+                db_dir = config.get('Paths', 'shared_db_path', fallback='')  # shared_db_path도 확인
+            if not db_dir:
                 db_dir = default_dir
             print(f"config.ini에서 읽은 database_dir: {db_dir}")
+            
+            # 경로가 유효한지 확인, 없으면 기본값 사용
+            if not os.path.exists(db_dir):
+                print(f"경로가 존재하지 않아 기본값으로 대체: {db_dir}")
+                db_dir = default_dir
+            
             return db_dir
         except Exception as e:
             print(f"설정 파일 읽기 실패: {e}, 기본값 {default_dir} 사용")
@@ -318,6 +326,7 @@ class DBManager:
                     if not config.has_section('Paths'):
                         config.add_section('Paths')
                     config.set('Paths', 'shared_db_path', auto_path)
+                    config.set('Paths', 'database_dir', auto_path)
                     with open(config_path, 'w', encoding='utf-8') as configfile:
                         config.write(configfile)
                 except Exception as save_err:
@@ -351,6 +360,7 @@ class DBManager:
                 config.add_section('Paths')
             try:
                 config.set('Paths', 'shared_db_path', os.path.dirname(local_db_path))
+                config.set('Paths', 'database_dir', os.path.dirname(local_db_path))
                 with open(config_path, 'w', encoding='utf-8') as configfile:
                     config.write(configfile)
                 print(f"[INFO] 초기 DB 폴더 경로 설정: {os.path.dirname(local_db_path)}")
@@ -388,15 +398,23 @@ class DBManager:
                 db_version = None
                 try:
                     with test_engine.connect() as conn:
+                        # ① 먼저 sqlite_master로 파일이 유효한 SQLite DB인지 검증
+                        # (손상된 파일이거나 SQLite DB가 아니면 여기서 DatabaseError 예외 발생)
+                        conn.execute(text("SELECT name FROM sqlite_master LIMIT 1")).fetchall()
+                        
                         try:
                             db_version = conn.execute(text("SELECT version FROM _schema_version")).scalar()
                             print(f"[INFO] 공유 DB 스키마 버전 감지: v{db_version}")
                         except Exception as schema_e:
                             print(f"[경고] 공유 DB 스키마 버전 확인 실패: {schema_e} (버전 테이블이 없을 수 있음)")
                 except Exception as conn_e:
-                    print(f"[경고] 공유 DB 연결 테스트 실패: {conn_e}")
-                    test_engine.dispose()
+                    print(f"[경고] 공유 DB 연결 테스트 실패 (파일 손상 등): {conn_e}, 로컬 DB로 대체합니다")
+                    try:
+                        test_engine.dispose()
+                    except Exception:
+                        pass
                     raise
+
 
                 # 엔진 채택 후 마이그레이션/트리거 보장 진행 (버전 불일치여도 시도)
                 self.engine = test_engine
@@ -432,7 +450,7 @@ class DBManager:
                 self._save_init_state(True)
                 return
         except Exception as e:
-            print(f"[경고] 공유 DB 연결 및 생성 실패: {e}")
+            print(f"[경고] 공유 DB 연결 및 생성 실패: {e}, 로컬 DB로 대체합니다")
             if 'test_engine' in locals():
                 try:
                     test_engine.dispose()
@@ -453,6 +471,34 @@ class DBManager:
             
             # 2. DB 파일 처리
             is_new_db = not file_exists_including_hidden(self.db_path)
+            
+            # 만약 기존 로컬 DB 파일이 존재하더라도 유효하지 않은 경우(깨짐 등) 감지
+            if not is_new_db:
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(self.db_path)
+                    conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchall()
+                    conn.close()
+                except Exception as db_corrupt_err:
+                    print(f"  * [자가치유] 기존 로컬 DB가 손상되었습니다 ({db_corrupt_err}). 삭제 후 재생성을 시도합니다.")
+                    try:
+                        self.dispose_engine()
+                        self.cleanup_db_files()
+                        if os.path.exists(self.db_path):
+                            try:
+                                os.remove(self.db_path)
+                                print("  * [자가치유] 손상된 로컬 DB 파일 삭제 성공")
+                            except Exception as remove_err:
+                                print(f"  * [자가치유] 바로 삭제 불가 ({remove_err}). 파일명 변경 우회를 시도합니다.")
+                                # 파일명이 사용 중인 경우, 임시 파일명으로 rename하여 기존 파일에 대한 락을 우회합니다.
+                                import time
+                                backup_path = f"{self.db_path}.corrupt_{int(time.time())}"
+                                os.rename(self.db_path, backup_path)
+                                print(f"  * [자가치유] 손상된 DB를 {backup_path}로 격리 완료")
+                    except Exception as rm_err:
+                        print(f"  * [경고] 손상된 로컬 DB 파일 격리 실패: {rm_err}")
+                    is_new_db = True
+
             self.cleanup_db_files()
             
             # 3. DB 파일 생성 (없을 경우에만)
@@ -549,8 +595,39 @@ class DBManager:
             raise RuntimeError(f"DB 설정 실패: {e}")
 
     def get_session(self):
-        if not self.Session:
-            raise RuntimeError("Database is not set up. Call setup_database() first.")
+        """세션을 반환합니다. 엔진이 없거나 연결이 끊어진 경우 자동 복구를 시도합니다."""
+        if not self.Session or not self.engine:
+            # 엔진/세션이 없으면 자동 복구 시도
+            print("[DB] Session 없음 - 자동 복구 시도 중...")
+            try:
+                if self.application_path and self.config_path:
+                    self.setup_database(self.application_path, self.config_path, None)
+                else:
+                    raise RuntimeError("Database is not set up. Call setup_database() first.")
+            except Exception as recovery_err:
+                raise RuntimeError(f"DB 자동 복구 실패: {recovery_err}")
+
+        # 연결 유효성 검사 (동기화로 DB 파일이 교체된 경우 감지)
+        try:
+            with self.engine.connect() as test_conn:
+                test_conn.execute(__import__('sqlalchemy').text("SELECT 1"))
+        except Exception:
+            # 연결 불량 → 엔진 재초기화
+            print("[DB] 연결 유효성 실패 - 엔진 재초기화 중...")
+            try:
+                self.engine.dispose()
+            except Exception:
+                pass
+            self.engine = None
+            self.Session = None
+            try:
+                if self.application_path and self.config_path:
+                    self.setup_database(self.application_path, self.config_path, None)
+                else:
+                    raise RuntimeError("DB 경로 정보 없음 - 재연결 불가")
+            except Exception as reconnect_err:
+                raise RuntimeError(f"DB 재연결 실패: {reconnect_err}")
+
         return self.Session()
 
     def dispose_engine(self):

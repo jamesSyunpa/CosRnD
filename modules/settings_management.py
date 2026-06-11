@@ -494,21 +494,14 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 engine.dispose()
 
     def _handle_move_db(self, new_db_path, new_excel_path):
-        """현재 DB를 새 경로로 이동하고 설정을 저장한 후 DB를 다시 로드합니다."""
+        """현재 DB를 새 경로로 이동합니다 (재시작을 통해 안전하게 처리)"""
         # 1. 현재 DB 파일 확인
-        local_db_path = db_manager.get_local_db_path()
-        if not local_db_path or not os.path.exists(local_db_path):
-            messagebox.showerror("오류", "현재 사용중인 로컬 DB 파일을 찾을 수 없습니다.", parent=self)
+        current_db_path = db_manager.db_path
+        if not current_db_path or not os.path.exists(current_db_path):
+            messagebox.showerror("오류", "현재 사용중인 DB 파일을 찾을 수 없습니다.", parent=self)
             return
 
-        # 2. 대상 디렉토리 생성
-        try:
-            os.makedirs(os.path.dirname(new_db_path), exist_ok=True)
-        except Exception as e:
-            messagebox.showerror("오류", f"대상 디렉토리 생성 실패: {e}", parent=self)
-            return
-
-        # 3. 대상 파일 존재 여부 확인
+        # 2. 대상 파일 존재 여부 확인
         if os.path.exists(new_db_path):
             if not messagebox.askyesno("경고", 
                 f"대상 경로에 이미 DB 파일이 존재합니다: '{os.path.basename(new_db_path)}'\n"
@@ -521,80 +514,20 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 messagebox.showerror("오류", f"기존 DB 파일 제거 실패: {e}", parent=self)
                 return
 
-        # 4. DB 연결 해제 및 파일 이동
-        db_backup_path = None
-        try:
-            # DB 연결 해제
-            db_manager.dispose_engine()
-            print(f"[DEBUG] DB 연결 해제 완료")
-            
-            # 백업 생성
-            db_backup_path = f"{local_db_path}.backup"
-            shutil.copy2(local_db_path, db_backup_path)
-            print(f"[DEBUG] 백업 생성 완료: {db_backup_path}")
-            
-            # 대상 디렉토리가 없으면 생성
-            os.makedirs(os.path.dirname(new_db_path), exist_ok=True)
-            
-            # 파일 이동 (copy + delete 방식으로 변경하여 크로스 드라이브 이동 지원)
-            shutil.copy2(local_db_path, new_db_path)
-            print(f"[DEBUG] DB 파일 복사 완료: {new_db_path}")
-            
-            # 원본 파일 삭제
-            os.remove(local_db_path)
-            print(f"[DEBUG] 원본 DB 파일 삭제 완료")
-            
-            # 5. 설정 저장
-            db_dir = os.path.dirname(new_db_path)
-            self._save_config('Paths', 'shared_db_path', db_dir)
-            self._save_config('Paths', 'excel_dir', new_excel_path)
-            print(f"[DEBUG] 설정 저장 완료: DB={db_dir}, Excel={new_excel_path}")
-            
-            # 6. 새 DB로 다시 연결
-            db_manager.setup_database(self.application_path, self.config_path, self.app.on_initial_setup)
-            print("[DEBUG] 새 DB 연결 완료")
-            
-            # 7. 모든 프레임의 데이터 새로고침
-            self.app.refresh_data_in_all_frames()
-            
-            # 성공적으로 이동했다면 백업 삭제
-            if os.path.exists(db_backup_path):
-                try:
-                    os.remove(db_backup_path)
-                    print(f"[DEBUG] 백업 파일 삭제 완료")
-                except Exception:
-                    pass  # 백업 삭제 실패는 무시
-            
-            messagebox.showinfo("완료", 
-                              f"DB가 새 경로로 이동되고 로드되었습니다.\n\n"
-                              f"새 경로: {new_db_path}",
-                              parent=self)
-                    
-        except Exception as e:
-            # 이동 실패 시 복구 시도
-            if db_backup_path and os.path.exists(db_backup_path):
-                try:
-                    shutil.copy2(db_backup_path, local_db_path)
-                    os.remove(db_backup_path)
-                    print(f"[DEBUG] DB 복구 완료")
-                except Exception as restore_error:
-                    self._show_error_with_clipboard(
-                        "심각한 DB 이동 오류", 
-                        f"DB 파일 이동 실패 및 복구 실패:\n"
-                        f"원본 오류: {str(e)}\n"
-                        f"복구 오류: {str(restore_error)}", 
-                        f"소스: {local_db_path}\n대상: {new_db_path}\n백업: {db_backup_path}"
-                    )
-                    return
-                    
-            self._show_error_with_clipboard(
-                "DB 이동 오류", 
-                f"DB 파일 이동 중 오류가 발생했습니다:\n{str(e)}", 
-                f"소스: {local_db_path}\n대상: {new_db_path}"
-            )
-            # 복구 후 다시 연결 시도
-            self.app.after(100, lambda: db_manager.setup_database(
-                self.application_path, self.config_path, self.app.on_initial_setup))
+        # 3. 프로그램 재시작을 통해 DB 이동
+        messagebox.showinfo(
+            "프로그램 재시작",
+            "DB를 새 경로로 이동하기 위해 프로그램을 재시작합니다.\n"
+            "재시작 후 자동으로 작업이 완료됩니다.",
+            parent=self
+        )
+        
+        self.app.restart_app(
+            save_state=True,
+            DB_MOVE_REQUIRED='True',
+            DB_MOVE_TARGET_DB=new_db_path,
+            DB_MOVE_TARGET_EXCEL=new_excel_path
+        )
 
     def _handle_use_existing_db(self, new_db_path, new_excel_path):
         """경로에 있는 기존 DB를 검증하고 설정을 저장한 후 DB를 다시 로드합니다."""
@@ -659,6 +592,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
             # 3. 설정 저장
             db_dir = os.path.dirname(new_db_path)
             self._save_config('Paths', 'shared_db_path', db_dir)
+            self._save_config('Paths', 'database_dir', db_dir)
             self._save_config('Paths', 'excel_dir', new_excel_path)
             print(f"[DEBUG] 설정 저장 완료: DB={db_dir}, Excel={new_excel_path}")
             
