@@ -180,6 +180,7 @@ class DBManager:
         if not hasattr(self, 'initialized'):
             self.engine = None
             self.Session = None
+            self.db_path = None
             self.initialized = True
             self.application_path = None
             self.config_path = None
@@ -718,9 +719,6 @@ class DBManager:
                             try:
                                 print(f"[정보] {table_name}.{column.name} 컬럼 추가 중...")
                                 
-                                # 트랜잭션 시작
-                                trans = connection.begin()
-                                
                                 # 각 컬럼별로 직접 ALTER TABLE 실행
                                 if table_name == 'clients':
                                     if column.name == 'name_en':
@@ -739,22 +737,21 @@ class DBManager:
                                     elif column.name == 'updated_at':
                                         connection.execute(text("ALTER TABLE materials ADD COLUMN updated_at DATETIME"))
                                 else:
-                                    # 기타 테이블은 기존 방식 사용
+                                    # 기타 테이블은 CreateColumn 방식 사용 (괄호 잘림 방지)
                                     from sqlalchemy.schema import CreateColumn
                                     column.default = None
                                     col_def = str(CreateColumn(column).compile(self.engine))
-                                    col_def = col_def.replace('CREATE TABLE ', '').replace(f'{table_name} (', '').rstrip(')')
                                     alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_def}"
                                     connection.execute(text(alter_sql))
                                 
-                                trans.commit()
+                                connection.commit()
                                 print(f"[완료] 테이블 '{table_name}'에 컬럼 '{column.name}' 추가")
                                 
                             except Exception as col_e:
                                 # 컬럼 추가 실패는 경고만 출력 (이미 있거나 호환 불가)
                                 print(f"[경고] 컬럼 '{table_name}.{column.name}' 추가 실패: {col_e}")
                                 try:
-                                    trans.rollback()
+                                    connection.rollback()
                                 except:
                                     pass
                     
@@ -766,9 +763,8 @@ class DBManager:
                             mat_cols = {row[1] for row in cursor.fetchall()}
                             if 'supplier_id' in mat_cols and 'client_id' in mat_cols:
                                 print(f"[정보] materials.client_id 데이터를 supplier_id로 복사 중...")
-                                trans = connection.begin()
                                 connection.execute(text("UPDATE materials SET supplier_id = client_id WHERE supplier_id IS NULL AND client_id IS NOT NULL"))
-                                trans.commit()
+                                connection.commit()
                                 print(f"[완료] 데이터 복사 완료")
                         except Exception as e:
                             print(f"[경고] 데이터 복사 실패: {e}")
@@ -785,26 +781,28 @@ class DBManager:
         print("데이터베이스 스키마 확인 및 업데이트 완료.")
 
     def _check_and_run_migrations(self):
-        with self.engine.connect() as connection:
-            try:
-                with connection.begin() as trans:
-                    connection.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
-                    result = connection.execute(text("SELECT version FROM _schema_version")).scalar_one_or_none()
-                    db_version = result if result is not None else 0
+        try:
+            with self.engine.connect() as connection:
+                connection.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
+                connection.commit()
+                result = connection.execute(text("SELECT version FROM _schema_version")).scalar_one_or_none()
+                db_version = result if result is not None else 0
 
-                    print(f"스키마 버전 확인: DB=v{db_version}, 코드=v{SCHEMA_VERSION}")
-                    
-                    # 항상 마이그레이션 실행 (누락된 컬럼 확인 및 추가)
-                    self._run_migrations()
-                    
-                    # 버전 업데이트
-                    if db_version != SCHEMA_VERSION:
-                        connection.execute(text("DELETE FROM _schema_version"))
-                        connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
-                        print(f"스키마 버전 업데이트: v{db_version} → v{SCHEMA_VERSION}")
-            except Exception as e:
-                print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
-                # 오류가 발생해도 계속 실행
+                print(f"스키마 버전 확인: DB=v{db_version}, 코드=v{SCHEMA_VERSION}")
+                
+            # 항상 마이그레이션 실행 (누락된 컬럼 확인 및 추가)
+            self._run_migrations()
+            
+            # 버전 업데이트
+            with self.engine.connect() as connection:
+                if db_version != SCHEMA_VERSION:
+                    connection.execute(text("DELETE FROM _schema_version"))
+                    connection.execute(text(f"INSERT INTO _schema_version (version) VALUES ({SCHEMA_VERSION})"))
+                    connection.commit()
+                    print(f"스키마 버전 업데이트: v{db_version} → v{SCHEMA_VERSION}")
+        except Exception as e:
+            print(f"스키마 버전 확인/업데이트 중 오류 발생: {e}")
+            # 오류가 발생해도 계속 실행
 
     def ensure_change_tracking(self):
         """변경 추적용 change_log 테이블과 트리거를 생성합니다 (존재하지 않으면)."""
@@ -1142,27 +1140,78 @@ class DBManager:
 
     # --- Data Reset Methods ---
     def reset_all_data(self, session):
+        """모든 데이터(품질서류, 생산처방, 처방, 원료, 거래처, 사용자)를 초기화합니다 (관리자 계정 제외)."""
+        from database.models import (
+            DocumentAttachment, DocumentPackageLink, DocumentPackage,
+            FinishedProductCOAItem, FinishedProductCOA,
+            SemiFinishedCOAItem, SemiFinishedCOA,
+            IngredientReportItem, IngredientReport,
+            ProductionRun, ProductionStep, ProductionFormulation,
+            FormulationItem, Formulation,
+            Ingredient, Material, Client, User
+        )
+        # 1. 문서 패키지 및 첨부파일 삭제
+        session.query(DocumentAttachment).delete(synchronize_session=False)
+        session.query(DocumentPackageLink).delete(synchronize_session=False)
+        session.query(DocumentPackage).delete(synchronize_session=False)
+
+        # 2. 품질 관리 서류 삭제
+        session.query(FinishedProductCOAItem).delete(synchronize_session=False)
+        session.query(FinishedProductCOA).delete(synchronize_session=False)
+        session.query(SemiFinishedCOAItem).delete(synchronize_session=False)
+        session.query(SemiFinishedCOA).delete(synchronize_session=False)
+        session.query(IngredientReportItem).delete(synchronize_session=False)
+        session.query(IngredientReport).delete(synchronize_session=False)
+
+        # 3. 생산 처방 및 런 삭제
+        session.query(ProductionRun).delete(synchronize_session=False)
+        session.query(ProductionStep).delete(synchronize_session=False)
+        session.query(ProductionFormulation).delete(synchronize_session=False)
+
+        # 4. 연구 처방 삭제
         session.query(FormulationItem).delete(synchronize_session=False)
         session.query(Formulation).delete(synchronize_session=False)
+
+        # 5. 전성분 및 원료 삭제
+        session.query(Ingredient).delete(synchronize_session=False)
         session.query(Material).delete(synchronize_session=False)
+
+        # 6. 거래처 삭제
         session.query(Client).delete(synchronize_session=False)
-        session.query(User).filter(User.username != 'admin').delete(synchronize_session=False)
-        print("모든 데이터가 리셋되었습니다 (admin 계정 제외).")
+
+        # 7. 일반 사용자 삭제 (MSAD/admin 계정 보존)
+        session.query(User).filter(
+            User.username != 'admin',
+            User.role != 'MSAD'
+        ).delete(synchronize_session=False)
+
+        print("[초기화] 모든 시스템 데이터가 성공적으로 초기화되었습니다 (관리자 계정 보존).")
 
     def reset_users_data(self, session):
-        session.query(User).filter(User.username != 'admin').delete(synchronize_session=False)
-        print("사용자 데이터가 리셋되었습니다 (admin 계정 제외).")
+        """기본 관리자(admin/MSAD)를 제외한 모든 사용자 데이터를 삭제합니다."""
+        session.query(User).filter(
+            User.username != 'admin',
+            User.role != 'MSAD'
+        ).delete(synchronize_session=False)
+        print("[초기화] 사용자 데이터가 초기화되었습니다 (관리자 계정 보존).")
 
     def reset_clients_data(self, session):
+        """모든 거래처 데이터를 안전하게 삭제합니다 (참조 해제 후 삭제)."""
         session.query(Material).update({Material.supplier_id: None}, synchronize_session=False)
-        session.query(Formulation).update({Formulation.target_client_id: None, Formulation.oem_odm_client_id: None}, synchronize_session=False)
+        session.query(Formulation).update({
+            Formulation.target_client_id: None, 
+            Formulation.oem_odm_client_id: None
+        }, synchronize_session=False)
         session.query(Client).delete(synchronize_session=False)
-        print("거래처 데이터가 리셋되었습니다.")
+        print("[초기화] 거래처 데이터가 초기화되었습니다.")
 
     def reset_materials_data(self, session):
+        """모든 원료 및 전성분 데이터를 안전하게 삭제합니다 (처방 아이템 참조 해제 후 삭제)."""
+        from database.models import Ingredient
         session.query(FormulationItem).update({FormulationItem.material_id: None}, synchronize_session=False)
+        session.query(Ingredient).delete(synchronize_session=False)
         session.query(Material).delete(synchronize_session=False)
-        print("원료 데이터가 리셋되었습니다.")
+        print("[초기화] 원료 및 전성분 데이터가 초기화되었습니다.")
 
     def has_admin_users(self):
         """시스템에 관리자 권한 사용자가 이미 존재하는지 확인합니다."""

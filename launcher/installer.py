@@ -38,13 +38,14 @@ class Installer:
     
     @staticmethod
     def get_default_install_path() -> Path:
-        """
+        r"""
         Get default installation path.
         
         Returns:
             Default installation directory (C:\CosRnD)
         """
         return Path("C:\\CosRnD")
+
     
     @staticmethod
     def validate_install_path(path: Path) -> bool:

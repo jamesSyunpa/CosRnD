@@ -118,6 +118,10 @@ class MaterialManagementFrame(ctk.CTkFrame):
                             for values, tag in initial:
                                 self.material_tree.insert("", "end", tags=(tag,), values=values)
 
+                            # 대기 중인 포커스 요청이 있으면 적용
+                            if hasattr(self, '_pending_focus_id') and self._pending_focus_id:
+                                self.apply_highlight_to_id(self._pending_focus_id)
+
                             # 나머지 항목은 배치로 점진 추가
                             if len(material_data_list) > CHUNK:
                                 def _append_batches():
@@ -128,6 +132,8 @@ class MaterialManagementFrame(ctk.CTkFrame):
                                                 try:
                                                     for values, tag in b:
                                                         self.material_tree.insert("", "end", tags=(tag,), values=values)
+                                                    if hasattr(self, '_pending_focus_id') and self._pending_focus_id:
+                                                        self.apply_highlight_to_id(self._pending_focus_id)
                                                 except Exception:
                                                     pass
                                             try:
@@ -188,17 +194,35 @@ class MaterialManagementFrame(ctk.CTkFrame):
         self.form_container.grid_columnconfigure(0, weight=0)
         self.form_container.grid_columnconfigure(1, weight=1)  # 입력 필드 가변
 
+        # [NEW 알림 전용 플로팅 배너 바 (최상단 노출)]
+        self.focus_banner_bar = ctk.CTkFrame(
+            self.form_container, 
+            fg_color=("#FEF3C7", "#78350F"), 
+            border_width=1, 
+            border_color="#F59E0B",
+            corner_radius=6,
+            height=34
+        )
+        self.focus_banner_bar_label = ctk.CTkLabel(
+            self.focus_banner_bar,
+            text="",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("#92400E", "#FDE68A")
+        )
+        self.focus_banner_bar_label.pack(side="left", padx=10, pady=4)
+
         material_labels = ["코드", "원료명", "단가", "포장단위", "공급처", "제조원명", "HS CODE", "원산지", "영문원료명", "NMPA등록번호", "등록일"]
         self.material_entries = {}
         for i, text in enumerate(material_labels):
-            ctk.CTkLabel(self.form_container, text=text).grid(row=i, column=0, padx=10, pady=5, sticky="w")
+            # row를 i+1 로 배치 (0번은 배너 바 자리)
+            ctk.CTkLabel(self.form_container, text=text).grid(row=i+1, column=0, padx=10, pady=5, sticky="w")
             if text == "공급처":
                 self.supplier_entry = AutocompleteEntry(self.form_container)
-                self.supplier_entry.grid(row=i, column=1, padx=10, pady=5, sticky="ew")
+                self.supplier_entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="ew")
                 self.material_entries[text] = self.supplier_entry
             else:
                 entry = ctk.CTkEntry(self.form_container)
-                entry.grid(row=i, column=1, padx=10, pady=5, sticky="ew")
+                entry.grid(row=i+1, column=1, padx=10, pady=5, sticky="ew")
                 self.material_entries[text] = entry
 
         # 사용 여부 체크박스
@@ -206,15 +230,15 @@ class MaterialManagementFrame(ctk.CTkFrame):
         ctk.CTkCheckBox(
             self.form_container, text="사용 여부",
             variable=self.material_active_var, onvalue="on", offvalue="off"
-        ).grid(row=len(material_labels), column=1, padx=10, pady=10, sticky="e")
+        ).grid(row=len(material_labels)+1, column=1, padx=10, pady=10, sticky="e")
 
         # 이력 보기 버튼
         self.material_history_button = ctk.CTkButton(self.form_container, text="선택 항목 이력 보기", command=self.show_selected_material_history, state="disabled")
-        self.material_history_button.grid(row=len(material_labels)+1, column=1, padx=10, pady=10, sticky="e")
+        self.material_history_button.grid(row=len(material_labels)+2, column=1, padx=10, pady=10, sticky="e")
 
         # ===== 전성분 영역 =====
         ingredient_frame = ctk.CTkFrame(self.form_container, fg_color="transparent")
-        ingredient_frame.grid(row=len(material_labels)+1, column=0, columnspan=2, padx=5, pady=10, sticky="nsew")
+        ingredient_frame.grid(row=len(material_labels)+2, column=0, columnspan=2, padx=5, pady=10, sticky="nsew")
         ingredient_frame.grid_columnconfigure(0, weight=0)
         ingredient_frame.grid_columnconfigure(1, weight=1)
 
@@ -303,10 +327,21 @@ class MaterialManagementFrame(ctk.CTkFrame):
         # --- 헤더 및 검색/버튼 프레임 ---
         list_header_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
         list_header_frame.grid(row=0, column=0, columnspan=2, pady=(10, 5), padx=10, sticky="ew")
-        list_header_frame.grid_columnconfigure(1, weight=1) # 가변 공간
-
-        # 좌측 위젯 (레이블)
-        ctk.CTkLabel(list_header_frame, text="원료 목록", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
+        # 좌측 위젯 (레이블 + NEW 이동 알림 뱃지)
+        title_box = ctk.CTkFrame(list_header_frame, fg_color="transparent")
+        title_box.grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(title_box, text="원료 목록", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left", padx=(0, 8))
+        
+        self.focus_notice_banner = ctk.CTkLabel(
+            title_box,
+            text="",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#F59E0B",
+            fg_color=("#FEF3C7", "#3B2F04"),
+            corner_radius=6,
+            padx=10,
+            pady=2
+        )
 
         # 우측 위젯 (버튼 및 검색창)
         right_header_frame = ctk.CTkFrame(list_header_frame, fg_color="transparent")
@@ -1869,14 +1904,63 @@ class MaterialManagementFrame(ctk.CTkFrame):
             messagebox.showwarning("선택 오류", "삭제할 원료를 선택해주세요.")
             return
 
-        if messagebox.askyesno("삭제 확인", "선택한 원료를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다."):
+        if messagebox.askyesno("삭제 확인", "선택한 원료를 삭제하시겠습니까?\n\n※ 삭제 전 안전 복구용 백업 파일이 자동으로 저장됩니다."):
             session = db_manager.get_session()
             try:
                 material = session.query(Material).get(self._selected_material_id)
                 if material:
+                    # 안전 자동 백업 수행 (SecureVault + data/backups/materials)
+                    try:
+                        import json
+                        from modules.secure_vault import SecureVault
+                        
+                        mat_backup = {
+                            'code': material.code,
+                            'name': material.name,
+                            'name_en': material.name_en,
+                            'unit_price': material.unit_price,
+                            'package_unit': material.package_unit,
+                            'supplier_name': material.supplier.name if material.supplier else '',
+                            'manufacturer': material.manufacturer,
+                            'hs_code': material.hs_code,
+                            'origin': material.origin,
+                            'nmpa_reg_num': material.nmpa_reg_num,
+                            'is_active': material.is_active,
+                            'ingredients': [
+                                {
+                                    'name_ko': ing.name_ko,
+                                    'name_en': ing.name_en,
+                                    'cas_no': ing.cas_no,
+                                    'composition_ratio': ing.composition_ratio,
+                                    'function': ing.function,
+                                    'ewg_grade': ing.ewg_grade,
+                                    'ewg_data': ing.ewg_data,
+                                    'remark': ing.remark
+                                } for ing in material.ingredients
+                            ]
+                        }
+                        
+                        # 1. AppData 심층 시스템 은닉 볼트 암호화 백업
+                        SecureVault.encrypt_and_save(
+                            category='materials',
+                            record_id=material.code,
+                            data_dict=mat_backup,
+                            username=getattr(self.current_user, 'username', 'unknown')
+                        )
+                        
+                        # 2. 로컬 백업 폴더(보조) 저장
+                        backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'backups', 'materials')
+                        os.makedirs(backup_dir, exist_ok=True)
+                        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        backup_file = os.path.join(backup_dir, f"material_backup_{material.code}_{ts}.json")
+                        with open(backup_file, 'w', encoding='utf-8') as f:
+                            json.dump({'backup_date': ts, 'deleted_by': getattr(self.current_user, 'username', 'unknown'), 'material': mat_backup}, f, ensure_ascii=False, indent=2)
+                    except Exception as bk_err:
+                        print(f"[경고] 원료 백업 실패(무시): {bk_err}")
+
                     session.delete(material)
                     session.commit()
-                    messagebox.showinfo("성공", "원료가 성공적으로 삭제되었습니다.")
+                    messagebox.showinfo("성공", "원료가 성공적으로 삭제되었습니다.\n(안전 복구용 백업 파일이 저장되었습니다.)")
                     
                     # UI 새로고침
                     self.refresh_data()
@@ -1922,10 +2006,13 @@ class MaterialManagementFrame(ctk.CTkFrame):
             session.close()
     
     def focus_material_by_id(self, material_id: int):
-        """원료 목록에서 해당 ID를 찾아 선택하고 상세를 표시합니다."""
+        """원료 목록에서 해당 ID를 찾아 선택하고 상단 배너와 입력창에 [NEW] 강조 효과를 부여합니다."""
+        self._pending_focus_id = material_id
+        return self.apply_highlight_to_id(material_id)
+
+    def apply_highlight_to_id(self, material_id: int):
+        """실제 Treeview에서 해당 원료를 찾아서 시각적 뱃지, 배너 및 반짝임(Blink) 효과를 부여합니다."""
         try:
-            # 목록 최신화 후 탐색
-            self.load_materials()
             target_iid = None
             for iid in self.material_tree.get_children():
                 try:
@@ -1936,12 +2023,88 @@ class MaterialManagementFrame(ctk.CTkFrame):
                         break
                 except Exception:
                     continue
+
             if target_iid:
+                # 1. 목록 선택 및 스크롤 위치 이동
                 self.material_tree.selection_set(target_iid)
                 self.material_tree.focus(target_iid)
                 self.material_tree.see(target_iid)
-                # 선택 핸들러 호출로 상세 로드
+                
+                # 2. 상세 정보 로드
                 self.on_material_tree_select(event=None)
+
+                # 3. 데이터 추출
+                current_vals = list(self.material_tree.item(target_iid, 'values'))
+                orig_group = current_vals[0] if current_vals else ""
+                mat_name = current_vals[3] if len(current_vals) > 3 else ""
+
+                # 4. [좌측 최상단 플로팅 배너 바] 즉시 노출
+                if hasattr(self, 'focus_banner_bar') and hasattr(self, 'focus_banner_bar_label'):
+                    self.focus_banner_bar_label.configure(text=f"🔥 [최근 변경 확인] {mat_name} (NEW)")
+                    self.focus_banner_bar.grid(row=0, column=0, columnspan=2, padx=10, pady=(4, 10), sticky="ew")
+
+                # 5. [우측 목록 상단 헤더 배너] 즉시 노출
+                if hasattr(self, 'focus_notice_banner'):
+                    self.focus_notice_banner.configure(text=f"🔥 최근 변경 확인: {mat_name} [NEW]")
+                    self.focus_notice_banner.pack(side="left", padx=5)
+
+                # 6. 트리뷰 구분 컬럼에 [NEW] 마크 적용
+                if current_vals and not str(current_vals[0]).startswith("🔥[NEW]"):
+                    current_vals[0] = f"🔥[NEW] {orig_group}"
+                    self.material_tree.item(target_iid, values=current_vals)
+
+                # 7. [핵심] 3회 반짝임(Flash Blink) 애니메이션
+                name_entry = self.material_entries.get("원료명") if hasattr(self, 'material_entries') else None
+                code_entry = self.material_entries.get("코드") if hasattr(self, 'material_entries') else None
+
+                def _flash_step(count):
+                    try:
+                        is_gold = (count % 2 == 1)
+                        border_c = "#F59E0B" if is_gold else ("gray70", "gray30")
+                        bg_c = ("#FEF3C7", "#451A03") if is_gold else ("#F9FAFB", "#343638")
+                        
+                        if name_entry:
+                            name_entry.configure(border_color=border_c, border_width=2 if is_gold else 1, fg_color=bg_c)
+                        if code_entry:
+                            code_entry.configure(border_color=border_c, border_width=2 if is_gold else 1, fg_color=bg_c)
+                        
+                        if count > 0:
+                            self.after(200, lambda: _flash_step(count - 1))
+                        else:
+                            # 반짝임 종료 후 골드 테두리로 6초간 고정 유지
+                            if name_entry:
+                                name_entry.configure(border_color="#F59E0B", border_width=2, fg_color=("#F9FAFB", "#343638"))
+                            if code_entry:
+                                code_entry.configure(border_color="#F59E0B", border_width=2, fg_color=("#F9FAFB", "#343638"))
+                    except Exception:
+                        pass
+
+                _flash_step(5) # 5단계 펄스 반짝임 발동
+
+                # 8. 다른 원료를 클릭하거나 8초가 지나면 원래대로 복구
+                def _restore_highlight(event=None):
+                    try:
+                        self._pending_focus_id = None
+                        if hasattr(self, 'focus_banner_bar'):
+                            self.focus_banner_bar.grid_remove()
+                        if hasattr(self, 'focus_notice_banner'):
+                            self.focus_notice_banner.pack_forget()
+                        if name_entry:
+                            name_entry.configure(border_color=("gray70", "gray30"), border_width=1, fg_color=("#F9FAFB", "#343638"))
+                        if code_entry:
+                            code_entry.configure(border_color=("gray70", "gray30"), border_width=1, fg_color=("#F9FAFB", "#343638"))
+                        if self.material_tree.exists(target_iid):
+                            restored_vals = list(self.material_tree.item(target_iid, 'values'))
+                            if restored_vals and str(restored_vals[0]).startswith("🔥[NEW]"):
+                                restored_vals[0] = orig_group
+                                self.material_tree.item(target_iid, values=restored_vals)
+                        self.material_tree.unbind("<<TreeviewSelect>>", restore_bind_id)
+                    except Exception:
+                        pass
+
+                restore_bind_id = self.material_tree.bind("<<TreeviewSelect>>", _restore_highlight, add="+")
+                self.after(8000, _restore_highlight)
+
                 return True
             return False
         except Exception as e:

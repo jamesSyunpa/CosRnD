@@ -127,20 +127,19 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.title(self.texts['formulation_popup_title'])
         self.transient(master)
         self.resizable(True, True) # 크기 조절 활성화
-        # 전체 크기를 다소 줄이고, 최소 크기도 낮춥니다
-        self.minsize(850, 600) # 최소 크기 축소
+        # [v64] 처방 생성/수정창 최적 뷰포트 (오른쪽 잘림 완벽 방지)
+        self.minsize(1050, 680)
         self.grab_set()
 
-        # 초기 표시 크기를 이전보다 작게 설정하고, 마우스가 있는 디스플레이 중앙에 배치
         try:
-            init_w, init_h = 1000, 680  # 기존보다 전반적으로 축소된 초기 크기
+            init_w, init_h = 1220, 760
             center_window_on_mouse_display(self, width=init_w, height=init_h)
         except Exception:
             try:
                 sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-                w, h = 1000, 680
-                x = (sw // 2) - (w // 2)
-                y = (sh // 2) - (h // 2)
+                w, h = 1220, 760
+                x = max(0, (sw // 2) - (w // 2))
+                y = max(0, (sh // 2) - (h // 2))
                 self.geometry(f"{w}x{h}+{x}+{y}")
             except Exception:
                 pass
@@ -159,8 +158,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
         # 1. 메인 컨테이너 (상세정보 폼과 처방내용을 담음)
         main_container = ctk.CTkFrame(self, fg_color="transparent")
         main_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        main_container.grid_columnconfigure(0, weight=1, uniform="group1") # 좌측: 처방 상세 정보
-        main_container.grid_columnconfigure(1, weight=1, uniform="group1") # 우측: 처방 내용
+        main_container.grid_columnconfigure(0, weight=5) # 좌측: 처방 상세 정보 (45%)
+        main_container.grid_columnconfigure(1, weight=6) # 우측: 처방 내용 (55%로 넓게 확보)
         main_container.grid_rowconfigure(0, weight=1)
 
         # 2. 좌측: 처방 상세 정보 폼
@@ -235,56 +234,62 @@ class FormulationEditPopup(ctk.CTkToplevel):
         experiment_info_frame = ctk.CTkFrame(self.form_pane, fg_color="transparent")
         # pady를 조정하여 구분선과의 간격을 맞춥니다.
         experiment_info_frame.grid(row=2, column=0, columnspan=4, padx=10, pady=(0, 10), sticky="ew")
+        experiment_info_frame.grid_columnconfigure(0, weight=0, minsize=65)
         experiment_info_frame.grid_columnconfigure(1, weight=1)
+        experiment_info_frame.grid_columnconfigure(2, weight=0, minsize=55)
         experiment_info_frame.grid_columnconfigure(3, weight=1)
 
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['experiment_name'], font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        # 0행: 실험품명
+        ctk.CTkLabel(experiment_info_frame, text="실험품명", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=(5, 5), pady=5, sticky="w")
         self.exp_name_entry = ctk.CTkEntry(experiment_info_frame)
-        self.exp_name_entry.grid(row=0, column=1, columnspan=3, padx=10, pady=5, sticky="ew")
+        self.exp_name_entry.grid(row=0, column=1, columnspan=3, padx=5, pady=5, sticky="ew")
         
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['experiment_date']).grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.exp_date_entry = DateEntry(experiment_info_frame, date_pattern='yyyy-mm-dd', width=15)
-        self.exp_date_entry.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        # 1행: 실험일 / 담당자
+        ctk.CTkLabel(experiment_info_frame, text="실험일").grid(row=1, column=0, padx=(5, 5), pady=5, sticky="w")
+        self.exp_date_entry = DateEntry(experiment_info_frame, date_pattern='yyyy-mm-dd', width=12)
+        self.exp_date_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
         self.exp_date_entry.bind("<<DateEntrySelected>>", self.update_lab_no)
 
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['manager_name']).grid(row=1, column=2, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(experiment_info_frame, text="담당자").grid(row=1, column=2, padx=(10, 5), pady=5, sticky="w")
         self.exp_manager_entry = ctk.CTkEntry(experiment_info_frame)
-        self.exp_manager_entry.grid(row=1, column=3, padx=10, pady=5, sticky="ew")
-        self.exp_manager_entry.insert(0, self.current_user.username) # 기본값으로 현재 사용자 설정
+        self.exp_manager_entry.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
+        self.exp_manager_entry.insert(0, self.current_user.username)
 
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['manager_code']).grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        # 2행: 담당번호 / 거래처
+        ctk.CTkLabel(experiment_info_frame, text="담당번호").grid(row=2, column=0, padx=(5, 5), pady=5, sticky="w")
         self.exp_code_entry = ctk.CTkEntry(experiment_info_frame)
-        self.exp_code_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        self.exp_code_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
         self.exp_code_entry.bind("<KeyRelease>", self.update_lab_no)
 
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['lab_no']).grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.lab_no_entry = ctk.CTkEntry(experiment_info_frame, state="disabled") # 읽기 전용으로 설정
-        self.lab_no_entry.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
-
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['revision']).grid(row=3, column=2, padx=10, pady=5, sticky="w")
-        self.revision_entry = ctk.CTkEntry(experiment_info_frame)
-        self.revision_entry.grid(row=3, column=3, padx=10, pady=5, sticky="ew")
-        self.revision_entry.bind("<KeyRelease>", self.update_lab_no)
-
-        # --- OEM/ODM 거래처 선택 ---
-        ctk.CTkLabel(experiment_info_frame, text=self.texts['client']).grid(row=2, column=2, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(experiment_info_frame, text="거래처").grid(row=2, column=2, padx=(10, 5), pady=5, sticky="w")
         
         client_selection_frame = ctk.CTkFrame(experiment_info_frame, fg_color="transparent")
-        client_selection_frame.grid(row=2, column=3, padx=10, pady=5, sticky="ew")
-        client_selection_frame.grid_columnconfigure(1, weight=1)
+        client_selection_frame.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
+        client_selection_frame.grid_columnconfigure(0, weight=1)
+        client_selection_frame.grid_columnconfigure(1, weight=2)
 
         all_client_types = [self.texts['select_type']] + db_manager.get_unique_client_types()
-        self.formulation_client_type_combo = CustomDropdown(client_selection_frame, values=all_client_types, width=120, command=self.update_formulation_client_combo)
-        self.formulation_client_type_combo.grid(row=0, column=0, padx=(0, 5), sticky="ew")
-        self.formulation_client_name_combo = CustomDropdown(client_selection_frame, values=[self.texts['select_client']], command=self.on_client_select, width=250)
+        self.formulation_client_type_combo = CustomDropdown(client_selection_frame, values=all_client_types, width=90, command=self.update_formulation_client_combo)
+        self.formulation_client_type_combo.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        self.formulation_client_name_combo = CustomDropdown(client_selection_frame, values=[self.texts['select_client']], command=self.on_client_select, width=150)
         self.formulation_client_name_combo.grid(row=0, column=1, sticky="ew")
 
-        # 선택된 거래처의 상세 정보를 표시할 라벨
+        # 3행: LAB NO. / 차수
+        ctk.CTkLabel(experiment_info_frame, text="LAB NO.").grid(row=3, column=0, padx=(5, 5), pady=5, sticky="w")
+        self.lab_no_entry = ctk.CTkEntry(experiment_info_frame, state="disabled")
+        self.lab_no_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+
+        ctk.CTkLabel(experiment_info_frame, text="차수").grid(row=3, column=2, padx=(10, 5), pady=5, sticky="w")
+        self.revision_entry = ctk.CTkEntry(experiment_info_frame)
+        self.revision_entry.grid(row=3, column=3, padx=5, pady=5, sticky="ew")
+        self.revision_entry.bind("<KeyRelease>", self.update_lab_no)
+
+        # 4행: 거래처 담당자 정보
         self.client_details_label = ctk.CTkLabel(
             experiment_info_frame, text="", justify="left",
             font=ctk.CTkFont(size=11), text_color="gray"
         )
-        self.client_details_label.grid(row=4, column=3, padx=10, pady=(0, 5), sticky="w")
+        self.client_details_label.grid(row=4, column=1, columnspan=3, padx=5, pady=(0, 5), sticky="w")
 
         # --- 3. 실험 결과 섹션 (form_pane에 추가) ---
         exp_result_frame = ctk.CTkFrame(self.form_pane)
@@ -331,63 +336,117 @@ class FormulationEditPopup(ctk.CTkToplevel):
         
         # --- content_pane 내부 UI 구성 ---
         content_pane.grid_columnconfigure(0, weight=1)
+        content_pane.grid_columnconfigure(1, weight=0) # 스크롤바 전용 열
         content_pane.grid_rowconfigure(1, weight=1)
 
-        # --- 처방 내용 헤더 (버튼 등) (content_pane에 추가) ---
-        content_header = ctk.CTkFrame(content_pane, fg_color="transparent")
-        content_header.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-        
-        # --- 구분(Phase) 입력 필드 추가 ---
-        ctk.CTkLabel(content_header, text=f"{self.texts['formulation_item_tree_columns']['phase']}:").pack(side="left", padx=(0, 5))
-        self.phase_entry = ctk.CTkEntry(content_header, width=60)
-        self.phase_entry.pack(side="left", padx=(0, 20))
-        self.phase_entry.insert(0, "A") # 기본값
+        # --- [v64] 처방 내용 헤더 툴바 (2단 콤팩트 배치) ---
+        content_header = ctk.CTkFrame(content_pane, fg_color=("gray92", "gray18"), corner_radius=6)
+        content_header.grid(row=0, column=0, columnspan=2, padx=5, pady=(0, 6), sticky="ew")
 
-        ctk.CTkLabel(content_header, text=self.texts['formulation_content'], font=ctk.CTkFont(size=14, weight="bold")).pack(side="left", padx=(0, 20))
+        # 1단: 처방 내용 타이틀 / 총 실험량 / 구분 입력
+        h_row1 = ctk.CTkFrame(content_header, fg_color="transparent")
+        h_row1.pack(fill="x", padx=8, pady=(4, 2))
 
-        # 총 실험량 입력 필드를 헤더로 이동
-        total_amount_header_frame = ctk.CTkFrame(content_header, fg_color="transparent")
-        total_amount_header_frame.pack(side="left", padx=(10, 20))
-        ctk.CTkLabel(total_amount_header_frame, text=self.texts['total_experiment_amount_g'], font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
-        self.main_total_amount_entry = ctk.CTkEntry(total_amount_header_frame, width=100, justify='right')
+        ctk.CTkLabel(h_row1, text=f"📋 {self.texts['formulation_content']}", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left", padx=(0, 12))
+
+        ctk.CTkLabel(h_row1, text=f"{self.texts['formulation_item_tree_columns']['phase']}:", font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 4))
+        self.phase_entry = ctk.CTkEntry(h_row1, width=45, height=26, font=ctk.CTkFont(size=11, weight="bold"), justify="center")
+        self.phase_entry.pack(side="left", padx=(0, 4))
+        self.phase_entry.insert(0, "A")
+        self.phase_entry.bind("<KeyRelease>", self.on_phase_entry_changed)
+        self.phase_entry.bind("<FocusOut>", self.on_phase_entry_changed)
+
+        self.apply_phase_button = ctk.CTkButton(
+            h_row1, text="구분 적용", width=55, height=26,
+            font=ctk.CTkFont(size=10), fg_color="gray45", hover_color="gray35",
+            command=self.apply_phase_to_selected
+        )
+        self.apply_phase_button.pack(side="left", padx=(0, 12))
+
+        ctk.CTkLabel(h_row1, text=self.texts['total_experiment_amount_g'], font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 4))
+        self.main_total_amount_entry = ctk.CTkEntry(h_row1, width=80, height=26, justify='right', font=ctk.CTkFont(size=11))
         self.main_total_amount_entry.pack(side="left")
         self.main_total_amount_entry.bind("<Return>", self.calculate_item_amounts)
         self.main_total_amount_entry.bind("<FocusOut>", self.calculate_item_amounts)
 
-        content_buttons = ctk.CTkFrame(content_header, fg_color="transparent")
-        content_buttons.pack(side="right")
-        self.add_material_button = ctk.CTkButton(content_buttons, text=self.texts['add_material'], width=80, command=self.open_add_material_dialog)
-        self.add_material_button.pack(side="left", padx=5)
-        self.to_100_button = ctk.CTkButton(content_buttons, text=self.texts['to_100'], width=80, command=self.set_ratio_to_100)
-        self.to_100_button.pack(side="left", padx=5)
-        self.move_up_button = ctk.CTkButton(content_buttons, text="▲", width=40, command=self.move_item_up)
-        self.move_up_button.pack(side="left", padx=(10, 2))
-        self.move_down_button = ctk.CTkButton(content_buttons, text="▼", width=40, command=self.move_item_down)
-        self.move_down_button.pack(side="left", padx=(2, 10))
-        self.delete_item_button = ctk.CTkButton(content_buttons, text=self.texts['delete_selected'], width=80, fg_color="#D32F2F", hover_color="#B71C1C", command=self.delete_selected_item)
-        self.delete_item_button.pack(side="left", padx=5)
+        # 2단: 액션 버튼 툴바 (원료추가 / 구분선 / To100 / 위 / 아래 / 삭제)
+        h_row2 = ctk.CTkFrame(content_header, fg_color="transparent")
+        h_row2.pack(fill="x", padx=8, pady=(2, 4))
+
+        self.add_material_button = ctk.CTkButton(
+            h_row2, text=f"➕ {self.texts['add_material']}", width=75, height=26,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#1565C0", hover_color="#0D47A1",
+            command=self.open_add_material_dialog
+        )
+        self.add_material_button.pack(side="left", padx=2)
+
+        self.add_separator_button = ctk.CTkButton(
+            h_row2, text="➖ 구분선", width=65, height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color="gray45", hover_color="gray35",
+            command=self.add_line_break_to_formulation
+        )
+        self.add_separator_button.pack(side="left", padx=2)
+
+        self.to_100_button = ctk.CTkButton(
+            h_row2, text=self.texts['to_100'], width=55, height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color="#0288D1", hover_color="#01579B",
+            command=self.set_ratio_to_100
+        )
+        self.to_100_button.pack(side="left", padx=2)
+
+        self.move_up_button = ctk.CTkButton(
+            h_row2, text="▲ 위로", width=48, height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color="gray40", hover_color="gray30",
+            command=self.move_item_up
+        )
+        self.move_up_button.pack(side="left", padx=2)
+
+        self.move_down_button = ctk.CTkButton(
+            h_row2, text="▼ 아래로", width=52, height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color="gray40", hover_color="gray30",
+            command=self.move_item_down
+        )
+        self.move_down_button.pack(side="left", padx=2)
+
+        self.delete_item_button = ctk.CTkButton(
+            h_row2, text=f"🗑️ {self.texts['delete_selected']}", width=70, height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color="#C62828", hover_color="#8E0000",
+            command=self.delete_selected_item
+        )
+        self.delete_item_button.pack(side="right", padx=2)
 
         # --- 처방 내용 Treeview ---
         formulation_item_cols = self.texts['formulation_item_tree_columns']
         # columns 인자에는 딕셔너리의 키 리스트를 명시적으로 전달해야 합니다.
         self.formulation_item_tree = ttk.Treeview(content_pane, columns=list(formulation_item_cols.keys()), show="headings", selectmode="browse")
-        self.formulation_item_tree.heading("phase", text=formulation_item_cols['phase']); self.formulation_item_tree.column("phase", width=80, anchor="center")
-        self.formulation_item_tree.heading("code", text=formulation_item_cols['code']); self.formulation_item_tree.column("code", width=100)
-        self.formulation_item_tree.heading("name", text=formulation_item_cols['name']); self.formulation_item_tree.column("name", width=150, stretch=True)
-        self.formulation_item_tree.heading("ratio", text=formulation_item_cols['ratio']); self.formulation_item_tree.column("ratio", width=80, anchor="e")
-        self.formulation_item_tree.heading("amount", text=formulation_item_cols['amount']); self.formulation_item_tree.column("amount", width=80, anchor="e")
-        self.formulation_item_tree.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 5), sticky="nsew")
+        self.formulation_item_tree.heading("phase", text=formulation_item_cols['phase']); self.formulation_item_tree.column("phase", width=50, minwidth=40, anchor="center")
+        self.formulation_item_tree.heading("code", text=formulation_item_cols['code']); self.formulation_item_tree.column("code", width=85, minwidth=70)
+        self.formulation_item_tree.heading("name", text=formulation_item_cols['name']); self.formulation_item_tree.column("name", width=160, minwidth=120, stretch=True)
+        self.formulation_item_tree.heading("ratio", text=formulation_item_cols['ratio']); self.formulation_item_tree.column("ratio", width=75, minwidth=65, anchor="e")
+        self.formulation_item_tree.heading("amount", text=formulation_item_cols['amount']); self.formulation_item_tree.column("amount", width=75, minwidth=65, anchor="e")
+        self.formulation_item_tree.grid(row=1, column=0, padx=(5, 0), pady=(0, 5), sticky="nsew")
         self.formulation_item_tree.bind("<Double-1>", self.edit_item_ratio)
+        self.formulation_item_tree.bind("<Button-3>", self.show_tree_context_menu)
+        self.formulation_item_tree.bind("<<TreeviewSelect>>", self.on_treeview_selection_change)
+        self.formulation_item_tree.bind("<Delete>", lambda e: self.delete_selected_item())
+        self.formulation_item_tree.bind("<BackSpace>", lambda e: self.delete_selected_item())
         self.formulation_item_tree.bind("<Up>", self.move_item_up)
         self.formulation_item_tree.bind("<Down>", self.move_item_down)
         self.formulation_item_tree.bind("<Control-Up>", self.move_item_up)
-        self.formulation_item_tree.bind("<Return>", self.edit_selected_item_ratio)
         self.formulation_item_tree.bind("<Control-Down>", self.move_item_down)
+        self.formulation_item_tree.bind("<Return>", self.edit_selected_item_ratio)
+        self.formulation_item_tree.bind("<F2>", self.edit_selected_item_ratio)
 
         # --- 처방 내용 Treeview 스크롤바 ---
-        tree_scrollbar = ttk.Scrollbar(content_pane, orient="vertical", command=self.formulation_item_tree.yview) # content_pane을 부모로 사용
-        self.formulation_item_tree.configure(yscrollcommand=tree_scrollbar.set) # 스크롤바를 Treeview에 연결
-        tree_scrollbar.grid(row=1, column=2, sticky="ns", pady=(0,5)) # 스크롤바 위치 수정
+        tree_scrollbar = ttk.Scrollbar(content_pane, orient="vertical", command=self.formulation_item_tree.yview)
+        self.formulation_item_tree.configure(yscrollcommand=tree_scrollbar.set)
+        tree_scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 5), pady=(0, 5))
 
 
         # --- 처방 내용 요약 ---
@@ -826,35 +885,40 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.update_formulation_summary()
 
     def edit_item_ratio(self, event):
-        """Treeview의 '함량' 셀을 더블클릭하여 수정합니다."""
-        if self.edit_entry: self.edit_entry.destroy()
+        """Treeview의 셀(구분, 코드, 원료명, 함량)을 더블클릭하여 즉시 수정합니다."""
+        if self.edit_entry: 
+            try: self.edit_entry.destroy()
+            except Exception: pass
+            self.edit_entry = None
+            
         region = self.formulation_item_tree.identify("region", event.x, event.y)
         column_id = self.formulation_item_tree.identify_column(event.x)
-        # '구분' 또는 '함량' 컬럼일 때 편집 시작
-        if region == "cell" and column_id in ["#1", "#4"]:
-            selected_item = self.formulation_item_tree.focus()
-            self.start_ratio_editing(selected_item, column_id)
-        else:
-            return
         selected_item = self.formulation_item_tree.focus()
-        self.start_ratio_editing(selected_item, "#4")
+        
+        if region == "cell" and selected_item and column_id in ["#1", "#2", "#3", "#4"]:
+            self.start_ratio_editing(selected_item, column_id)
 
     def edit_selected_item_ratio(self, event=None):
         selected_item = self.formulation_item_tree.focus()
-        if selected_item: self.start_ratio_editing(selected_item, "#4")
+        if selected_item: 
+            self.start_ratio_editing(selected_item, "#4")
 
-    def start_ratio_editing(self, selected_item, column_id):
+    def start_ratio_editing(self, selected_item, column_id="#4"):
         if not selected_item: return
         item_values = self.formulation_item_tree.item(selected_item, "values")
-        if item_values and item_values[1] == "---": return
+        if not item_values: return
+        if item_values[1] == "---" and column_id not in ["#1"]: return
 
-        x, y, width, height = self.formulation_item_tree.bbox(selected_item, column_id)
+        bbox = self.formulation_item_tree.bbox(selected_item, column_id)
+        if not bbox: return
+        x, y, width, height = bbox
         
         # 어떤 컬럼을 편집하는지에 따라 값 가져오기
         col_index = int(column_id.replace('#', '')) - 1
-        current_value = self.formulation_item_tree.item(selected_item, "values")[col_index]
+        current_value = str(item_values[col_index]) if col_index < len(item_values) else ""
 
-        self.edit_entry = ctk.CTkEntry(self.formulation_item_tree, width=width, height=height, justify='right')
+        justify_mode = 'right' if column_id in ["#4", "#5"] else ('center' if column_id in ["#1", "#2"] else 'left')
+        self.edit_entry = ctk.CTkEntry(self.formulation_item_tree, width=width, height=height, justify=justify_mode)
         self.edit_entry.place(x=x, y=y)
         self.edit_entry.insert(0, current_value)
         self.edit_entry.select_range(0, 'end')
@@ -865,26 +929,88 @@ class FormulationEditPopup(ctk.CTkToplevel):
     def on_edit_entry_commit(self, item_id, column_id):
         if not self.edit_entry: return
         try:
-            # Decimal로 안전하게 변환
-            new_ratio_dec = to_decimal(self.edit_entry.get())
+            val = self.edit_entry.get().strip()
             current_values = list(self.formulation_item_tree.item(item_id, "values"))
-            current_values[3] = decimal_to_str_full(new_ratio_dec)
-            # amount 재계산 (총량을 Decimal로)
-            if column_id == "#1": # 구분
-                current_values[0] = self.edit_entry.get().strip().upper()
-            elif column_id == "#4": # 함량
-                new_ratio_dec = to_decimal(self.edit_entry.get())
+            
+            if column_id == "#1": # 구분 (Phase)
+                current_values[0] = val.upper()
+            elif column_id == "#2": # 원료코드
+                current_values[1] = val
+            elif column_id == "#3": # 원료명
+                current_values[2] = val
+            elif column_id == "#4": # 함량 (%)
+                new_ratio_dec = to_decimal(val)
                 current_values[3] = decimal_to_str_full(new_ratio_dec)
                 # amount 재계산
                 current_values[4] = self.calculate_single_amount(new_ratio_dec)
             
-            self.formulation_item_tree.item(item_id, values=tuple(current_values)) # noqa
+            self.formulation_item_tree.item(item_id, values=tuple(current_values))
         except (InvalidOperation, ValueError, TypeError):
             pass
         finally:
-            self.edit_entry.destroy()
-            self.edit_entry = None
+            if self.edit_entry:
+                try: self.edit_entry.destroy()
+                except Exception: pass
+                self.edit_entry = None
             self.update_formulation_summary()
+
+    def on_treeview_selection_change(self, event=None):
+        """Treeview에서 선택 항목이 바뀔 때 상단 구분(Phase) 입력창을 해당 항목의 구분값으로 표시"""
+        selected_item = self.formulation_item_tree.focus()
+        if not selected_item: return
+        item_values = self.formulation_item_tree.item(selected_item, "values")
+        if item_values and len(item_values) > 0 and item_values[1] != "---":
+            current_phase = str(item_values[0]).strip()
+            if current_phase:
+                self.phase_entry.delete(0, "end")
+                self.phase_entry.insert(0, current_phase)
+
+    def on_phase_entry_changed(self, event=None):
+        """상단 구분(Phase) 입력창 변경 시 현재 선택된 행의 구분을 실시간 변경"""
+        new_phase = self.phase_entry.get().strip().upper()
+        selected_item = self.formulation_item_tree.focus()
+        if not selected_item: return
+        item_values = list(self.formulation_item_tree.item(selected_item, "values"))
+        if item_values and len(item_values) > 0 and item_values[1] != "---":
+            item_values[0] = new_phase
+            self.formulation_item_tree.item(selected_item, values=tuple(item_values))
+
+    def apply_phase_to_selected(self):
+        """구분 적용 버튼 클릭 시 현재 phase_entry 값을 선택된 항목(또는 포커스된 항목)에 적용"""
+        new_phase = self.phase_entry.get().strip().upper()
+        selected_item = self.formulation_item_tree.focus()
+        if not selected_item:
+            # 선택된 게 없다면 안내
+            return
+        item_values = list(self.formulation_item_tree.item(selected_item, "values"))
+        if item_values and item_values[1] != "---":
+            item_values[0] = new_phase
+            self.formulation_item_tree.item(selected_item, values=tuple(item_values))
+
+    def show_tree_context_menu(self, event):
+        """Treeview 우클릭 시 빠른 조작 팝업 메뉴 표시"""
+        item_id = self.formulation_item_tree.identify_row(event.y)
+        if item_id:
+            self.formulation_item_tree.selection_set(item_id)
+            self.formulation_item_tree.focus(item_id)
+            self.on_treeview_selection_change()
+            
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="➕ 원료 추가...", command=self.open_add_material_dialog)
+        menu.add_command(label="➖ 구분선 추가", command=self.add_line_break_to_formulation)
+        menu.add_separator()
+        menu.add_command(label="🏷️ 구분(Phase) 수정 (더블클릭)", command=lambda: self.start_ratio_editing(self.formulation_item_tree.focus(), "#1"))
+        menu.add_command(label="✏️ 함량 수정 (F2 / Return)", command=self.edit_selected_item_ratio)
+        menu.add_command(label="💯 To 100% 자동 채우기", command=self.set_ratio_to_100)
+        menu.add_separator()
+        menu.add_command(label="▲ 위로 이동 (Ctrl+Up)", command=self.move_item_up)
+        menu.add_command(label="▼ 아래로 이동 (Ctrl+Down)", command=self.move_item_down)
+        menu.add_separator()
+        menu.add_command(label="🗑️ 선택 항목 삭제 (Delete)", command=self.delete_selected_item)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def set_ratio_to_100(self):
         selected_item_id = self.formulation_item_tree.focus()
@@ -1204,3 +1330,37 @@ class FormulationEditPopup(ctk.CTkToplevel):
         formulation_data = excel_handler.import_formulation_template()
         if formulation_data:
             self._apply_imported_data_to_ui(formulation_data)
+
+    def add_materials_from_lookup(self, materials_list):
+        """원료/성분 조회 창에서 선택된 원료들을 처방 아이템 트리에 일괄 추가"""
+        if not materials_list:
+            return
+        
+        # 기존 등록된 원료 코드 수집 (중복 방지)
+        existing_codes = set()
+        for item_id in self.formulation_item_tree.get_children():
+            vals = self.formulation_item_tree.item(item_id, "values")
+            if len(vals) > 1:
+                existing_codes.add(vals[1])
+
+        added_count = 0
+        default_phase = "A"
+        for mat in materials_list:
+            m_code = getattr(mat, 'code', '') or ''
+            m_name = getattr(mat, 'name', '') or ''
+            if m_code and m_code in existing_codes:
+                continue
+
+            self.formulation_item_tree.insert("", "end", values=(
+                default_phase,
+                m_code,
+                m_name,
+                "0.00",  # 배합 비율 기본값
+                "0.00"   # 총량 기본값
+            ))
+            existing_codes.add(m_code)
+            added_count += 1
+
+        self.update_formulation_summary()
+        if added_count > 0:
+            messagebox.showinfo("원료 추가 완료", f"선택한 원료 {added_count}종이 처방 배합표에 자동 배치되었습니다.\n배합 비율(%)을 입력해 주세요.", parent=self)

@@ -50,11 +50,35 @@ class SignupWindow(ctk.CTkToplevel):
         main_frame.pack(padx=20, pady=20, fill="both", expand=True)
 
         title_label = ctk.CTkLabel(main_frame, text="신규 사용자 등록", font=ctk.CTkFont(size=20, weight="bold"))
-        title_label.pack(pady=20)
+        title_label.pack(pady=(15, 5))
         
-        info_label = ctk.CTkLabel(main_frame, text="※ DB에 첫 번째 사용자로 등록하면\n자동으로 관리자 권한이 부여됩니다.", 
-                                  wraplength=350, font=ctk.CTkFont(size=10), text_color="gray")
-        info_label.pack(pady=(0, 10))
+        # 새 PC / 공유 DB 연동 상태 프레임
+        db_conn_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray20"), corner_radius=8)
+        db_conn_frame.pack(fill="x", padx=20, pady=(0, 10))
+        
+        cur_db = getattr(db_manager, 'db_path', '기본 DB')
+        cur_db_display = os.path.basename(os.path.dirname(cur_db)) if cur_db else "기본"
+        self.db_status_label = ctk.CTkLabel(
+            db_conn_frame, 
+            text=f"📁 연동 DB: {os.path.basename(cur_db)} ({cur_db_display})",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray30", "gray80")
+        )
+        self.db_status_label.pack(side="left", padx=10, pady=6)
+        
+        self.db_change_btn = ctk.CTkButton(
+            db_conn_frame,
+            text="DB 경로 연동",
+            width=85,
+            height=24,
+            font=ctk.CTkFont(size=11),
+            command=self.open_db_settings
+        )
+        self.db_change_btn.pack(side="right", padx=8, pady=6)
+
+        info_label = ctk.CTkLabel(main_frame, text="※ 새 PC인 경우 [DB 경로 연동]을 통해 기존 공유 데이터와 연결할 수 있습니다.\n(DB에 첫 번째 사용자로 등록 시 자동으로 관리자 권한이 부여됩니다.)", 
+                                  wraplength=380, font=ctk.CTkFont(size=10), text_color="gray")
+        info_label.pack(pady=(0, 8))
 
         input_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         input_frame.pack(fill="x", padx=20)
@@ -88,10 +112,11 @@ class SignupWindow(ctk.CTkToplevel):
             current_row += 1
 
         # 권한 선택 추가
+        # 권한 선택 및 도움말(?) 버튼
         role_label = ctk.CTkLabel(input_frame, text="권한")
         role_label.grid(row=current_row, column=0, padx=(0, 10), pady=5, sticky="w")
         
-        # 관리자 존재 여부 확인 (권한 설명에서도 사용)
+        # 관리자 존재 여부 확인
         if not self.is_initial_setup:
             from database.db_manager import db_manager
             self.has_admin = db_manager.has_admin_users()
@@ -99,48 +124,36 @@ class SignupWindow(ctk.CTkToplevel):
             self.has_admin = False
         
         if self.is_initial_setup:
-            # 초기 설정 시에는 MSAD만 선택 가능
-            self.role_options = {
-                "MSAD - 모든 관리자": "MSAD"
-            }
+            self.role_options = {"MSAD - 모든 관리자": "MSAD"}
             default_role = "MSAD - 모든 관리자"
-            self.role_combo = ctk.CTkOptionMenu(
-                input_frame,
-                values=["MSAD - 모든 관리자"],
-                state="disabled"
-            )
         else:
-            # 일반 가입은 무조건 일반(RD)로 생성, 권한 선택 비활성화
-            self.role_options = {
-                "RD - 연구원": "RD"
-            }
+            self.role_options = {"RD - 연구원": "RD"}
             default_role = "RD - 연구원"
-            self.role_combo = ctk.CTkOptionMenu(
-                input_frame,
-                values=["RD - 연구원"],
-                state="disabled"
-            )
         
-        self.role_combo.set(default_role)
-        self.role_combo.grid(row=current_row, column=1, pady=5, sticky="ew")
-        current_row += 1
-        
-        # 권한 설명 라벨 (새로운 권한 체계)
-        if self.is_initial_setup:
-            role_info_text = "MSAD: 마스터 관리자 (모든 권한 + 데이터 백업 권한)"
-        else:
-            role_info_text = (
-                "신규 사용자는 기본적으로 'RD - 연구원' 권한으로 생성됩니다.\n"
-                "필요 시 관리자가 권한을 부여/변경합니다."
-            )
-        role_info = ctk.CTkLabel(
-            input_frame, 
-            text=role_info_text,
-            font=ctk.CTkFont(size=10),
-            text_color="gray",
-            justify="left"
+        signup_role_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
+        signup_role_frame.grid(row=current_row, column=1, pady=5, sticky="ew")
+        signup_role_frame.grid_columnconfigure(0, weight=1)
+
+        self.role_combo = ctk.CTkOptionMenu(
+            signup_role_frame,
+            values=list(self.role_options.keys()),
+            state="disabled"
         )
-        role_info.grid(row=current_row, column=1, pady=(0, 10), sticky="w")
+        self.role_combo.set(default_role)
+        self.role_combo.grid(row=0, column=0, sticky="ew")
+
+        # [?] 권한 설명 도움말 버튼
+        self.role_help_btn = ctk.CTkButton(
+            signup_role_frame,
+            text="?",
+            width=28,
+            height=28,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=("#3B82F6", "#2563EB"),
+            hover_color=("#2563EB", "#1D4ED8"),
+            command=self.show_role_help
+        )
+        self.role_help_btn.grid(row=0, column=1, padx=(6, 0))
         current_row += 1
 
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -174,6 +187,28 @@ class SignupWindow(ctk.CTkToplevel):
         register_button = ctk.CTkButton(button_frame, text="등록하기", command=self.register_user)
         register_button.pack(side="right")
 
+    def show_role_help(self):
+        """권한별 상세 기능 및 권한 안내를 팝업으로 표시합니다."""
+        from modules.ui_components import ModernInfoDialog
+        help_msg = (
+            "【 시스템 5대 권한 체계 안내 】\n\n"
+            "🔹 QC (품질관리원)\n"
+            "  - 품질 서류 관리: 원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서\n"
+            "  - 거래처 관리 (검색/참고 조회 전용)\n\n"
+            "🔹 RD (연구원)\n"
+            "  - 연구 서류 관리: 처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료\n"
+            "  - 성분 / 거래처 관리 (검색/참고 조회 전용)\n\n"
+            "🔹 RQ (연구/품질 통합관리자)\n"
+            "  - RD + QC 모든 연구 및 품질 서류 통합 관리\n\n"
+            "🔹 RQD (연구/품질/데이터 관리자)\n"
+            "  - RQ 모든 기능 + 성분/거래처 원천 데이터의 등록/수정/삭제 권한\n\n"
+            "🔹 MSAD (마스터 관리자)\n"
+            "  - 시스템 최고 권한: 모든 서류 + 모든 데이터 + 회원 관리 + 백업 권한\n\n"
+            "※ 신규 가입 시 기본적으로 'RD(연구원)' 권한으로 생성되며,\n"
+            "   가입 완료 후 관리자가 필요한 권한으로 변경할 수 있습니다."
+        )
+        ModernInfoDialog(self, title="권한 체계 안내", message=help_msg)
+
     def open_legal_notice(self):
         """법적 고지 팝업을 엽니다."""
         from modules.legal_notice import LegalNoticeDialog
@@ -200,6 +235,58 @@ class SignupWindow(ctk.CTkToplevel):
 
         LegalNoticeDialog(self, ver, on_dialog_agree, None, already_agreed=False)
 
+
+    def open_db_settings(self):
+        """회원가입 창에서 DB 경로를 설정하고 즉시 재연결합니다."""
+        from tkinter import filedialog
+        import configparser
+        
+        # config 경로 획득
+        config_path = getattr(self.master, 'config_path', None)
+        if not config_path or not os.path.exists(config_path):
+            config_path = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'CosRnD', 'config.ini')
+            if not os.path.exists(config_path):
+                config_path = os.path.join(PROJECT_ROOT, 'config.ini')
+
+        config = configparser.ConfigParser(interpolation=None)
+        try:
+            if os.path.exists(config_path):
+                config.read(config_path, encoding='utf-8')
+        except Exception:
+            pass
+
+        current = config.get('Paths', 'shared_db_path', fallback='') if config.has_section('Paths') else ''
+        folder = filedialog.askdirectory(
+            title="공유 DB 저장 폴더 선택",
+            initialdir=current if current and os.path.exists(current) else os.path.expanduser('~')
+        )
+        
+        if folder:
+            try:
+                if not config.has_section('Paths'):
+                    config.add_section('Paths')
+                config.set('Paths', 'shared_db_path', folder)
+                config.set('Paths', 'database_dir', folder)
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    config.write(f)
+
+                # DB 재연결
+                app_path = getattr(self.master, 'application_path', PROJECT_ROOT)
+                db_manager.dispose_engine()
+                db_manager.setup_database(app_path, config_path, None)
+
+                # 라벨 텍스트 갱신
+                cur_db = getattr(db_manager, 'db_path', folder)
+                cur_db_display = os.path.basename(os.path.dirname(cur_db)) if cur_db else "지정폴더"
+                self.db_status_label.configure(text=f"📁 연동 DB: {os.path.basename(cur_db)} ({cur_db_display})")
+                
+                # 마스터(LoginWindow)의 메시지 라벨도 업데이트
+                if hasattr(self.master, 'show_message'):
+                    self.master.show_message(f"DB 연결 성공!\n{folder}", "green")
+
+                messagebox.showinfo("DB 연동 완료", f"선택한 공유 DB와 성공적으로 연결되었습니다.\n\n경로: {folder}", parent=self)
+            except Exception as e:
+                messagebox.showerror("DB 연동 오류", f"DB 연결 중 오류가 발생했습니다:\n{e}", parent=self)
 
     def register_user(self):
         """사용자 등록 로직을 처리합니다."""
@@ -286,24 +373,50 @@ class SignupWindow(ctk.CTkToplevel):
                     "관리자에게 요청하여 권한을 변경하세요.", parent=self)
                 return
 
+            # 3-2. 담당번호(manager_code) 중복 검사 및 빈값 처리
+            raw_manager_code = self.entries["manager_code"].get().strip()
+            manager_code_val = raw_manager_code if raw_manager_code else None
+            if manager_code_val:
+                existing_manager = session.query(User).filter_by(manager_code=manager_code_val).first()
+                if existing_manager:
+                    messagebox.showerror("입력 오류", 
+                        f"담당번호 '{manager_code_val}'는 이미 사용 중입니다.\n"
+                        f"사용자: {existing_manager.username} ({existing_manager.real_name or '이름 없음'})",
+                        parent=self)
+                    return
+
             print("\n=== 사용자 등록 시작 ===")
             
             # 4. 비밀번호 암호화 및 사용자 생성
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
             print("  * 비밀번호 암호화 완료")
             
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            real_name_val = self.entries["real_name"].get().strip()
+            
+            initial_log = (
+                f"[{timestamp}] by {username} - 신규 가입\n"
+                f"- 사용자 ID: '{username}'\n"
+                f"- 실명: '{real_name_val}'\n"
+                f"- 직책: '{position}'\n"
+                f"- 담당번호: '{raw_manager_code}'\n"
+                f"- 권한: '{role_code}'"
+            )
+            
             new_user = User(
                 username=username,
-                real_name=self.entries["real_name"].get().strip(),
+                real_name=real_name_val,
                 password=hashed_password.decode('utf-8'),
                 position=position,
-                manager_code=self.entries["manager_code"].get().strip(),
+                manager_code=manager_code_val,
                 contact=contact,
                 zip_code=zip_code,
                 address=address,
                 # 정책: RQD도 관리자(True) 처리
                 is_admin=(role_code in ('MSAD', 'RQD')),
-                role=role_code  # 권한 코드 저장
+                role=role_code,  # 권한 코드 저장
+                change_log=initial_log
             )
             
             print(f"  * 새 사용자 객체 생성 - ID: {username}, 권한: {role_code}")

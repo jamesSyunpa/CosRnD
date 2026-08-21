@@ -59,19 +59,22 @@ LEGAL_NOTICE_FULL_TEXT = '''
 '''
 
 
-# Auto-install dependencies if missing (Self-Healing)
+# Auto-install dependencies if missing (Self-Healing - Optimized)
 def install_and_import(package_name, import_name=None):
     if import_name is None:
         import_name = package_name
+    if import_name in sys.modules:
+        return
     try:
         __import__(import_name)
     except ImportError:
         print(f"[Self-Healing] Installing missing package: {package_name}...")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print(f"[Self-Healing] Successfully installed {package_name}")
         except Exception as e:
             print(f"[Self-Healing] Failed to install {package_name}: {e}")
+
 
 # Ensure critical dependencies are present
 install_and_import("customtkinter")
@@ -119,83 +122,37 @@ import tkinter.font as tkfont
 import re
 from PIL import Image
 
-# ==================== 단일 인스턴스 실행 체크 ====================
+# ==================== 단일 인스턴스 실행 체크 (v64 스마트 소켓 락) ====================
+_instance_socket = None
+
 def check_single_instance():
-    """프로그램이 이미 실행 중인지 확인하고, 중복 실행을 방지합니다."""
+    """로컬 소켓 바인딩 방식으로 중복 실행을 100% 안전하게 판별하고 프로세스 종료 시 자동 해제되도록 합니다."""
+    global _instance_socket
+    import socket
     try:
-        if sys.platform.startswith('win'):
-            # Windows: Named Mutex 사용
-            import win32event
-            import win32api
-            import winerror
-            
-            mutex_name = "Global\\RnD_Platform_Cosmetic_Management_System_Mutex"
-            try:
-                # 뮤텍스 생성 시도
-                mutex = win32event.CreateMutex(None, False, mutex_name)
-                last_error = win32api.GetLastError()
-                
-                if last_error == winerror.ERROR_ALREADY_EXISTS:
-                    # 이미 실행 중
-                    import tkinter as tk
-                    root = tk.Tk()
-                    root.withdraw()
-                    messagebox.showerror(
-                        "프로그램 실행 오류",
-                        "프로그램이 이미 실행 중입니다.\n"
-                        "작업 관리자에서 기존 프로세스를 종료하거나,\n"
-                        "실행 중인 프로그램 창을 확인해주세요.",
-                        parent=root
-                    )
-                    root.destroy()
-                    return False
-                
-                # 뮤텍스를 전역 변수로 저장 (프로그램 종료 시까지 유지)
-                globals()['_app_mutex'] = mutex
-                print("[단일 인스턴스] 프로그램 실행 허용")
-                return True
-                
-            except Exception as e:
-                print(f"[단일 인스턴스] Windows 뮤텍스 생성 실패: {e}")
-                # 뮤텍스 생성 실패 시에도 프로그램은 계속 실행
-                return True
-        else:
-            # 다른 OS: 락 파일 사용
-            import fcntl
-            lock_file_path = os.path.join(
-                os.path.expanduser('~'),
-                '.rnd_platform_lock'
+        _instance_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # 로컬 고유 포트 바인딩 (Cosmetic R&D 고유 포트 49281)
+        _instance_socket.bind(('127.0.0.1', 49281))
+        print("[단일 인스턴스] 락 획득 완료 - 프로그램 정상 구동 허용")
+        return True
+    except (socket.error, OSError) as sock_err:
+        print(f"[단일 인스턴스] 이미 다른 인스턴스가 포트를 사용 중입니다: {sock_err}")
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showwarning(
+                "프로그램 실행 알림",
+                "프로그램이 이미 실행 중입니다.\n\n작업표시줄 또는 실행 중인 창을 확인해주세요.",
+                parent=root
             )
-            
-            try:
-                lock_file = open(lock_file_path, 'w')
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                
-                # 락 파일을 전역 변수로 저장 (프로그램 종료 시까지 유지)
-                globals()['_app_lock_file'] = lock_file
-                print("[단일 인스턴스] 프로그램 실행 허용")
-                return True
-                
-            except IOError:
-                # 이미 실행 중
-                import tkinter as tk
-                root = tk.Tk()
-                root.withdraw()
-                messagebox.showerror(
-                    "프로그램 실행 오류",
-                    "프로그램이 이미 실행 중입니다.\n"
-                    "실행 중인 프로그램 창을 확인해주세요.",
-                    parent=root
-                )
-                root.destroy()
-                return False
-            except Exception as e:
-                print(f"[단일 인스턴스] 락 파일 생성 실패: {e}")
-                return True
-                
+            root.destroy()
+        except Exception:
+            pass
+        return False
     except Exception as e:
-        print(f"[단일 인스턴스] 체크 중 오류 발생: {e}")
-        # 오류 발생 시에도 프로그램은 계속 실행
+        print(f"[단일 인스턴스] 체크 예외 발생(허용): {e}")
         return True
 
 from utils import center_window_on_mouse_display, resource_path
@@ -241,10 +198,11 @@ def create_fallback_icon(meipass_path: str | None) -> str | None:
         return None
 
 def get_persistent_config_path(app_dir_name: str = 'CosRnD') -> str:
-    """사용자 AppData 폴더 내 config.ini 경로를 제공합니다.
+    r"""사용자 AppData 폴더 내 config.ini 경로를 제공합니다.
     
     - 기존 사용자가 있는 경우 기존 local config.ini 또는 AppData\RnD_플랫폼의 설정을 복사/이동하여 적용해 줍니다.
     """
+
     try:
         # 1. 새 AppData 경로 설정 (%APPDATA%\CosRnD\config.ini)
         appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), app_dir_name)
@@ -312,9 +270,19 @@ from sqlalchemy import text
 from database.db_manager import db_manager
 from datetime import datetime
 
-# PyInstaller 빌드 환경을 고려한 안전한 모듈 임포트
+# 모듈 정적 임포트 (IDE 린터 및 런타임 정적 분석 완벽 지원)
+from modules.translation import get_texts
+import modules.translation as _translation
+from modules.login import LoginWindow
+from modules.settings_management import SettingsManagementFrame
+from modules.quality_management import QualityManagementFrame
+from modules.data_management import DataManagementFrame
+from modules.home_frame import HomeFrame
+from modules.document_management import DocumentManagementFrame
+
+# PyInstaller 빌드 환경을 고려한 안전한 모듈 경로 보강
 def safe_import_modules():
-    """빌드 환경에서 안전하게 모듈을 임포트합니다."""
+    """빌드 환경에서 안전하게 모듈 경로를 보강하고 로드 상태를 검증합니다."""
     global get_texts, _translation, LoginWindow, SettingsManagementFrame
     global QualityManagementFrame, DataManagementFrame, HomeFrame
     global DocumentManagementFrame
@@ -323,19 +291,11 @@ def safe_import_modules():
         # 경로 설정 (빌드 환경 고려)
         if getattr(sys, 'frozen', False):
             # PyInstaller 빌드된 환경
-            application_path = sys._MEIPASS
-            sys.path.insert(0, os.path.join(application_path, 'modules'))
-            sys.path.insert(0, os.path.join(application_path, 'database'))
-            sys.path.insert(0, os.path.join(application_path, 'utils'))
-        
-        from modules.translation import get_texts
-        import modules.translation as _translation
-        from modules.login import LoginWindow
-        from modules.settings_management import SettingsManagementFrame
-        from modules.quality_management import QualityManagementFrame
-        from modules.data_management import DataManagementFrame
-        from modules.home_frame import HomeFrame
-        from modules.document_management import DocumentManagementFrame
+            app_meipass = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+            for sub_dir in ['modules', 'database', 'utils']:
+                p = os.path.join(app_meipass, sub_dir)
+                if p not in sys.path:
+                    sys.path.insert(0, p)
         
         print("[DEBUG] 모든 모듈 임포트 성공")
         return True
@@ -812,7 +772,7 @@ class App(ctk.CTk):
                             pass
 
                     try:
-                        LegalNoticeDialog(self, "v61", on_agree, CONFIG_FILE_PATH)
+                        LegalNoticeDialog(self, "v64", on_agree, CONFIG_FILE_PATH)
                     except Exception as e:
                         # 다이얼로그 생성 실패 시 에러창을 띄우지 않고 계속 진행하도록 처리
                         print(f"[LEGAL] LegalNoticeDialog 생성 실패(무시): {e}")
@@ -920,12 +880,12 @@ class App(ctk.CTk):
         pass
 
     def show_pre_login_splash(self):
-        """앱 시작 시 초기화 작업을 보여주는 스플래시 화면"""
+        """[v64] 앱 시작 시 프리미엄 모던 카드 스플래시 및 고화질 로고 & 슬릭 프로그레스바"""
         splash = ctk.CTkToplevel(self)
-        splash.withdraw()  # 초기 드로잉 깜빡임 및 크기 드드득 현상 방지
+        splash.withdraw()
         splash.overrideredirect(True)
 
-        width, height = 350, 350
+        width, height = 400, 360
         try:
             center_window_on_mouse_display(splash, width=width, height=height)
         except Exception:
@@ -936,99 +896,81 @@ class App(ctk.CTk):
         splash.lift()
         splash.focus_force()
         
-        if sys.platform.startswith('win'):
-            trans_color = "#000001"
-            splash.configure(fg_color=trans_color)
-            splash.wm_attributes("-transparentcolor", trans_color)
-        else:
-            bg_color = splash._apply_appearance_mode(ctk.ThemeManager.theme["CTk"]["fg_color"])
-            splash.configure(fg_color=bg_color)
-        splash.deiconify()  # 위치 선정 완료 후 노출
-
-        # Compute image area first, then create label with fixed size (CustomTkinter requires width/height in constructor)
-        img_area_w, img_area_h = width - 40, height - 140
-        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent", width=img_area_w, height=img_area_h)
-        bg_label.place(relx=0.5, rely=0.38, anchor="center")
-
-        # 아이콘 로딩 시도
-        icon_loaded = False
-        splash_image = None
-        
-        try:
-            # 다양한 아이콘 이름으로 시도
-            icon_names = ["Icon.ico", "icon.ico", "ICON.ICO", "icon.png", "Icon.png"]
-            
-            for icon_name in icon_names:
-                try:
-                    icon_path = resource_path(icon_name)
-                    print(f"[PRE-SPLASH] Trying icon: {icon_path}")
-                    
-                    if os.path.exists(icon_path):
-                        print(f"[PRE-SPLASH] Icon file exists: {icon_path}")
-                        pil_img = Image.open(icon_path)
-                        
-                        # 이미지 크기 조정 및 형식 변환
-                        if pil_img.mode != 'RGBA':
-                            pil_img = pil_img.convert("RGBA")
-                        
-                        # 이미지 크기를 스플래시 화면에 맞게 조정
-                        # Resize image to fit the image area while preserving aspect ratio
-                        target_size = (img_area_w, img_area_h)
-                        pil_img.thumbnail(target_size, Image.Resampling.LANCZOS)
-                        splash_image = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
-                        bg_label.configure(image=splash_image, text="")
-                        print(f"[PRE-SPLASH] Successfully loaded icon: {icon_path}")
-                        icon_loaded = True
-                        break
-                        
-                except Exception as icon_error:
-                    print(f"[PRE-SPLASH] Failed to load {icon_name}: {icon_error}")
-                    continue
-            
-            if not icon_loaded:
-                print("[PRE-SPLASH] No icon file found, using fallback")
-                raise FileNotFoundError("No icon file found in any variant")
-                
-        except Exception as e:
-            print(f"[PRE-SPLASH] Icon loading completely failed: {e}")
-            # 아이콘 로딩 실패 시 간단한 텍스트만 표시 (배경색 제거)
-            bg_label.configure(
-                text="R&D Management System\n화장품 연구소 관리 시스템", 
-                font=ctk.CTkFont(size=16, weight="bold"),
-                text_color=("gray20", "gray80"),
-                fg_color="transparent"
-            )
-
-        # 언어 설정에 따라 텍스트 선택
-        if self.language == 'korean':
-            initial_text = "애플리케이션 시작 중... 0%"
-            task_descriptions = [
-                "설정 파일 로드 중...",
-                "데이터베이스 연결 중...",
-            ]
-            done_text = "완료!"
-        else: # English or other
-            initial_text = "Starting application... 0%"
-            task_descriptions = [
-                "Loading settings...",
-                "Connecting to database...",
-            ]
-            done_text = "Done!"
-
-        progress_label = ctk.CTkLabel(splash, text=initial_text, font=ctk.CTkFont(size=12),
-                                      fg_color="transparent", text_color=("black", "white"), corner_radius=5)
-        # Move progress label slightly up to leave clear space below the image
-        progress_label.place(relx=0.5, rely=0.78, anchor="center")
-
-        progress_bar = ctk.CTkProgressBar(
+        # 모던 다크/라이트 카드 배경 프레임 (메인 프로그램 테마 색상과 완벽 일치: 다크=#242424, 라이트=#EBEBEB)
+        card_frame = ctk.CTkFrame(
             splash, 
-            width=300,
-            fg_color="#E0F2F1",
-            progress_color="#69F0AE"
+            fg_color=("gray86", "gray17"),
+            border_width=1,
+            border_color=("gray75", "gray30"),
+            corner_radius=12
+        )
+        card_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        splash.deiconify()
+
+        # 상단 아이콘 이미지 영역
+        img_label = ctk.CTkLabel(card_frame, text="", fg_color="transparent")
+        img_label.pack(pady=(25, 8))
+
+        # 로고 로딩
+        try:
+            icon_path = resource_path("Icon.png")
+            if not os.path.exists(icon_path):
+                icon_path = resource_path("Icon.ico")
+            if os.path.exists(icon_path):
+                pil_img = Image.open(icon_path).convert("RGBA")
+                pil_img.thumbnail((100, 100), Image.Resampling.LANCZOS)
+                splash_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
+                img_label.configure(image=splash_img)
+        except Exception as err:
+            print(f"[PRE-SPLASH] Logo load error: {err}")
+
+        # 시스템 타이틀
+        title_label = ctk.CTkLabel(
+            card_frame,
+            text="화장품 연구소 관리 시스템",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=("black", "white")
+        )
+        title_label.pack(pady=(0, 2))
+
+        sub_title_label = ctk.CTkLabel(
+            card_frame,
+            text="Cosmetic R&D Platform v64",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "gray70")
+        )
+        sub_title_label.pack(pady=(0, 16))
+
+        # 상태 텍스트 및 작업 목록
+        task_descriptions = [
+            "설정 파일 로드 중...",
+            "데이터베이스 연결 중...",
+        ] if self.language == 'korean' else [
+            "Loading settings...",
+            "Connecting to database...",
+        ]
+        initial_text = "시스템 초기화 준비 중... 0%" if self.language == 'korean' else "Initializing system... 0%"
+        done_text = "초기화 완료!" if self.language == 'korean' else "Ready!"
+
+        progress_label = ctk.CTkLabel(
+            card_frame, 
+            text=initial_text, 
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=("#3B8ED0", "#1F6AA5")
+        )
+        progress_label.pack(pady=(0, 6))
+
+        # 메인 프로그램 테마와 100% 동일한 프로그레스바 (#3B8ED0 / #1F6AA5)
+        progress_bar = ctk.CTkProgressBar(
+            card_frame, 
+            width=320,
+            height=10,
+            corner_radius=5,
+            fg_color=("#939BA2", "#4A4D50"),
+            progress_color=("#3B8ED0", "#1F6AA5")
         )
         progress_bar.set(0)
-        # Place progress bar lower but within the splash window
-        progress_bar.place(relx=0.5, rely=0.88, anchor="center")
+        progress_bar.pack(pady=(0, 20))
 
         splash.update()
 
@@ -1196,12 +1138,12 @@ class App(ctk.CTk):
         self.after(100, run_tasks)
 
     def show_post_login_splash(self, on_complete):
-        """로그인 후 메인 UI 로딩 시 보여주는 스플래시 화면"""
+        """[v64] 로그인 후 프리미엄 모던 카드 스플래시 및 고화질 로고 & 슬릭 프로그레스바"""
         splash = ctk.CTkToplevel(self)
-        splash.withdraw()  # 초기 드로잉 깜빡임 및 크기 드드득 현상 방지
+        splash.withdraw()
         splash.overrideredirect(True)
 
-        width, height = 350, 350
+        width, height = 400, 360
         try:
             center_window_on_mouse_display(splash, width=width, height=height)
         except Exception:
@@ -1212,99 +1154,85 @@ class App(ctk.CTk):
         splash.lift()
         splash.focus_force()
         
-        if sys.platform.startswith('win'):
-            trans_color = "#000001"
-            splash.configure(fg_color=trans_color)
-            splash.wm_attributes("-transparentcolor", trans_color)
-        else:
-            bg_color = splash._apply_appearance_mode(ctk.ThemeManager.theme["CTk"]["fg_color"])
-            splash.configure(fg_color=bg_color)
-        splash.deiconify()  # 위치 선정 완료 후 노출
-
-        # Compute image display area and create label with explicit size (required by CustomTkinter)
-        img_area_w, img_area_h = width - 40, height - 140
-        bg_label = ctk.CTkLabel(splash, text="", fg_color="transparent", width=img_area_w, height=img_area_h)
-        bg_label.place(relx=0.5, rely=0.38, anchor="center")
-
-        # 아이콘 로딩 시도
-        icon_loaded = False
-        splash_image = None
-        
-        try:
-            # 다양한 아이콘 이름으로 시도
-            icon_names = ["Icon.ico", "icon.ico", "ICON.ICO", "icon.png", "Icon.png"]
-            
-            for icon_name in icon_names:
-                try:
-                    icon_path = resource_path(icon_name)
-                    print(f"[POST-SPLASH] Trying icon: {icon_path}")
-                    
-                    if os.path.exists(icon_path):
-                        print(f"[POST-SPLASH] Icon file exists: {icon_path}")
-                        pil_img = Image.open(icon_path)
-                        
-                        # 이미지 크기 조정 및 형식 변환
-                        if pil_img.mode != 'RGBA':
-                            pil_img = pil_img.convert("RGBA")
-
-                        # Resize image to fit the image area while preserving aspect ratio
-                        target_size = (img_area_w, img_area_h)
-                        pil_img.thumbnail(target_size, Image.Resampling.LANCZOS)
-                        splash_image = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
-                        bg_label.configure(image=splash_image, text="")
-                        print(f"[POST-SPLASH] Successfully loaded icon: {icon_path}")
-                        icon_loaded = True
-                        break
-                        
-                except Exception as icon_error:
-                    print(f"[POST-SPLASH] Failed to load {icon_name}: {icon_error}")
-                    continue
-            
-            if not icon_loaded:
-                print("[POST-SPLASH] No icon file found, using fallback")
-                raise FileNotFoundError("No icon file found in any variant")
-                
-        except Exception as e:
-            print(f"[POST-SPLASH] Icon loading completely failed: {e}")
-            # 아이콘 로딩 실패 시 간단한 텍스트만 표시 (배경색 제거)
-            bg_label.configure(
-                text="R&D Management System\n화장품 연구소 관리 시스템", 
-                font=ctk.CTkFont(size=16, weight="bold"),
-                text_color=("gray20", "gray80"),
-                fg_color="transparent"
-            )
-
-        if self.language == 'korean':
-            initial_text = "초기화 중... 0%"
-            task_descriptions = [
-                "이전 세션 정리 중...",
-                "사용자 기록 불러오는 중...",
-                "메인 화면 구성 중...",
-                "테마 적용 중..."
-            ]
-            done_text = "완료!"
-        else: # English or other
-            initial_text = "Initializing... 0%"
-            task_descriptions = [
-                "Clearing old session...",
-                "Loading user history...",
-                "Building main interface...",
-                "Applying visual theme..."
-            ]
-            done_text = "Done!"
-
-        progress_label = ctk.CTkLabel(splash, text=initial_text, font=ctk.CTkFont(size=12),
-                                      fg_color=("white", "black"), text_color=("black", "white"), corner_radius=5)
-        progress_label.place(relx=0.5, rely=0.78, anchor="center")
-
-        progress_bar = ctk.CTkProgressBar(
+        # 모던 다크/라이트 카드 배경 프레임 (메인 프로그램 테마와 100% 동일)
+        card_frame = ctk.CTkFrame(
             splash, 
-            width=300,
-            fg_color="#E0F2F1",
-            progress_color="#69F0AE"
+            fg_color=("gray86", "gray17"),
+            border_width=1,
+            border_color=("gray75", "gray30"),
+            corner_radius=12
+        )
+        card_frame.pack(fill="both", expand=True, padx=2, pady=2)
+        splash.deiconify()
+
+        # 상단 아이콘 이미지 영역
+        img_label = ctk.CTkLabel(card_frame, text="", fg_color="transparent")
+        img_label.pack(pady=(25, 8))
+
+        try:
+            icon_path = resource_path("Icon.png")
+            if not os.path.exists(icon_path):
+                icon_path = resource_path("Icon.ico")
+            if os.path.exists(icon_path):
+                pil_img = Image.open(icon_path).convert("RGBA")
+                pil_img.thumbnail((100, 100), Image.Resampling.LANCZOS)
+                splash_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
+                img_label.configure(image=splash_img)
+        except Exception as err:
+            print(f"[POST-SPLASH] Logo load error: {err}")
+
+        # 환영 타이틀
+        user_name = getattr(self.current_user, 'real_name', None) or getattr(self.current_user, 'username', '사용자')
+        title_label = ctk.CTkLabel(
+            card_frame,
+            text=f"환영합니다, {user_name}님!",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=("black", "white")
+        )
+        title_label.pack(pady=(0, 2))
+
+        sub_title_label = ctk.CTkLabel(
+            card_frame,
+            text="연구소 데이터베이스 및 워크스페이스 로드 중",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "gray70")
+        )
+        sub_title_label.pack(pady=(0, 16))
+
+        # 상태 텍스트
+        initial_text = "로그인 성공! 시스템 준비 중... 0%" if self.language == 'korean' else "Initializing... 0%"
+        task_descriptions = [
+            "이전 세션 정리 중...",
+            "최근 작업 이력 로드 중...",
+            "메인 화면 구성 중...",
+            "테마 적용 중..."
+        ] if self.language == 'korean' else [
+            "Clearing old session...",
+            "Loading user history...",
+            "Building main interface...",
+            "Applying visual theme..."
+        ]
+        done_text = "완료!" if self.language == 'korean' else "Done!"
+
+        progress_label = ctk.CTkLabel(
+            card_frame, 
+            text=initial_text, 
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=("#3B8ED0", "#1F6AA5")
+        )
+        progress_label.pack(pady=(0, 6))
+
+        # 모던 슬림 프로그레스바 (메인 프로그램 테마와 100% 동일)
+        progress_bar = ctk.CTkProgressBar(
+            card_frame, 
+            width=320,
+            height=10,
+            corner_radius=5,
+            fg_color=("#939BA2", "#4A4D50"),
+            progress_color=("#3B8ED0", "#1F6AA5")
         )
         progress_bar.set(0)
-        progress_bar.place(relx=0.5, rely=0.88, anchor="center")
+        progress_bar.pack(pady=(0, 20))
 
         splash.update()
 
@@ -1441,91 +1369,252 @@ class App(ctk.CTk):
             except Exception:
                 current_mode = "dark" # 기본 폴백
 
-        if current_mode == "dark":
-            m_bg = "#2b2b2b"
-            m_fg = "#ffffff"
-            m_abg = "#1f538d" # Active Background
-            m_afg = "#ffffff"
-        else:
-            m_bg = "#ebebeb"
-            m_fg = "#000000"
-            m_abg = "#3a7ebf"
-            m_afg = "#ffffff"
+        # [v64] Windows 네이티브 메뉴바의 흰색 강제 렌더링을 완전히 제거하고,
+        # 세련된 다크 탑바(Custom Dark Menubar)를 프로그램 최상단에 마운트합니다.
+        self.config(menu="") # 윈도우 기본 메뉴바 제거
 
-        # tk.Menu의 OS별(윈도우 테마 고정 렌더링) 한계를 극복하기 위해 tk.Menu의 렌더링 설정을 제거하고
-        # 시스템 기본 메뉴바 대신 프로그램 최상단에 테마 연동형 프레임을 얹는 방식(Fake Menu Frame)을 도입하거나,
-        # 윈도우 창 자체의 표준 메뉴 배경을 Tk 수준에서 강제 연동합니다.
-        # 여기서는 기존 윈도우 메뉴바를 유지하되 시스템 윈도우 메뉴바 특성을 제거하여 OS 스타일 제약을 피합니다.
-        self.menubar = tk.Menu(self, bg=m_bg, fg=m_fg, activebackground=m_abg, activeforeground=m_afg, bd=0)
-        
-        # 윈도우 API 연동 오류나 테마가 다크인데도 메뉴바만 흰색으로 고정되는 현상을 방지하기 위해 
-        # tk.Menu 속성 대신 윈도우즈 OS 네이티브 렌더러 비활성화 처리 또는 메뉴바에 직접 시스템 색상 맵핑
-        # Windows OS에서는 tk.Menu가 윈도우 시스템 제어판의 테마를 따르기 때문에 Python의 bg 설정이 적용되지 않고 흰색으로 짤리는 경우가 많습니다.
-        # 따라서 다크 모드 등 프로그램 테마와 온전히 동기화시키기 위해, tk.Menu의 시스템 렌더링 강제 비활성화 기법(tearoff=0 및 추가 옵션) 적용
-        
+        # 상단 메뉴바 컨테이너 프레임 (다크 배경: #1E1E1E / #181818)
+        self.top_menubar_frame = ctk.CTkFrame(
+            self,
+            height=34,
+            corner_radius=0,
+            fg_color=("#E0E0E0", "#18191A"), # 라이트 모드 연회색, 다크 모드 딥 차콜
+            border_width=1,
+            border_color=("#CCCCCC", "#2A2B2D")
+        )
+        self.top_menubar_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+        self.top_menubar_frame.pack_propagate(False)
+
+        # [v64] 마우스 이동(Hover) 시 차단 없이 스무스하게 메뉴가 따라오는 CTk 기반 모던 드롭다운 구현
+        self._current_dropdown_window = None
+        self._current_active_btn = None
+
+        # 메뉴 데이터 구조 정의
+        menu_data = {}
+
         # 1. 파일 메뉴
-        self.file_menu = tk.Menu(self.menubar, tearoff=0, bg=m_bg, fg=m_fg, activebackground=m_abg, activeforeground=m_afg, bd=0)
-        self.file_menu.add_command(label="홈 화면", command=lambda: self.navigate_and_record(FRAME_HOME))
-        self.file_menu.add_separator()
-        self.file_menu.add_command(label="로그아웃", command=self.logout)
-        self.file_menu.add_command(label="종료", command=self.on_closing)
-        self.menubar.add_cascade(label="파일", menu=self.file_menu)
-        
-        # 2. 연구소 메뉴 (연구소 권한이 있는 경우에만 표시)
+        menu_data['file'] = [
+            ("홈 화면", lambda: self.navigate_and_record(FRAME_HOME)),
+            ("로그아웃", self.logout),
+            ("종료", self.on_closing),
+        ]
+
+        # 2. 연구소 메뉴
         if self.current_user.has_research_access():
-            self.research_menu = tk.Menu(self.menubar, tearoff=0, bg=m_bg, fg=m_fg, activebackground=m_abg, activeforeground=m_afg, bd=0)
-            self.research_menu.add_command(label="원료/성분 조회", command=lambda: self.navigate_and_record("document/lookup")) # 처방관리 내 탭
-            self.research_menu.add_command(label="처방 목록", command=lambda: self.navigate_and_record("document/list"))
-            self.research_menu.add_command(label="견적 작성", command=lambda: self.navigate_and_record("document/quote"))
-            self.research_menu.add_command(label="전성분 분석", command=lambda: self.navigate_and_record("document/ingredient"))
-            self.research_menu.add_command(label="생산 처방", command=lambda: self.navigate_and_record("document/production"))
-            self.research_menu.add_separator()
-            self.research_menu.add_command(label="실험일지 (물성 규격)", command=lambda: self.navigate_and_record("document/property_spec")) # 문서 탭 내 탭
-            self.research_menu.add_command(label="기능성 보고서", command=lambda: self.navigate_and_record("document/report"))
-            self.menubar.add_cascade(label="연구소", menu=self.research_menu)
-        
-        # 3. 품질관리 메뉴 (품질관리 권한이 있는 경우에만 표시)
+            menu_data['research'] = [
+                ("원료/성분 조회", lambda: self.navigate_and_record("document/lookup")),
+                ("처방 목록", lambda: self.navigate_and_record("document/list")),
+                ("견적 작성", lambda: self.navigate_and_record("document/quote")),
+                ("전성분 분석", lambda: self.navigate_and_record("document/ingredient")),
+                ("생산 처방", lambda: self.navigate_and_record("document/production")),
+                ("실험일지 (물성 규격)", lambda: self.navigate_and_record("document/property_spec")),
+                ("기능성 보고서", lambda: self.navigate_and_record("document/report")),
+            ]
+
+        # 3. 품질관리 메뉴
         if self.current_user.has_quality_access():
-            self.quality_menu = tk.Menu(self.menubar, tearoff=0, bg=m_bg, fg=m_fg, activebackground=m_abg, activeforeground=m_afg, bd=0)
-            self.quality_menu.add_command(label="COA (성적서)", command=lambda: self.navigate_and_record("quality/coa"))
-            self.quality_menu.add_command(label="원료목록보고", command=lambda: self.navigate_and_record("quality/ingredient_report"))
-            self.menubar.add_cascade(label="품질관리", menu=self.quality_menu)
-        
-        # 4. 데이터/설정 메뉴 (데이터관리 권한이 있는 경우에만 표시)
+            menu_data['quality'] = [
+                ("COA (성적서)", lambda: self.navigate_and_record("quality/coa")),
+                ("MSDS (물질안전보건자료)", lambda: self.navigate_and_record("quality/msds")),
+                ("원료목록보고", lambda: self.navigate_and_record("quality/ingredient_report")),
+                ("원료 입고검사", lambda: self.navigate_and_record("quality/mat_inspection")),
+                ("제품표준서", lambda: self.navigate_and_record("quality/prod_standard")),
+                ("제조관리기록서 (BMR)", lambda: self.navigate_and_record("quality/mfg_record")),
+                ("안정성 시험 (경시변화)", lambda: self.navigate_and_record("quality/stability_test")),
+                ("용기 상용성 시험", lambda: self.navigate_and_record("quality/compatibility_test")),
+            ]
+
+        # 4. 데이터 & 설정 메뉴
         if self.current_user.can_access_data_management():
-            self.data_menu = tk.Menu(self.menubar, tearoff=0, bg=m_bg, fg=m_fg, activebackground=m_abg, activeforeground=m_afg, bd=0)
-            self.data_menu.add_command(label="성분 관리", command=lambda: self.navigate_and_record("data/ingredient_mgt"))
-            # 거래처 관리 및 사용자 관리는 최고 관리자/RQD/MSAD 권한 소유자만 항목 추가
+            data_items = [
+                ("성분 관리", lambda: self.navigate_and_record("data/ingredient_mgt")),
+            ]
             if self.current_user.is_admin or self.current_user.role in ['RQD', 'MSAD']:
-                self.data_menu.add_command(label="거래처 관리", command=lambda: self.navigate_and_record("data/client_mgt"))
-                self.data_menu.add_command(label="사용자 관리", command=lambda: self.navigate_and_record("data/user_mgt"))
-            self.data_menu.add_separator()
-            self.data_menu.add_command(label="시스템 설정", command=lambda: self.navigate_and_record("settings/settings_sub"))
-            self.menubar.add_cascade(label="데이터 & 설정", menu=self.data_menu)
-        
-        # 윈도우에 장착
-        self.config(menu=self.menubar)
-        
-        # Windows 시스템 자체 메뉴 렌더러가 Tkinter의 bg 값을 강제로 덮어씌워 하얗게 나오는 버그를 우회하기 위해
-        # Windows 테마의 Dark 모드 윈도우 API를 직접 호출하여 타이틀바와 표준 메뉴바 영역의 비주얼을 강제로 어두운 색상으로 변경(UWA/DWM 렌더링 힌트 설정)
-        if sys.platform.startswith('win'):
-            try:
-                import ctypes
-                hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
-                if not hwnd:
-                    hwnd = self.winfo_id()
-                # Windows 10 버전 2004(Build 19041) 이상에서 타이틀 및 메뉴바 영역 테마 연동 지원
-                DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-                is_dark = ctypes.c_int(1 if current_mode == "dark" else 0)
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 
-                    DWMWA_USE_IMMERSIVE_DARK_MODE, 
-                    ctypes.byref(is_dark), 
-                    ctypes.sizeof(is_dark)
+                data_items.append(("거래처 관리", lambda: self.navigate_and_record("data/client_mgt")))
+                data_items.append(("사용자 관리", lambda: self.navigate_and_record("data/user_mgt")))
+            data_items.append(("시스템 설정", lambda: self.navigate_and_record("settings/settings_sub")))
+            menu_data['data'] = data_items
+
+        def close_dropdown():
+            if self._current_dropdown_window:
+                try:
+                    self._current_dropdown_window.destroy()
+                except Exception:
+                    pass
+                self._current_dropdown_window = None
+            if self._current_active_btn:
+                try:
+                    self._current_active_btn.configure(fg_color="transparent")
+                except Exception:
+                    pass
+                self._current_active_btn = None
+
+        def show_dropdown(key, btn_widget):
+            if self._current_dropdown_window and self._current_active_btn == btn_widget:
+                # 같은 버튼 클릭 시 토글 닫기
+                close_dropdown()
+                return
+
+            close_dropdown()
+            items = menu_data.get(key, [])
+            if not items:
+                return
+
+            self._current_active_btn = btn_widget
+            btn_widget.configure(fg_color=("#D0D0D0", "#333333"))
+
+            # 드롭다운 창 생성 (모던 플랫 다크 테마)
+            dropdown = ctk.CTkToplevel(self)
+            dropdown.overrideredirect(True)
+            dropdown.attributes("-topmost", True)
+            self._current_dropdown_window = dropdown
+
+            # 메인 컨테이너 프레임
+            container = ctk.CTkFrame(
+                dropdown,
+                corner_radius=6,
+                fg_color=("#F5F5F5", "#202124"),
+                border_width=1,
+                border_color=("#D0D0D0", "#3C4043")
+            )
+            container.pack(fill="both", expand=True, padx=0, pady=0)
+
+            # 항목 렌더링 (구분선 없이 균일하고 정갈한 원터치 리스트)
+            for label, cmd in items:
+                def make_click_cmd(target_cmd):
+                    return lambda: (close_dropdown(), target_cmd())
+
+                item_btn = ctk.CTkButton(
+                    container,
+                    text=label,
+                    height=28,
+                    anchor="w",
+                    font=ctk.CTkFont(size=12),
+                    fg_color="transparent",
+                    hover_color=("#E8EAED", "#2E3134"),
+                    text_color=("#202124", "#E8EAED"),
+                    corner_radius=4,
+                    command=make_click_cmd(cmd)
                 )
-                print(f"[THEME-DWM] Windows 다크 모드 스타일 강제 설정 완료 (값: {is_dark.value})")
-            except Exception as dwm_err:
-                print(f"[THEME-DWM] DWM attribute 설정 실패: {dwm_err}")
+                item_btn.pack(fill="x", padx=4, pady=2)
+
+            # 위치 계산
+            dropdown.update_idletasks()
+            x = btn_widget.winfo_rootx()
+            y = btn_widget.winfo_rooty() + btn_widget.winfo_height() + 2
+            dropdown.geometry(f"+{x}+{y}")
+
+        def on_hover_btn(key, btn_widget):
+            # 이미 다른 메뉴가 열려 있는 상태라면 마우스가 이동하는 순간 해당 메뉴로 즉시 전환
+            if self._current_dropdown_window is not None and self._current_active_btn != btn_widget:
+                show_dropdown(key, btn_widget)
+
+        def bind_menu_button(btn_widget, key):
+            btn_widget.configure(command=lambda: show_dropdown(key, btn_widget))
+            for widget in [btn_widget, getattr(btn_widget, '_canvas', None), getattr(btn_widget, '_text_label', None)]:
+                if widget:
+                    widget.bind("<Enter>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
+                    widget.bind("<Motion>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
+
+        # 전역 클릭 시 메뉴 닫기 바인딩
+        def on_global_click(event):
+            if self._current_dropdown_window:
+                w = event.widget
+                menubar_widgets = [self.top_menubar_frame, self.btn_file]
+                if hasattr(self, 'btn_research'): menubar_widgets.append(self.btn_research)
+                if hasattr(self, 'btn_quality'): menubar_widgets.append(self.btn_quality)
+                if hasattr(self, 'btn_data'): menubar_widgets.append(self.btn_data)
+
+                is_in_menubar = False
+                for mw in menubar_widgets:
+                    if w == mw or (hasattr(mw, '_text_label') and w == mw._text_label) or (hasattr(mw, '_canvas') and w == mw._canvas):
+                        is_in_menubar = True
+                        break
+
+                if not is_in_menubar:
+                    close_dropdown()
+
+        self.bind_all("<Button-1>", on_global_click, add="+")
+
+        btn_font = ctk.CTkFont(size=12, weight="normal")
+
+        # [파일 버튼]
+        self.btn_file = ctk.CTkButton(
+            self.top_menubar_frame,
+            text="파일",
+            width=50,
+            height=26,
+            font=btn_font,
+            fg_color="transparent",
+            hover_color=("#D0D0D0", "#333333"),
+            text_color=("#1A1A1A", "#D4D4D4"),
+            anchor="center",
+            corner_radius=4
+        )
+        bind_menu_button(self.btn_file, 'file')
+        self.btn_file.pack(side="left", padx=(8, 2), pady=4)
+
+        # [연구소 버튼]
+        if self.current_user.has_research_access():
+            self.btn_research = ctk.CTkButton(
+                self.top_menubar_frame,
+                text="연구소",
+                width=60,
+                height=26,
+                font=btn_font,
+                fg_color="transparent",
+                hover_color=("#D0D0D0", "#333333"),
+                text_color=("#1A1A1A", "#D4D4D4"),
+                anchor="center",
+                corner_radius=4
+            )
+            bind_menu_button(self.btn_research, 'research')
+            self.btn_research.pack(side="left", padx=2, pady=4)
+
+        # [품질관리 버튼]
+        if self.current_user.has_quality_access():
+            self.btn_quality = ctk.CTkButton(
+                self.top_menubar_frame,
+                text="품질관리",
+                width=68,
+                height=26,
+                font=btn_font,
+                fg_color="transparent",
+                hover_color=("#D0D0D0", "#333333"),
+                text_color=("#1A1A1A", "#D4D4D4"),
+                anchor="center",
+                corner_radius=4
+            )
+            bind_menu_button(self.btn_quality, 'quality')
+            self.btn_quality.pack(side="left", padx=2, pady=4)
+
+        # [데이터 & 설정 버튼]
+        if self.current_user.can_access_data_management():
+            self.btn_data = ctk.CTkButton(
+                self.top_menubar_frame,
+                text="데이터 & 설정",
+                width=90,
+                height=26,
+                font=btn_font,
+                fg_color="transparent",
+                hover_color=("#D0D0D0", "#333333"),
+                text_color=("#1A1A1A", "#D4D4D4"),
+                anchor="center",
+                corner_radius=4
+            )
+            bind_menu_button(self.btn_data, 'data')
+            self.btn_data.pack(side="left", padx=2, pady=4)
+
+        # 우측 상단 상태/정보 표시 (사용자명 및 권한 배지)
+        role_label = getattr(self.current_user, 'role', '')
+        real_name = getattr(self.current_user, 'real_name', '') or getattr(self.current_user, 'username', '')
+        self.top_user_badge = ctk.CTkLabel(
+            self.top_menubar_frame,
+            text=f"{real_name} ({role_label})",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "gray65")
+        )
+        self.top_user_badge.pack(side="right", padx=(0, 12), pady=4)
 
 
         self.grid_columnconfigure(0, weight=1)
@@ -1590,7 +1679,7 @@ class App(ctk.CTk):
 
         # Rebuild title map in case normalization or ACTION_CONFIG changed
         rebuild_action_title_map()
-        self.title("R&D Management System" if self.language == "english" else "화장품 연구소 관리 시스템")
+        self.title("R&D Management System (v64)" if self.language == "english" else "화장품 연구소 관리 시스템 (v64)")
 
         self.navigation_frame_label = ctk.CTkLabel(
             self.navigation_frame, 
@@ -1687,8 +1776,13 @@ class App(ctk.CTk):
         )
         self.logout_button.grid(row=current_row, column=0, padx=15, pady=(10, 30))
 
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=0) # 상단 커스텀 메뉴바
+        self.grid_rowconfigure(1, weight=1) # 메인 컨텐츠 영역
+        self.grid_rowconfigure(2, weight=0) # 하단 카피라이트
+
         self.main_content_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.main_content_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        self.main_content_frame.grid(row=1, column=0, sticky="nsew", padx=(20, 20), pady=(10, 5))
         self.main_content_frame.grid_columnconfigure(0, weight=1)
         self.main_content_frame.grid_rowconfigure(0, weight=1)
         
@@ -1713,11 +1807,11 @@ class App(ctk.CTk):
         # 우측 하단 카피라이트 표기 (박제)
         self.copyright_label = ctk.CTkLabel(
             self,
-            text="Copyright © 2026 luckfortma. All rights reserved.",
+            text="v64 | Copyright © 2026 luckfortma. All rights reserved.",
             font=ctk.CTkFont(size=10),
             text_color="gray50"
         )
-        self.copyright_label.grid(row=1, column=0, sticky="se", padx=20, pady=(0, 5))
+        self.copyright_label.grid(row=2, column=0, sticky="se", padx=20, pady=(0, 6))
 
     def get_or_create_frame(self, frame_name):
         """요청된 프레임이 없으면 실시간 생성(Lazy Loading)하고 그리드 배치합니다."""
@@ -1984,17 +2078,25 @@ class App(ctk.CTk):
                 current_mode = "dark"
 
         if current_mode == "dark":
-            m_bg = "#2b2b2b"
-            m_fg = "#ffffff"
-            m_abg = "#1f538d"
-            m_afg = "#ffffff"
+            m_bg = "#242526"
+            m_fg = "#E4E6EB"
+            m_abg = "#3A3B3C"
+            m_afg = "#FFFFFF"
+            bar_bg = ("#E0E0E0", "#18191A")
         else:
-            m_bg = "#dbdbdb"
-            m_fg = "#000000"
-            m_abg = "#3a7ebf"
-            m_afg = "#ffffff"
+            m_bg = "#FFFFFF"
+            m_fg = "#050505"
+            m_abg = "#E4E6EB"
+            m_afg = "#000000"
+            bar_bg = ("#E0E0E0", "#18191A")
 
-        for menu_attr in ['menubar', 'file_menu', 'research_menu', 'quality_menu', 'data_menu']:
+        if hasattr(self, 'top_menubar_frame') and self.top_menubar_frame:
+            try:
+                self.top_menubar_frame.configure(fg_color=bar_bg)
+            except Exception:
+                pass
+
+        for menu_attr in ['file_menu', 'research_menu', 'quality_menu', 'data_menu']:
             if hasattr(self, menu_attr):
                 menu = getattr(self, menu_attr)
                 if menu:
@@ -2010,26 +2112,26 @@ class App(ctk.CTk):
         
         if theme.lower() == 'light':
             style.theme_use("default")
-            style.configure("Treeview", background="white", foreground="black", fieldbackground="white", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
-            style.configure("Treeview.Heading", background="#f0f0f0", foreground="black", font=('Malgun Gothic', 10, 'bold'))
-            style.map('Treeview', background=[('selected', '#3475d9')])
-            style.map('Treeview.Heading', background=[('active', '#dcdcdc')])
+            style.configure("Treeview", background="#FFFFFF", foreground="#1F2937", fieldbackground="#FFFFFF", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
+            style.configure("Treeview.Heading", background="#F3F4F6", foreground="#111827", font=('Malgun Gothic', 9, 'bold'), borderwidth=1, relief="flat")
+            style.map('Treeview', background=[('selected', '#3B82F6')], foreground=[('selected', '#FFFFFF')])
+            style.map('Treeview.Heading', background=[('active', '#E5E7EB')])
             style.configure("folder", font=('Malgun Gothic', 9, 'bold'))
-            style.configure("group_odd", background="#F0F8FF")
-            style.configure("group_even", background="white")
-            style.map("group_odd", background=[('selected', '#3475d9')])
-            style.map("group_even", background=[('selected', '#3475d9')])
-        else: # 다크 테마 설정
+            style.configure("group_odd", background="#F9FAFB")
+            style.configure("group_even", background="#FFFFFF")
+            style.map("group_odd", background=[('selected', '#3B82F6')])
+            style.map("group_even", background=[('selected', '#3B82F6')])
+        else: # 다크 테마 설정 (차분하고 세련된 모던 슬레이트 다크)
             style.theme_use("default")
-            style.configure("Treeview", background="#2b2b2b", foreground="white", fieldbackground="#2b2b2b", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
-            style.configure("Treeview.Heading", background="#333333", foreground="white", font=('Malgun Gothic', 10, 'bold'))
-            style.map('Treeview', background=[('selected', '#253655')])
-            style.map('Treeview.Heading', background=[('active', '#4a4a4a')])
+            style.configure("Treeview", background="#202124", foreground="#E8EAED", fieldbackground="#202124", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
+            style.configure("Treeview.Heading", background="#2D3035", foreground="#F1F3F4", font=('Malgun Gothic', 9, 'bold'), borderwidth=1, relief="flat")
+            style.map('Treeview', background=[('selected', '#1A73E8')], foreground=[('selected', '#FFFFFF')])
+            style.map('Treeview.Heading', background=[('active', '#3C4043')])
             style.configure("folder", font=('Malgun Gothic', 9, 'bold'))
-            style.configure("group_odd", background="#2c3e50")
-            style.configure("group_even", background="#2b2b2b")
-            style.map("group_odd", background=[('selected', '#253655')])
-            style.map("group_even", background=[('selected', '#253655')])
+            style.configure("group_odd", background="#282A2E")
+            style.configure("group_even", background="#202124")
+            style.map("group_odd", background=[('selected', '#1A73E8')])
+            style.map("group_even", background=[('selected', '#1A73E8')])
 
         try:
             self.update_menubar_style()

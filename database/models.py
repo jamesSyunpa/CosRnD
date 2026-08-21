@@ -411,6 +411,182 @@ class FinishedProductCOAItem(Base):
 
     header = relationship('FinishedProductCOA', back_populates='items')
 
+
+# ----------------------------------------------------------------------------
+# 품질관리 5대 신규 서류 모델 (원료입고검사, 제품표준서, 제조기록서, 경시안정성, 용기상용성)
+# ----------------------------------------------------------------------------
+
+class MaterialInspectionReport(Base):
+    """1. 원료 입고검사성적서 (Raw Material Incoming Inspection Report)"""
+    __tablename__ = 'material_inspection_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    material_code = Column(String(100), nullable=False)
+    material_name = Column(String(255), nullable=False)
+    supplier_name = Column(String(255))
+    incoming_date = Column(Date)
+    lot_no = Column(String(100))
+    incoming_amount_kg = Column(Float)
+    
+    appearance_spec = Column(String(255))      # 성상/외관 기준
+    appearance_result = Column(String(255))    # 성상/외관 결과
+    color_spec = Column(String(255))           # 색상 기준
+    color_result = Column(String(255))         # 색상 결과
+    odor_spec = Column(String(255))            # 향/취 기준
+    odor_result = Column(String(255))          # 향/취 결과
+    refractive_index = Column(String(100))     # 굴절률
+    specific_gravity = Column(String(100))     # 비중
+    ph_val = Column(String(100))               # pH
+    packaging_status = Column(String(100))     # 포장/밀봉 상태 (정상/불량)
+    
+    examiner = Column(String(100))
+    overall_result = Column(String(50), default="적합")  # 적합/부적합
+    test_items_json = Column(Text)             # 동적 추가/제거된 시험 항목 리스트 (JSON)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ProductStandard(Base):
+    """2. 완제품/반제품 제품표준서 (Product Specification Standard) - 국문/영문 및 CGMP 5대 파트"""
+    __tablename__ = 'product_standards'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    product_name_en = Column(String(255))      # 영문 제품명
+    product_code = Column(String(100))
+    cosmetic_type = Column(String(100))        # 화장품 유형 (국문/영문)
+    cosmetic_type_en = Column(String(100))
+    target_client = Column(String(255))        # 의뢰/판매업체
+    package_volume = Column(String(100))       # 포장 용량
+    appearance_criteria = Column(String(255))  # 성상 기준
+    appearance_criteria_en = Column(String(255))
+    color_criteria = Column(String(255))       # 색상 기준
+    color_criteria_en = Column(String(255))
+    odor_criteria = Column(String(255))        # 냄새 기준
+    odor_criteria_en = Column(String(255))
+    ph_spec = Column(String(100))              # pH 규격
+    viscosity_spec = Column(String(100))       # 점도 규격
+    specific_gravity_spec = Column(String(100))# 비중 규격
+    microbial_spec = Column(String(255))       # 미생물 기준
+    storage_condition = Column(String(255))    # 보관 조건
+    storage_condition_en = Column(String(255))
+    expiry_period = Column(String(100))        # 사용 기한
+    expiry_period_en = Column(String(100))
+    
+    # CGMP 5대 세부 파트 JSON/Text
+    mfg_process_summary = Column(Text)         # 제조공정 요약 (국문)
+    mfg_process_summary_en = Column(Text)      # 제조공정 요약 (영문)
+    packaging_specs_json = Column(Text)        # 1차/2차 포장재 및 표시 규격
+    formulation_snapshot = Column(Text)        # 처방 배합비 JSON 스냅샷
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class BatchManufacturingRecord(Base):
+    """3. 제조지시 및 기록서 (Batch Manufacturing Record - BMR) - 국문/영문 및 칭량/공정/수율"""
+    __tablename__ = 'batch_manufacturing_records'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    product_name_en = Column(String(255))
+    batch_no = Column(String(100), nullable=False)  # 제조번호(LOT)
+    manufacture_date = Column(Date)
+    batch_size_kg = Column(Float)              # 제조지시량(kg)
+    actual_yield_kg = Column(Float)            # 실제 생산량(kg)
+    yield_rate = Column(Float)                 # 수율(%)
+    tank_no = Column(String(100))              # 제조 가마/탱크 번호
+    operator_name = Column(String(100))        # 제조작업자
+    supervisor_name = Column(String(100))      # 제조책임자/확인자
+    
+    weighing_records_json = Column(Text)       # 원료별 칭량 지시/실측/오차 기록표 (JSON)
+    process_log = Column(Text)                 # 단계별 투입/교반/온도 기록 (JSON/Text)
+    process_log_en = Column(Text)              # 영문 제조공정 로그
+    ipc_records_json = Column(Text)            # 공정검사(IPC: 중간 pH, 점도, 입도 등)
+    ph_result = Column(String(100))            # 제조 중 pH
+    viscosity_result = Column(String(100))     # 제조 중 점도
+    overall_status = Column(String(50))        # 공정완료/합격 여부
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class StabilityTestReport(Base):
+    """4. 안정성(경시변화) 시험보고서 (Stability Test Report)"""
+    __tablename__ = 'stability_test_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    lot_no = Column(String(100))
+    test_start_date = Column(Date)
+    examiner = Column(String(100))
+    
+    # 4주, 8주, 12주 등 주기별 보관조건별 (실온, 45도, 50도, 저온4도, Cycle) 시험결과 JSON
+    test_results_json = Column(Text)
+    overall_evaluation = Column(String(100))   # 종합 평가 (안정/특이사항/불안정)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class PackagingCompatibilityReport(Base):
+    """5. 내용물-용기 상용성(적합성) 시험보고서 (Packaging Compatibility Test Report)"""
+    __tablename__ = 'packaging_compatibility_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    lab_no = Column(String(100))
+    client_name = Column(String(255))
+    container_name = Column(String(255))       # 용기명
+    container_material = Column(String(100))   # 용기 재질 (PET, PP, PE, 유리 등)
+    pump_specs = Column(String(255))           # 캡/펌프/디스펜서 사양
+    coating_printing = Column(String(255))     # 인쇄 및 코팅 사양
+    
+    weight_loss_rate = Column(String(50))      # 감량율 (%)
+    container_deformation = Column(String(100))# 용기 외관 변형 (함몰/팽창/크랙 없음 등)
+    coating_peeling = Column(String(100))      # 인쇄/코팅 박리 여부
+    pump_operability = Column(String(100))     # 펌프 토출 및 작동성 (정상 등)
+    leakage_test = Column(String(100))         # 감압 누액 시험 결과 (적합 등)
+    contents_change = Column(String(100))      # 내용물 변질 (변색/취변/분리 없음)
+    
+    overall_result = Column(String(50), default="적합") # 적합 / 부적합 / 조건부적합
+    recommendations = Column(Text)             # 개선 권고사항 / 특이사항
+    examiner = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+class MSDSReport(Base):
+    """6. 물질안전보건자료 (Material Safety Data Sheet - MSDS) 16대 표준 항목 (국문/영문 완벽 지원)"""
+    __tablename__ = 'msds_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(255), nullable=False)
+    product_name_en = Column(String(255))      # 영문 제품명
+    product_code = Column(String(100))
+    company_name = Column(String(255))         # 제조/공급사명
+    company_name_en = Column(String(255))      # 영문 제조/공급사명
+    emergency_contact = Column(String(100))    # 긴급연락처
+    usage = Column(String(255))                # 권장 용도
+    usage_en = Column(String(255))             # 영문 권장 용도
+    
+    # GHS 분류 및 유해위험성
+    ghs_classification = Column(String(255))   # 유해·위험성 분류
+    warning_mark = Column(String(100))         # 그림문자 / 신호어
+    hazard_statement = Column(Text)            # 유해·위험 문구 (국문)
+    hazard_statement_en = Column(Text)         # 유해·위험 문구 (영문)
+    precaution_statement = Column(Text)        # 예방조치 문구 (국문)
+    precaution_statement_en = Column(Text)     # 예방조치 문구 (영문)
+    
+    # 16대 표준 항목 요약 데이터 (JSON)
+    sections_json = Column(Text)               # 16개 섹션별 국문 세부 데이터
+    sections_en_json = Column(Text)            # 16개 섹션별 영문 세부 데이터 (Sections 1-16 English)
+    formulation_snapshot = Column(Text)        # 처방 성분 및 CAS No 배합비
+    
+    author = Column(String(100))               # 작성자
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 # ---------------------------------------------------------------------------
 # 통합 문서 패키지 (생산 처방 관련 자료 일괄 저장)
 # ---------------------------------------------------------------------------

@@ -116,104 +116,37 @@ def export_template(headers, default_filename="template.xlsx"):
 
     save_excel_path(os.path.dirname(file_path))
 
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    header_font = Font(name='맑은 고딕', size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+    center_align = Alignment(horizontal='center', vertical='center')
+
     try:
         workbook = Workbook()
         sheet = workbook.active
-        sheet.append(headers)
+        sheet.title = "양식"
+        sheet.row_dimensions[1].height = 28
+
+        for col_idx, header_text in enumerate(headers, 1):
+            cell = sheet.cell(row=1, column=col_idx, value=header_text)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = thin_border
+            
+            # 너비 자동 조절
+            col_letter = get_column_letter(col_idx)
+            header_len = _get_display_length(header_text)
+            sheet.column_dimensions[col_letter].width = max(header_len + 5, 14)
+
         workbook.save(file_path)
-        messagebox.showinfo("성공", f"엑셀 폼이 '{file_path}'에 저장되었습니다.")
+        messagebox.showinfo("성공", f"엑셀 폼이 '{file_path}'에 성공적으로 저장되었습니다.")
+        try:
+            os.startfile(os.path.abspath(file_path))
+        except Exception:
+            pass
     except Exception as e:
         messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
-
-def import_data():
-    initial_dir = get_excel_path()
-    file_path = filedialog.askopenfilename(
-        filetypes=[("Excel files", "*.xlsx")],
-        initialdir=initial_dir,
-        title="가져올 엑셀 파일 선택"
-    )
-    if not file_path:
-        return None
-
-    save_excel_path(os.path.dirname(file_path))
-
-    def clean_cell(cell):
-        """
-        셀 값 정리:
-        - None 또는 '-' → 빈 문자열
-        - 문자열이면 앞뒤 공백 제거
-        """
-        if cell is None:
-            return ""
-        if isinstance(cell, str):
-            cell = cell.strip()
-            if cell == "-":
-                return ""
-        return cell
-
-    try:
-        workbook = _load_workbook_robust(file_path, data_only=True)
-        sheet = workbook.active
-        headers = [cell.value for cell in sheet[1]]
-        data_list = []
-        for row in sheet.iter_rows(min_row=2, values_only=True):
-            # 전부 비어있으면 건너뜀
-            if all(cell is None or str(cell).strip() in ("", "-") for cell in row):
-                continue
-            # 헤더 개수에 맞춰 길이 조정
-            row = list(row) + [None] * (len(headers) - len(row))
-            # 각 셀 값 정리
-            row = [clean_cell(cell) for cell in row]
-            row_data = dict(zip(headers, row))
-            data_list.append(row_data)
-        return data_list
-    except PermissionError:
-        messagebox.showerror("오류", f"파일이 열려 있습니다.\n파일을 닫고 다시 시도해주세요.\n\n경로: {file_path}")
-        return None
-    except Exception as e:
-        messagebox.showerror("오류", f"파일을 읽는 중 오류가 발생했습니다: {e}")
-        return None
-
-def create_approval_image_v2(canvas_width: int) -> tuple[str, int]:
-    """결재란 이미지 생성 (v2): 결재방만 표시, 높이 2/3로 축소"""
-    # 1행: 기존 높이, 2행: 1행의 4.5배(=1+3.5)로 분할 (전체 1.5배에서 2/3 = 1.0배)
-    base_h1 = int(70 * 1.0)  # 기존 70 유지
-    base_h2 = int(base_h1 * 4.5)
-    base_h = base_h1 + base_h2
-    img = Image.new('RGB', (canvas_width, base_h), 'white')
-    drw = ImageDraw.Draw(img)
-    col_left_w = max(28, int(canvas_width * 0.12))
-    rest_w = canvas_width - col_left_w
-    col_w = rest_w // 3
-    # 바깥 테두리
-    drw.rectangle([0, 0, canvas_width-1, base_h-1], outline='#2C3E50', width=2)
-    # 세로 구분선 (왼쪽 라벨/3분할)
-    drw.line([col_left_w, 0, col_left_w, base_h], fill='#2C3E50', width=1)
-    drw.line([col_left_w + col_w, 0, col_left_w + col_w, base_h], fill='#2C3E50', width=1)
-    drw.line([col_left_w + col_w*2, 0, col_left_w + col_w*2, base_h], fill='#2C3E50', width=1)
-    # 1행/2행 구분선
-    drw.line([0, base_h1, canvas_width, base_h1], fill='#2C3E50', width=1)
-    # 헤더 배경 제거(흰색 유지)
-    try:
-        f_bold = ImageFont.truetype("malgunbd.ttf", 24)  # 폰트 크기 24
-    except Exception:
-        f_bold = ImageFont.load_default()
-    # 왼쪽에는 아무것도 표시하지 않음 (결재방만 표시)
-    # 헤더 텍스트 (1행)
-    heads = ['작성','검토','승인']
-    for i, txt in enumerate(heads):
-        x0 = col_left_w + i*col_w
-        tw, th = drw.textbbox((0,0), txt, font=f_bold)[2:4]
-        drw.text((x0 + (col_w - tw)//2, (base_h1 - th)//2), txt, fill='#2C3E50', font=f_bold)
-    # 서명란 (2행) - (인) 제거, 빈 공간만
-    # (아무 텍스트도 넣지 않음)
-    # tempfile 대신 프로젝트 폴더 사용
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    temp_dir = os.path.join(PROJECT_ROOT, 'data', 'temp')
-    os.makedirs(temp_dir, exist_ok=True)
-    temp_img_path = os.path.join(temp_dir, f'approval_{timestamp}.png')
-    img.save(temp_img_path, 'PNG')
-    return temp_img_path, base_h
 
 def export_multisheet_template(sheets_with_headers, default_filename="template.xlsx"):
     """여러 시트를 가진 엑셀 템플릿을 내보냅니다."""
@@ -231,10 +164,36 @@ def export_multisheet_template(sheets_with_headers, default_filename="template.x
 
     save_excel_path(os.path.dirname(file_path))
 
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    header_font = Font(name='맑은 고딕', size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+    center_align = Alignment(horizontal='center', vertical='center')
+
     try:
         workbook = Workbook()
-        workbook.remove(workbook.active)
-        # NOTE: revised exporter is defined at module level; this function handles only multi-sheet template export.
+        workbook.remove(workbook.active) # 기본 시트 제거
+
+        for sheet_name, headers in sheets_with_headers.items():
+            sheet = workbook.create_sheet(title=sheet_name)
+            sheet.row_dimensions[1].height = 28
+            
+            for col_idx, header_text in enumerate(headers, 1):
+                cell = sheet.cell(row=1, column=col_idx, value=header_text)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = center_align
+                cell.border = thin_border
+                
+                col_letter = get_column_letter(col_idx)
+                header_len = _get_display_length(header_text)
+                sheet.column_dimensions[col_letter].width = max(header_len + 5, 14)
+
+        workbook.save(file_path)
+        messagebox.showinfo("성공", f"다중 시트 엑셀 폼이 '{file_path}'에 성공적으로 저장되었습니다.")
+        try:
+            os.startfile(os.path.abspath(file_path))
+        except Exception:
+            pass
     except Exception as e:
         messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
 
@@ -2010,8 +1969,9 @@ def export_ingredient_report(report_data):
     except Exception as e:
         messagebox.showerror("오류", f"파일 저장 중 오류가 발생했습니다: {e}")
 
-def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx"):
-    """견적서 데이터를 특정 템플릿 형식의 엑셀 파일로 내보냅니다."""
+def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx", lang="ko"):
+    """견적서 데이터를 특정 템플릿 형식의 엑셀 파일로 내보냅니다. (한글 / 영문 다국어 지원)"""
+    is_eng = (lang == "en")
     initial_dir = get_excel_path()
     timestamped_filename = get_timestamped_filename(default_filename)
     file_path = filedialog.asksaveasfilename(
@@ -2019,7 +1979,7 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
         filetypes=[("Excel files", "*.xlsx")],
         initialdir=initial_dir,
         initialfile=timestamped_filename,
-        title="견적서 저장"
+        title="Quotation Export" if is_eng else "견적서 저장"
     )
     if not file_path:
         return
@@ -2029,7 +1989,7 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
     try:
         wb = Workbook()
         sheet = wb.active
-        sheet.title = "견적서"
+        sheet.title = "Quotation" if is_eng else "견적서"
 
         # --- 스타일 정의 ---
         thin = Side(style='thin')
@@ -2045,16 +2005,20 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
         total_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
 
         # --- 문서 제목 및 결재란 ---
-        sheet.merge_cells('A1:C2') # 제목이 더 넓은 공간을 차지하도록 수정
+        is_semi = quotation_data.get("is_semi", False)
+        sheet.merge_cells('A1:C2')
         title_cell = sheet['A1']
-        title_cell.value = "견적서 (Quotation)"
+        if is_eng:
+            title_cell.value = "BULK PRICE QUOTATION" if is_semi else "FINISHED PRODUCT QUOTATION"
+        else:
+            title_cell.value = "반제품 견적서 (Bulk Quotation)" if is_semi else "완제품 견적서 (Quotation)"
         title_cell.font = title_font
         title_cell.alignment = center_align
 
-        approval_labels = ["작성", "검토", "승인"]
+        approval_labels = ["Prepared", "Reviewed", "Approved"] if is_eng else ["작성", "검토", "승인"]
         for i, label in enumerate(approval_labels):
             col_idx = i + 4 # D, E, F 열
-            sheet.column_dimensions[chr(ord('A') + col_idx - 1)].width = 15 # 결재란 각 칸 너비 동일하게
+            sheet.column_dimensions[chr(ord('A') + col_idx - 1)].width = 15
             sheet.cell(row=1, column=col_idx, value=label).font = header_font
             sheet.cell(row=1, column=col_idx).alignment = center_align
             sheet.cell(row=1, column=col_idx).border = thin_border
@@ -2063,12 +2027,13 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
 
         # --- 기본 정보 ---
         details = quotation_data.get("details", {})
-        info_layout = [
-            ("실험품명", details.get("실험품명")),
-            ("담당자", details.get("담당자")),
-            ("LAB NO.", details.get("LAB NO.")),
-            ("기준 중량", details.get("기준 중량")),
-        ]
+        info_layout = []
+        for k, v in details.items():
+            lbl = k
+            if is_eng:
+                en_key_map = {"실험품명": "Product Name", "담당자": "Manager", "기준 중량": "Base Weight", "개당 용량": "Unit Capacity", "산출 수량": "Produced Units"}
+                lbl = en_key_map.get(k, k)
+            info_layout.append((lbl, v))
         row_idx = 4
         for label, value in info_layout:
             sheet.cell(row=row_idx, column=1, value=label).font = header_font
@@ -2077,7 +2042,11 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
 
         # --- 견적 항목 헤더 ---
         row_idx += 1
-        item_headers = ["구분", "코드", "원료명", "함량(%)", "단가(원/kg)", "원가(원)"]
+        if is_eng:
+            item_headers = ["Phase", "Code", "Raw Material (INCI)", "Ratio (%)", "Unit Price (₩/kg)", "Cost (₩)"]
+        else:
+            item_headers = ["구분", "코드", "원료명", "함량(%)", "단가(원/kg)", "원가(원)"]
+            
         for col_idx, header in enumerate(item_headers, 1):
             cell = sheet.cell(row=row_idx, column=col_idx, value=header)
             cell.font = header_font; cell.alignment = center_align; cell.fill = header_fill; cell.border = thin_border
@@ -2086,32 +2055,87 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
         row_idx += 1
         for item_values in quotation_data.get("items", []):
             for col_idx, value in enumerate(item_values, 1):
-                # 숫자 변환 시도 (단, 쉼표 제거 후)
                 if isinstance(value, str):
                     try_val = try_convert_to_float(value.replace(",", ""))
                     value = try_val if isinstance(try_val, (int, float)) else value
 
                 cell = sheet.cell(row=row_idx, column=col_idx, value=value)
                 cell.font = default_font; cell.border = thin_border
-                if col_idx == 3: # 원료명
+                if col_idx == 3:
                     cell.alignment = left_align
                 else:
                     cell.alignment = right_align
                 
                 if isinstance(value, (int, float)):
-                    if col_idx == 4: cell.number_format = '0.0000' # 함량
-                    elif col_idx == 5: cell.number_format = '#,##0' # 단가
-                    elif col_idx == 6: cell.number_format = '#,##0.00' # 원가
+                    if col_idx == 4: cell.number_format = '0.0000'
+                    elif col_idx == 5: cell.number_format = '#,##0'
+                    elif col_idx == 6: cell.number_format = '#,##0.00'
             row_idx += 1
 
-        # --- 요약 정보 ---
+        # --- 제조·부자재 비용 및 최종 견적 요약 ---
         row_idx += 1
+        
+        extra_expenses = quotation_data.get("extra_expenses", {})
         summary = quotation_data.get("summary", {})
-        for label, value in summary.items(): # "총 함량", "총 원료 원가" 등
-            label_cell = sheet.cell(row=row_idx, column=5, value=label)
-            label_cell.font = total_font; label_cell.alignment = right_align
-            value_cell = sheet.cell(row=row_idx, column=6, value=value)
-            value_cell.font = total_font; value_cell.alignment = right_align; value_cell.number_format = '#,##0.00'
+        
+        # 영문 매핑 딕셔너리
+        en_extra_map = {
+            "인력비": "Labor Cost", "제조비": "Manufacturing Cost",
+            "운송비": "Shipping Cost", "용기": "Container/Packaging",
+            "1kg당 총단가": "Total Cost per kg", "개당(EA) 총단가": "Total Cost per Unit (EA)"
+        }
+        en_summary_map = {
+            "총 함량": "Total Ratio", "총 원료 원가": "Total Raw Material Cost",
+            "총 제조 원가": "Total Manufacturing Cost",
+            "최종가 (VAT 10% 포함)": "Total Final Price (Incl. VAT 10%)"
+        }
+
+        extra_items = []
+        for k, v in extra_expenses.items():
+            lbl = en_extra_map.get(k, k) if is_eng else k
+            val = str(v).replace("원", "KRW").replace("개", "EA") if is_eng else v
+            extra_items.append((lbl, val))
+
+        summary_items = []
+        for k, v in summary.items():
+            lbl = k
+            if is_eng:
+                for ko_k, en_k in en_summary_map.items():
+                    if ko_k in k:
+                        lbl = k.replace(ko_k, en_k)
+                        break
+                if "이윤" in k:
+                    lbl = k.replace("이윤", "Profit Margin").replace("포함 공급가", "Included Supply Price").replace("포함가", "Included Price")
+            val = str(v).replace("원", "KRW") if is_eng else v
+            summary_items.append((lbl, val))
+
+        max_rows = max(len(extra_items), len(summary_items))
+        
+        for i in range(max_rows):
+            # 좌측: 부가 비용
+            if i < len(extra_items):
+                ex_label, ex_val = extra_items[i]
+                c_lbl = sheet.cell(row=row_idx, column=2, value=ex_label)
+                c_lbl.font = default_font; c_lbl.alignment = left_align
+                c_val = sheet.cell(row=row_idx, column=3, value=ex_val)
+                is_highlight = ('단가' in ex_label) or ('Cost per' in ex_label)
+                c_val.font = total_font if is_highlight else default_font
+                c_val.alignment = right_align
+                if is_highlight:
+                    c_lbl.fill = header_fill
+                    c_val.fill = header_fill
+            
+            # 우측: 견적 요약
+            if i < len(summary_items):
+                sm_label, sm_val = summary_items[i]
+                label_cell = sheet.cell(row=row_idx, column=5, value=sm_label)
+                label_cell.font = total_font; label_cell.alignment = right_align
+                value_cell = sheet.cell(row=row_idx, column=6, value=sm_val)
+                value_cell.font = total_font; value_cell.alignment = right_align
+                if ('최종' in sm_label or '공급가' in sm_label or 'Final' in sm_label or 'Supply Price' in sm_label):
+                    label_cell.fill = total_fill
+                    value_cell.fill = total_fill
+            
             row_idx += 1
 
         # --- 컬럼 너비 자동 조절 ---
@@ -2136,7 +2160,7 @@ def export_quotation_to_excel(quotation_data, default_filename="quotation.xlsx")
         except Exception:
             pass
     except Exception as e:
-        messagebox.showerror("내보내기 오류", f"파일 저장 중 오류가 발생했습니다: {e}")
+        messagebox.showerror("내보내기 오류" if not is_eng else "Export Error", f"파일 저장 중 오류가 발생했습니다: {e}")
 
 def export_ingredient_lists_to_excel(sheets_data, default_filename="ingredient_list.xlsx"):
     """

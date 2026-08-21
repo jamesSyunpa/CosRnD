@@ -14,7 +14,7 @@ class LegalNoticeDialog(ctk.CTkToplevel):
         self.resizable(False, False)
         self.parent = parent
         self.on_agree_callback = on_agree
-        self.version_str = version_str or "v61"
+        self.version_str = version_str or "v64"
         self.config_path = config_path
         self.already_agreed = already_agreed
         
@@ -83,21 +83,22 @@ class LegalNoticeDialog(ctk.CTkToplevel):
 
 0.5 저작권 및 지식재산권
     0.5.1 저작권 정보
-        Copyright © 2025 luckfortma. All rights reserved.
+        Copyright © 2025-2026 luckfortma. All rights reserved.
         본 프로그램의 소스코드, UI 구성, 기능 설계 및 설명 문서는 대한민국 저작권법의 보호를 받습니다.
         사전 승인 없이 본 프로그램의 전부 또는 일부를 복제, 배포, 수정, 재사용하는 행위를 금지합니다.
 
     0.5.2 개발 정보
         개발자: luckfortma
         이메일: luckfortma@gmail.com
-        개발 목적: 화장품 연구소 내부 관리 전용
+        개발 목적: 화장품 연구소 내부 관리 및 R&D 플랫폼
 
 0.6 버전 및 변경 이력 관리
     0.6.1 버전 정보
-        프로그램 버전: v55
-        최조 배포일: 2025.12.17
+        프로그램 버전: v64
+        배포 상태: 정식 릴리즈 (최초 공식 배포 준비 중 / 미배포)
     0.6.2 변경 이력
         본 프로그램은 기능 개선 및 안정성 확보를 위해 지속적으로 업데이트될 수 있습니다. 주요 변경 사항은 본 설명서의 개정본 또는 별도의 Release Note를 통해 관리합니다.
+
 
 0.7 오픈소스 사용 고지
     본 프로그램은 개발 과정에서 다음의 오픈소스 소프트웨어를 활용하였습니다. 각 라이브러리는 해당 라이선스 정책을 따릅니다.

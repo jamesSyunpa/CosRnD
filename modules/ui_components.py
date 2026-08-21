@@ -6,6 +6,74 @@ import json
 from database.db_manager import db_manager
 from modules.translation import get_texts
 
+class ModernInfoDialog(ctk.CTkToplevel):
+    """시스템 다크/라이트 테마를 완벽하게 추종하는 모던 안내 대화상자"""
+    def __init__(self, master, title="안내", message="", width=520, height=430):
+        super().__init__(master)
+        self.withdraw()
+        self.title(title)
+        self.geometry(f"{width}x{height}")
+        self.resizable(False, False)
+        self.transient(master)
+        self.grab_set()
+
+        main_frame = ctk.CTkFrame(self, corner_radius=10)
+        main_frame.pack(padx=16, pady=16, fill="both", expand=True)
+
+        # 상단 타이틀
+        top_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        top_frame.pack(fill="x", padx=16, pady=(16, 10))
+        
+        icon_label = ctk.CTkLabel(top_frame, text="💡", font=ctk.CTkFont(size=22))
+        icon_label.pack(side="left", padx=(0, 10))
+        
+        title_label = ctk.CTkLabel(top_frame, text=title, font=ctk.CTkFont(size=16, weight="bold"))
+        title_label.pack(side="left")
+
+        # 본문 메시지 텍스트박스 (다크/라이트 테마 완벽 대응)
+        textbox = ctk.CTkTextbox(
+            main_frame, 
+            wrap="word", 
+            font=ctk.CTkFont(size=13),
+            fg_color=("white", "#2B2B2B"),
+            text_color=("black", "#F3F4F6"),
+            border_width=1,
+            border_color=("gray80", "#3E3E3E"),
+            corner_radius=8
+        )
+        textbox.pack(padx=16, pady=(0, 14), fill="both", expand=True)
+        textbox.insert("1.0", message)
+        textbox.configure(state="disabled")
+
+        # 하단 닫기 버튼
+        close_btn = ctk.CTkButton(
+            main_frame, 
+            text="확인", 
+            width=100, 
+            height=32,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self.destroy
+        )
+        close_btn.pack(pady=(0, 14))
+
+        # 부모 중앙 배치
+        self.update_idletasks()
+        try:
+            parent = master
+            if parent:
+                parent_x = parent.winfo_rootx()
+                parent_y = parent.winfo_rooty()
+                parent_w = parent.winfo_width()
+                parent_h = parent.winfo_height()
+                win_w = self.winfo_width()
+                win_h = self.winfo_height()
+                x = parent_x + (parent_w - win_w) // 2
+                y = parent_y + (parent_h - win_h) // 2
+                self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+        self.deiconify()
+
 class HelpPopup(ctk.CTkToplevel):
     """도움말 내용을 표시하는 스크롤 가능한 팝업 창"""
     def __init__(self, master, title, message):
@@ -100,79 +168,72 @@ class CustomErrorDialog(ctk.CTkToplevel):
         messagebox.showinfo("복사 완료", "오류 메시지가 클립보드에 복사되었습니다.", parent=self)
 
 class CustomDropdown(ctk.CTkFrame):
-    """스크롤바가 있는 안정적인 커스텀 드롭다운 메뉴 위젯"""
-    def __init__(self, master, values=None, command=None, width=120, **kwargs):
-        super().__init__(master, **kwargs)
-        self.values = values if values else []
+    """[v64 네이티브 초고속 콤보박스] 팝업 렉 없이 즉각 반응하고 타이핑 검색 및 선택 완벽 보장"""
+    def __init__(self, master, values=None, command=None, width=150, **kwargs):
+        super().__init__(master, fg_color="transparent", width=width)
+        self.raw_values = list(values) if values else []
         self.command = command
-        self.width = width
-        self.configure(fg_color="transparent", width=self.width)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self.button = ctk.CTkButton(self, text=self.values[0] if self.values else "", width=self.width, 
-                                    anchor="w", command=self.toggle_dropdown)
-        self.button.pack()
-        self.dropdown_toplevel = None
+        self.combobox = ctk.CTkComboBox(
+            self,
+            values=self.raw_values if self.raw_values else ["- 선택 -"],
+            command=self._on_combo_change,
+            width=width,
+            height=28
+        )
+        self.combobox.grid(row=0, column=0, sticky="ew")
 
-    def toggle_dropdown(self):
-        if self.dropdown_toplevel and self.dropdown_toplevel.winfo_exists():
-            self.close_dropdown()
-        else:
-            self.open_dropdown()
+        # [요청 반영] 텍스트창 수정 클릭/포커스 시 전체 텍스트 자동 선택
+        self._bind_auto_select_all()
 
-    def open_dropdown(self):
-        if self.dropdown_toplevel and self.dropdown_toplevel.winfo_exists():
-            return
+    def _bind_auto_select_all(self):
+        """내부 Entry 위젯에 포커스/클릭 시 전체 선택 바인딩"""
+        try:
+            entry_widget = getattr(self.combobox, '_entry', None)
+            if entry_widget:
+                entry_widget.bind("<FocusIn>", self._select_all_text, add="+")
+                entry_widget.bind("<Button-1>", self._select_all_text_on_click, add="+")
+        except Exception:
+            pass
 
-        self.dropdown_toplevel = ctk.CTkToplevel(self)
-        self.dropdown_toplevel.overrideredirect(True)
-        x = self.button.winfo_rootx()
-        y = self.button.winfo_rooty() + self.button.winfo_height()
-        width = self.button.winfo_width()
-        self.dropdown_toplevel.geometry(f"{width}x200+{x}+{y}")
+    def _select_all_text(self, event=None):
+        try:
+            entry_widget = getattr(self.combobox, '_entry', None)
+            if entry_widget:
+                entry_widget.after(10, lambda: entry_widget.select_range(0, 'end'))
+        except Exception:
+            pass
 
-        scroll_frame = ctk.CTkScrollableFrame(self.dropdown_toplevel, label_text="")
-        scroll_frame.pack(fill="both", expand=True)
+    def _select_all_text_on_click(self, event=None):
+        try:
+            entry_widget = getattr(self.combobox, '_entry', None)
+            if entry_widget:
+                # 마우스 클릭 후 커서가 풀리지 않도록 비동기 20ms 후 전체 선택 실행
+                entry_widget.after(20, lambda: entry_widget.select_range(0, 'end'))
+        except Exception:
+            pass
 
-        # --- 이벤트 전파 방지 (최종 수정) ---
-        # 드롭다운 메뉴가 열려 있는 동안, 마우스 휠 이벤트가 다른 위젯으로 전파되는 것을 막습니다.
-        # bind_all을 사용하여 이벤트를 가로채고, 드롭다운이 닫힐 때 unbind_all로 해제합니다.
-        def _block_scroll(event):
-            # 이벤트가 드롭다운 메뉴 내부에서 발생했는지 확인합니다.
-            # 이벤트 위젯이 드롭다운의 자식이 아니면 이벤트를 처리하지 않습니다.
-            if event.widget.winfo_toplevel() != self.dropdown_toplevel:
-                return
-            return "break"
-        self.dropdown_toplevel.bind_all("<MouseWheel>", _block_scroll, add="+")
-        
-        # 드롭다운이 닫힐 때 bind_all로 등록한 마우스 휠 이벤트를 해제합니다.
-        # unbind_all은 특정 함수를 지정할 수 없으므로, 이벤트 타입만 전달합니다.
-        self.dropdown_toplevel.bind("<Destroy>", lambda e: self.dropdown_toplevel.unbind_all("<MouseWheel>"))
+    def _on_combo_change(self, value):
+        if self.command:
+            self.command(value)
 
-        for value in self.values:
-            item_button = ctk.CTkButton(scroll_frame, text=value, anchor="w",
-                                        command=lambda v=value: self.select_item(v))
-            item_button.pack(fill="x", expand=True, pady=1)
+    def set(self, value):
+        self.combobox.set(value)
 
-        self.dropdown_toplevel.bind("<FocusOut>", lambda e: self.close_dropdown())
-        # Schedule a safe focus set (check existence before calling)
-        self.dropdown_toplevel.after(10, lambda: self.dropdown_toplevel.focus_set() if self.dropdown_toplevel and self.dropdown_toplevel.winfo_exists() else None)
+    def get(self):
+        return self.combobox.get()
 
-    def close_dropdown(self):
-        if self.dropdown_toplevel:
-            self.dropdown_toplevel.destroy()
-            self.dropdown_toplevel = None
-
-    def select_item(self, value):
-        self.set(value)
-        if self.command: self.command(value)
-        self.close_dropdown()
-
-    def set(self, value): self.button.configure(text=value)
-    def get(self): return self.button.cget("text")
     def configure(self, **kwargs):
-        if 'values' in kwargs: self.values = kwargs.pop('values')
-        if 'state' in kwargs: self.button.configure(state=kwargs.pop('state'))
-        super().configure(**kwargs)
+        if 'values' in kwargs:
+            vals = kwargs.pop('values')
+            self.raw_values = list(vals) if vals else []
+            self.combobox.configure(values=self.raw_values)
+        if 'state' in kwargs:
+            self.combobox.configure(state=kwargs.pop('state'))
+        if kwargs:
+            super().configure(**kwargs)
 
 class AddMaterialDialog(ctk.CTkToplevel):
     """처방에 원료를 추가하기 위한 팝업창"""

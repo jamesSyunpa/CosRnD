@@ -166,27 +166,26 @@ class DataManagementFrame(ctk.CTkFrame):
         material_frame.grid(row=0, column=0, sticky="nsew")
 
     def setup_user_management_tab(self, tab_frame):
-        tab_frame.grid_columnconfigure(0, weight=0, minsize=500)
-        tab_frame.grid_columnconfigure(1, weight=1)
+        # 성분/거래처 관리와 동일한 모던 3열 그리드 구조 (좌측 폼 400px + sash 7px + 우측 리스트 가변)
+        tab_frame.grid_columnconfigure(0, weight=0, minsize=400)
+        tab_frame.grid_columnconfigure(1, weight=0)
+        tab_frame.grid_columnconfigure(2, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
 
-        user_scrollable = ctk.CTkScrollableFrame(tab_frame, fg_color="transparent")
-        user_scrollable.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        user_scrollable.grid_columnconfigure(0, weight=1)
+        # ===== 좌측: 사용자 정보 입력 폼 =====
+        self.user_form_container = ctk.CTkScrollableFrame(tab_frame, label_text="사용자 정보 입력")
+        self.user_form_container.grid(row=0, column=0, padx=0, pady=0, sticky="nsew")
+        self.user_form_container.grid_columnconfigure(0, weight=0)
+        self.user_form_container.grid_columnconfigure(1, weight=1)
 
-        user_form_frame = ctk.CTkFrame(user_scrollable)
-        user_form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        user_form_frame.grid_columnconfigure(1, weight=1) # 입력 필드가 너비를 채우도록 설정
-        
-        form_label = ctk.CTkLabel(user_form_frame, text=self.texts['user_info'], font=ctk.CTkFont(size=14, weight="bold"))
-        form_label.grid(row=0, column=0, columnspan=2, pady=(10, 20))
+        user_form_frame = self.user_form_container
 
         user_labels = self.texts['user_labels']
         self.user_entries = {}
         current_row = 1
         for key, label_text in user_labels.items():
             ctk.CTkLabel(user_form_frame, text=label_text).grid(row=current_row, column=0, padx=10, pady=5, sticky="w")
-            entry = ctk.CTkEntry(user_form_frame) # 고정 너비 제거
+            entry = ctk.CTkEntry(user_form_frame)
             entry.grid(row=current_row, column=1, padx=10, pady=5, sticky="ew")
             if key == "password":
                 entry.configure(show="*")
@@ -195,31 +194,20 @@ class DataManagementFrame(ctk.CTkFrame):
             self.user_entries[key] = entry
             current_row += 1
         
-        # 권한 선택 추가
+        # 권한 선택 및 도움말(?) 버튼
         ctk.CTkLabel(user_form_frame, text="권한").grid(row=current_row, column=0, padx=10, pady=5, sticky="w")
         
         # 관리자 존재 여부에 따라 권한 옵션 결정
         self.has_admin = db_manager.has_admin_users()
         
         if self.has_admin:
-            # 이미 관리자가 있으면 MSAD 제외
             self.role_options = {
                 "QC - 품질관리원": "QC",
                 "RD - 연구원": "RD",
                 "RQ - 연구/품질 통합관리자": "RQ",
                 "RQD - 연구/품질/데이터 관리자": "RQD"
             }
-            role_info_text = (
-                "QC: 품질 서류 관리 (원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서)\n"
-                "     + 거래처 관리 (검색/참고만)\n"
-                "RD: 연구 서류 관리 (처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료)\n"
-                "     + 성분/거래처 관리 (검색/참고만)\n"
-                "RQ: 연구/품질 통합관리 (RD + QC 모든 기능)\n"
-                "RQD: RQ 기능 + 모든 데이터 수정/삭제 권한\n"
-                "\n※ 관리자 계정이 이미 존재하여 MSAD 권한은 선택할 수 없습니다."
-            )
         else:
-            # 관리자가 없으면 모든 권한 허용
             self.role_options = {
                 "QC - 품질관리원": "QC",
                 "RD - 연구원": "RD",
@@ -227,37 +215,34 @@ class DataManagementFrame(ctk.CTkFrame):
                 "RQD - 연구/품질/데이터 관리자": "RQD",
                 "MSAD - 모든 관리자": "MSAD"
             }
-            role_info_text = (
-                "QC: 품질 서류 관리 (원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서)\n"
-                "     + 거래처 관리 (검색/참고만)\n"
-                "RD: 연구 서류 관리 (처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료)\n"
-                "     + 성분/거래처 관리 (검색/참고만)\n"
-                "RQ: 연구/품질 통합관리 (RD + QC 모든 기능)\n"
-                "RQD: RQ 기능 + 모든 데이터 수정/삭제 권한\n"
-                "MSAD: 마스터 관리자 (모든 기능 + 데이터 삭제 전 백업 권한)"
-            )
         
+        # 콤보박스 + [?] 버튼 가로 프레임
+        user_role_frame = ctk.CTkFrame(user_form_frame, fg_color="transparent")
+        user_role_frame.grid(row=current_row, column=1, padx=10, pady=5, sticky="ew")
+        user_role_frame.grid_columnconfigure(0, weight=1)
+
         self.user_role_combo = ctk.CTkOptionMenu(
-            user_form_frame,
-            values=list(self.role_options.keys()),
-            width=250
+            user_role_frame,
+            values=list(self.role_options.keys())
         )
         self.user_role_combo.set("RD - 연구원")
-        self.user_role_combo.grid(row=current_row, column=1, padx=10, pady=5, sticky="w")
-        current_row += 1
-        
-        # 권한 설명
-        role_info = ctk.CTkLabel(
-            user_form_frame, 
-            text=role_info_text,
-            font=ctk.CTkFont(size=9),
-            text_color="gray",
-            justify="left"
+        self.user_role_combo.grid(row=0, column=0, sticky="ew")
+
+        # [?] 권한 설명 도움말 버튼
+        self.user_role_help_btn = ctk.CTkButton(
+            user_role_frame,
+            text="?",
+            width=28,
+            height=28,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color=("#3B82F6", "#2563EB"),
+            hover_color=("#2563EB", "#1D4ED8"),
+            command=self.show_role_help
         )
-        role_info.grid(row=current_row, column=1, padx=10, sticky="w")
+        self.user_role_help_btn.grid(row=0, column=1, padx=(6, 0))
         current_row += 1
         
-        # 마스터 권한 불변 안내 라벨 (필요 시 표시)
+        # 마스터 권한 불변 안내 라벨 (마스터 계정 선택 시에만 표시)
         self.master_guard_label = ctk.CTkLabel(
             user_form_frame,
             text="마스터 계정의 권한은 변경할 수 없습니다.",
@@ -266,23 +251,11 @@ class DataManagementFrame(ctk.CTkFrame):
             justify="left"
         )
         self.master_guard_label.grid(row=current_row, column=1, padx=10, sticky="w")
-        # 기본은 숨김
         self.master_guard_label.grid_remove()
         current_row += 1
         
-        # 관리자 체크박스는 숨기고 권한 콤보박스로만 관리
         self.is_admin_var = ctk.StringVar(value="off")
-        # is_admin_check는 표시하지 않음 (권한이 자동으로 결정됨)
         
-        # 권한 정보 안내
-        ctk.CTkLabel(
-            user_form_frame, 
-            text="※ 권한은 위의 드롭다운에서 선택하신 항목으로 자동 설정됩니다.",
-            font=ctk.CTkFont(size=9),
-            text_color="#1f538d"
-        ).grid(row=current_row, column=1, padx=10, pady=5, sticky="w")
-        current_row += 1
-
         # 사용자 변경 이력 미리보기
         ctk.CTkLabel(user_form_frame, text="변경 이력", font=ctk.CTkFont(size=12, weight="bold")).grid(row=current_row, column=0, padx=10, pady=(5, 0), sticky="nw")
         self.user_history_preview = ctk.CTkTextbox(user_form_frame, height=120, wrap="word")
@@ -296,7 +269,7 @@ class DataManagementFrame(ctk.CTkFrame):
         current_row += 1
 
         user_button_frame = ctk.CTkFrame(user_form_frame, fg_color="transparent")
-        user_button_frame.grid(row=current_row, column=0, columnspan=2, pady=20)
+        user_button_frame.grid(row=current_row, column=0, columnspan=2, pady=15, sticky="w")
         
         self.user_save_button = ctk.CTkButton(user_button_frame, text=self.texts['save'], command=self.save_user)
         self.user_save_button.pack(side="left", padx=5)
@@ -354,61 +327,53 @@ class DataManagementFrame(ctk.CTkFrame):
         self.user_tree.bind("<<TreeviewSelect>>", self.on_user_tree_select)
         self.load_users()
 
+    def on_user_sash_press(self, event):
+        self._user_sash_drag_start_x = event.x_root
+        self._user_form_start_width = self.user_form_container.winfo_width()
+
+    def on_user_sash_drag(self, event):
+        tab_frame = self.user_sash.master
+        delta_x = event.x_root - self._user_sash_drag_start_x
+        new_width = self._user_form_start_width + delta_x
+
+        if new_width < 350: new_width = 350
+        if new_width > tab_frame.winfo_width() - 400: new_width = tab_frame.winfo_width() - 400
+        
+        tab_frame.grid_columnconfigure(0, minsize=new_width)
+
     def setup_client_management_tab(self, tab_frame):
-        # 그리드 구조
-        tab_frame.grid_columnconfigure(0, weight=1)
+        # 성분 관리와 동일한 모던 3열 그리드 구조 (좌측 폼 400px + sash 7px + 우측 리스트 가변)
+        tab_frame.grid_columnconfigure(0, weight=0, minsize=400)
+        tab_frame.grid_columnconfigure(1, weight=0)
+        tab_frame.grid_columnconfigure(2, weight=1)
         tab_frame.grid_rowconfigure(0, weight=1)
 
-        # PanedWindow로 좌우 분할 (크기 조절 가능)
-        paned = tk.PanedWindow(
-            tab_frame, 
-            orient="horizontal",
-            sashwidth=6,
-            sashrelief="raised",
-            sashpad=2,
-            bg=ctk.ThemeManager.theme["CTkFrame"]["fg_color"][1 if ctk.get_appearance_mode() == "Dark" else 0],
-            bd=0,
-            opaqueresize=False
-        )
-        paned.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        # ===== 좌측: 거래처 입력 폼 =====
+        self.client_form_container = ctk.CTkScrollableFrame(tab_frame, label_text="거래처 정보 입력")
+        self.client_form_container.grid(row=0, column=0, padx=0, pady=0, sticky="nsew")
+        self.client_form_container.grid_columnconfigure(0, weight=0)
+        self.client_form_container.grid_columnconfigure(1, weight=1)
 
-        # 좌측 컨테이너
-        left_container = ctk.CTkFrame(paned, fg_color="transparent")
-        paned.add(left_container, minsize=400, stretch="always")
-
-        # 우측 컨테이너
-        right_container = ctk.CTkFrame(paned, fg_color="transparent")
-        paned.add(right_container, minsize=400, stretch="always")
-
-        # 좌측: 거래처 입력 폼
-        scrollable_frame = ctk.CTkScrollableFrame(left_container, fg_color="transparent")
-        scrollable_frame.pack(fill="both", expand=True, padx=(0, 3))
-
-        form_frame = ctk.CTkFrame(scrollable_frame)
-        form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-        form_frame.grid_columnconfigure(1, weight=1)
-        
-        form_label = ctk.CTkLabel(form_frame, text=self.texts['client_info'], font=ctk.CTkFont(size=14, weight="bold"))
-        form_label.grid(row=2, column=0, columnspan=2, pady=(20, 10))
+        form_frame = self.client_form_container
 
         # 거래처 유형 필드 추가
-        ctk.CTkLabel(form_frame, text=self.texts['client_type']).grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.client_type_combobox = ctk.CTkComboBox(form_frame, values=self.texts['client_type_values']) # noqa
-        self.client_type_combobox.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
+        ctk.CTkLabel(form_frame, text=self.texts['client_type']).grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.client_type_combobox = ctk.CTkComboBox(form_frame, values=self.texts['client_type_values'])
+        self.client_type_combobox.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
         labels = self.texts['client_labels']
         self.client_entries = {}
         for i, (key, label_text) in enumerate(labels.items()):
             label = ctk.CTkLabel(form_frame, text=label_text)
-            label.grid(row=i+4, column=0, padx=10, pady=5, sticky="w")
-            entry = ctk.CTkEntry(form_frame) # 고정 너비 제거
-            entry.grid(row=i+4, column=1, padx=10, pady=5, sticky="ew")
+            label.grid(row=i+2, column=0, padx=10, pady=5, sticky="w")
+            entry = ctk.CTkEntry(form_frame)
+            entry.grid(row=i+2, column=1, padx=10, pady=5, sticky="ew")
             self.client_entries[key] = entry
 
         self.is_active_var = ctk.StringVar(value="on")
-        ctk.CTkCheckBox(form_frame, text=self.texts['is_active'], variable=self.is_active_var, onvalue="on", offvalue="off").grid(row=len(labels)+4, column=1, padx=10, pady=10, sticky="e") # noqa
+        ctk.CTkCheckBox(form_frame, text=self.texts['is_active'], variable=self.is_active_var, onvalue="on", offvalue="off").grid(row=len(labels)+2, column=1, padx=10, pady=10, sticky="e")
         
-        current_row = len(labels) + 5
+        current_row = len(labels) + 3
         # 거래처 변경 이력 미리보기
         ctk.CTkLabel(form_frame, text="변경 이력", font=ctk.CTkFont(size=12, weight="bold")).grid(row=current_row, column=0, padx=10, pady=(5, 0), sticky="nw")
         self.client_history_preview = ctk.CTkTextbox(form_frame, height=120, wrap="word")
@@ -418,7 +383,6 @@ class DataManagementFrame(ctk.CTkFrame):
         self.client_history_button = ctk.CTkButton(form_frame, text=self.texts['view_selected_history'], command=self.show_selected_client_history, state="disabled")
         self.client_history_button.grid(row=current_row, column=1, padx=10, pady=10, sticky="e")
 
-        # 다음 행으로 이동 후 버튼 프레임 배치 (이전 위젯과 겹치지 않도록)
         current_row += 1
         button_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
         button_frame.grid(row=current_row, column=0, columnspan=2, pady=10, sticky="w")
@@ -430,9 +394,15 @@ class DataManagementFrame(ctk.CTkFrame):
         self.client_delete_button = ctk.CTkButton(button_frame, text=self.texts['delete'], command=self.delete_client, fg_color="#D32F2F", hover_color="#B71C1C")
         self.client_delete_button.pack(side="left", padx=5)
 
-        # --- 우측: 거래처 목록 ---
-        list_frame = ctk.CTkFrame(right_container)
-        list_frame.pack(fill="both", expand=True, padx=(3, 0))
+        # ===== 가운데 조절바 (Sash) =====
+        self.client_sash = ctk.CTkFrame(tab_frame, width=7, cursor="sb_h_double_arrow")
+        self.client_sash.grid(row=0, column=1, padx=2, pady=0, sticky="ns")
+        self.client_sash.bind("<ButtonPress-1>", self.on_client_sash_press)
+        self.client_sash.bind("<B1-Motion>", self.on_client_sash_drag)
+
+        # ===== 우측: 거래처 목록 =====
+        list_frame = ctk.CTkFrame(tab_frame)
+        list_frame.grid(row=0, column=2, padx=(0, 0), pady=0, sticky="nsew")
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
         
@@ -501,6 +471,20 @@ class DataManagementFrame(ctk.CTkFrame):
 
         self.client_tree.bind("<<TreeviewSelect>>", self.on_client_tree_select)
         self.load_clients()
+
+    def on_client_sash_press(self, event):
+        self._client_sash_drag_start_x = event.x_root
+        self._client_form_start_width = self.client_form_container.winfo_width()
+
+    def on_client_sash_drag(self, event):
+        tab_frame = self.client_sash.master
+        delta_x = event.x_root - self._client_sash_drag_start_x
+        new_width = self._client_form_start_width + delta_x
+
+        if new_width < 350: new_width = 350
+        if new_width > tab_frame.winfo_width() - 400: new_width = tab_frame.winfo_width() - 400
+        
+        tab_frame.grid_columnconfigure(0, minsize=new_width)
 
     def export_user_data(self):
         session = db_manager.get_session()
@@ -767,6 +751,27 @@ class DataManagementFrame(ctk.CTkFrame):
             if current_value not in self.role_options.keys():
                 self.user_role_combo.set("RD - 연구원")
 
+    def show_role_help(self):
+        """권한별 상세 기능 및 권한 안내를 팝업으로 표시합니다."""
+        from modules.ui_components import ModernInfoDialog
+        help_msg = (
+            "【 시스템 5대 권한 체계 안내 】\n\n"
+            "🔹 QC (품질관리원)\n"
+            "  - 품질 서류 관리: 원료목록보고, COA, MSDS, 제품표준서, 제조관리기록서\n"
+            "  - 거래처 관리 (검색/참고 조회 전용)\n\n"
+            "🔹 RD (연구원)\n"
+            "  - 연구 서류 관리: 처방, 견적, 전성분, 물성치/SPEC, 기능성보고/참고자료\n"
+            "  - 성분 / 거래처 관리 (검색/참고 조회 전용)\n\n"
+            "🔹 RQ (연구/품질 통합관리자)\n"
+            "  - RD + QC 모든 연구 및 품질 서류 통합 관리\n\n"
+            "🔹 RQD (연구/품질/데이터 관리자)\n"
+            "  - RQ 모든 기능 + 성분/거래처 원천 데이터의 등록/수정/삭제 권한\n\n"
+            "🔹 MSAD (마스터 관리자)\n"
+            "  - 시스템 최고 권한: 모든 서류 + 모든 데이터 + 회원 관리 + 백업 권한\n\n"
+            "※ 기존 관리자 계정이 이미 존재하는 경우 추가 MSAD 생성은 제한됩니다."
+        )
+        ModernInfoDialog(self, title="권한 체계 안내", message=help_msg)
+
     def on_user_tree_select(self, event):
         selected_item = self.user_tree.selection()
         if not selected_item: return
@@ -1011,7 +1016,7 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showerror("삭제 불가", "기본 관리자 계정(admin)은 삭제할 수 없습니다.")
             return
 
-        if not messagebox.askyesno("삭제 확인", "정말로 선택한 사용자를 삭제하시겠습니까?"):
+        if not messagebox.askyesno("삭제 확인", "정말로 선택한 사용자를 삭제하시겠습니까?\n\n※ 삭제 전 안전 복구용 백업 파일이 자동으로 저장됩니다."):
             return
 
         session = db_manager.get_session()
@@ -1022,9 +1027,45 @@ class DataManagementFrame(ctk.CTkFrame):
                 messagebox.showerror("삭제 불가", "마스터 관리자(MSAD)는 삭제할 수 없습니다.")
                 return
             if user_to_delete:
+                # 안전 자동 백업 수행 (SecureVault + data/backups/users)
+                try:
+                    import json
+                    from modules.secure_vault import SecureVault
+                    
+                    user_backup = {
+                        'username': user_to_delete.username,
+                        'real_name': user_to_delete.real_name,
+                        'manager_code': user_to_delete.manager_code,
+                        'position': user_to_delete.position,
+                        'contact': user_to_delete.contact,
+                        'zip_code': user_to_delete.zip_code,
+                        'address': user_to_delete.address,
+                        'role': user_to_delete.role,
+                        'is_admin': user_to_delete.is_admin,
+                        'change_log': user_to_delete.change_log
+                    }
+                    
+                    # 1. AppData 심층 시스템 은닉 볼트 암호화 백업
+                    SecureVault.encrypt_and_save(
+                        category='users',
+                        record_id=user_to_delete.username,
+                        data_dict=user_backup,
+                        username=getattr(self.current_user, 'username', 'unknown')
+                    )
+                    
+                    # 2. 로컬 백업 폴더(보조) 저장
+                    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'backups', 'users')
+                    os.makedirs(backup_dir, exist_ok=True)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    backup_file = os.path.join(backup_dir, f"user_backup_{user_to_delete.username}_{ts}.json")
+                    with open(backup_file, 'w', encoding='utf-8') as f:
+                        json.dump({'backup_date': ts, 'deleted_by': getattr(self.current_user, 'username', 'unknown'), 'user': user_backup}, f, ensure_ascii=False, indent=2)
+                except Exception as bk_err:
+                    print(f"[경고] 사용자 백업 실패(무시): {bk_err}")
+
                 session.delete(user_to_delete)
                 session.commit()
-                messagebox.showinfo("성공", "사용자가 삭제되었습니다.")
+                messagebox.showinfo("성공", "사용자가 성공적으로 삭제되었습니다.\n(안전 복구용 백업 파일이 저장되었습니다.)")
         except Exception as e:
             session.rollback()
             messagebox.showerror("데이터베이스 오류", f"삭제 중 오류가 발생했습니다: {e}")
@@ -1261,16 +1302,55 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showwarning("선택 오류", "삭제할 거래처를 목록에서 선택하세요.")
             return
 
-        if not messagebox.askyesno("삭제 확인", "정말로 선택한 거래처를 삭제하시겠습니까?"):
+        if not messagebox.askyesno("삭제 확인", "정말로 선택한 거래처를 삭제하시겠습니까?\n\n※ 삭제 전 안전 복구용 백업 파일이 자동으로 저장됩니다."):
             return
 
         session = db_manager.get_session()
         try:
             client_to_delete = session.query(Client).filter_by(id=self._selected_client_id).first()
             if client_to_delete:
+                # 안전 자동 백업 수행 (SecureVault + data/backups/clients)
+                try:
+                    import json
+                    from modules.secure_vault import SecureVault
+                    
+                    client_backup = {
+                        'name': client_to_delete.name,
+                        'name_en': getattr(client_to_delete, 'name_en', ''),
+                        'business_number': client_to_delete.business_number,
+                        'client_type': client_to_delete.client_type,
+                        'ceo_name': getattr(client_to_delete, 'ceo_name', ''),
+                        'manager_name': client_to_delete.manager_name,
+                        'phone': client_to_delete.phone,
+                        'fax': getattr(client_to_delete, 'fax', ''),
+                        'email': client_to_delete.email,
+                        'zip_code': getattr(client_to_delete, 'zip_code', ''),
+                        'address': client_to_delete.address,
+                        'is_active': client_to_delete.is_active,
+                        'change_log': getattr(client_to_delete, 'change_log', '')
+                    }
+                    
+                    # 1. AppData 심층 시스템 은닉 볼트 암호화 백업
+                    SecureVault.encrypt_and_save(
+                        category='clients',
+                        record_id=client_to_delete.name,
+                        data_dict=client_backup,
+                        username=getattr(self.current_user, 'username', 'unknown')
+                    )
+                    
+                    # 2. 로컬 백업 폴더(보조) 저장
+                    backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'backups', 'clients')
+                    os.makedirs(backup_dir, exist_ok=True)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    backup_file = os.path.join(backup_dir, f"client_backup_{client_to_delete.name}_{ts}.json")
+                    with open(backup_file, 'w', encoding='utf-8') as f:
+                        json.dump({'backup_date': ts, 'deleted_by': getattr(self.current_user, 'username', 'unknown'), 'client': client_backup}, f, ensure_ascii=False, indent=2)
+                except Exception as bk_err:
+                    print(f"[경고] 거래처 백업 실패(무시): {bk_err}")
+
                 session.delete(client_to_delete)
                 session.commit()
-                messagebox.showinfo("성공", "거래처가 삭제되었습니다.")
+                messagebox.showinfo("성공", "거래처가 성공적으로 삭제되었습니다.\n(안전 복구용 백업 파일이 저장되었습니다.)")
         except Exception as e:
             session.rollback()
             messagebox.showerror("데이터베이스 오류", f"삭제 중 오류가 발생했습니다: {e}")

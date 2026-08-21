@@ -8,7 +8,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from database.db_manager import db_manager
-from database.models import Material
+from database.models import Material, Formulation, Client
 from sqlalchemy import desc
 from datetime import datetime
 import re
@@ -84,17 +84,60 @@ class HomeFrame(ctk.CTkFrame):
                                           "- 주요 기능: 처방 관리, 데이터 관리, 품질 관리")
         self.notice_textbox.configure(state="disabled")
 
-        # --- 하단 우측: 최근 성분 변경 이력 (가로 셀 나열) ---
+        # --- 하단 우측: 최근 R&D 변경 이력 (통합 피드 & 다운로드) ---
         changes_frame = ctk.CTkFrame(bottom_frame)
         changes_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         changes_frame.grid_rowconfigure(1, weight=1)
         changes_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(changes_frame, text="최근 성분 변경 이력", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, padx=15, pady=10, sticky="w")
+        # 상단 툴바 프레임 (제목, 필터 세그먼트, 엑셀 다운로드/새로고침 버튼)
+        changes_header = ctk.CTkFrame(changes_frame, fg_color="transparent")
+        changes_header.grid(row=0, column=0, padx=15, pady=(8, 4), sticky="ew")
+        changes_header.grid_columnconfigure(1, weight=1)
 
-        # 변경 이력 리스트 컨테이너 (행 단위로 2단 색상 적용)
-        self.changes_panel = ctk.CTkFrame(changes_frame, fg_color="transparent")
-        self.changes_panel.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
+        ctk.CTkLabel(changes_header, text="📋 최근 R&D 변경 이력", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, sticky="w")
+
+        # 피드 필터 (전체 / 처방 / 원료 / 거래처)
+        self.feed_filter_var = ctk.StringVar(value="전체")
+        self.feed_filter_segmented = ctk.CTkSegmentedButton(
+            changes_header,
+            values=["전체", "🧪 처방", "🌿 원료", "🏢 거래처"],
+            variable=self.feed_filter_var,
+            command=self._on_filter_changed,
+            height=24,
+            font=ctk.CTkFont(size=11)
+        )
+        self.feed_filter_segmented.grid(row=0, column=1, padx=10, sticky="w")
+
+        # 엑셀 다운로드 버튼 & 새로고침 버튼
+        btn_box = ctk.CTkFrame(changes_header, fg_color="transparent")
+        btn_box.grid(row=0, column=2, sticky="e")
+
+        ctk.CTkButton(
+            btn_box,
+            text="📥 이력 다운로드",
+            width=90,
+            height=24,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#2FA572",
+            hover_color="#106A43",
+            command=self.export_feed_history_to_excel
+        ).pack(side="left", padx=(0, 4))
+
+        ctk.CTkButton(
+            btn_box,
+            text="🔄",
+            width=28,
+            height=24,
+            font=ctk.CTkFont(size=12),
+            fg_color="gray50",
+            hover_color="gray40",
+            command=self.load_recent_material_changes
+        ).pack(side="left")
+
+        # 변경 이력 리스트 스크롤 컨테이너
+        self.changes_panel = ctk.CTkScrollableFrame(changes_frame, fg_color="transparent")
+        self.changes_panel.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         self.changes_panel.grid_columnconfigure(0, weight=1)
 
         self.refresh_cards()
@@ -121,18 +164,43 @@ class HomeFrame(ctk.CTkFrame):
             card.grid(row=0, column=i, padx=10, pady=10, sticky="nsew")
 
     def create_action_card(self, master, icon, title, action_name):
-        """클릭 가능한 활동 카드를 생성합니다."""
-        card = ctk.CTkFrame(master, corner_radius=15, cursor="hand2")
+        """클릭 가능한 모던 활동 카드를 생성합니다."""
+        card = ctk.CTkFrame(
+            master,
+            corner_radius=10,
+            cursor="hand2",
+            fg_color=("#FFFFFF", "#242526"),
+            border_width=1,
+            border_color=("#E5E7EB", "#333538")
+        )
         card.grid_columnconfigure(0, weight=1)
 
-        icon_label = ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=32))
-        icon_label.pack(pady=(15, 8))
+        icon_label = ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=26))
+        icon_label.pack(pady=(14, 6))
 
-        title_label = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=10, weight="bold"), wraplength=100)
-        title_label.pack(pady=(0, 15), padx=8)
+        title_label = ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=("#1F2937", "#E4E6EB"),
+            wraplength=100
+        )
+        title_label.pack(pady=(0, 14), padx=8)
+
+        # 부드러운 호버 피드백
+        def on_enter(e):
+            card.configure(fg_color=("#F3F4F6", "#2D3035"), border_color=("#D1D5DB", "#4B5563"))
+        def on_leave(e):
+            card.configure(fg_color=("#FFFFFF", "#242526"), border_color=("#E5E7EB", "#333538"))
+
+        card.bind("<Enter>", on_enter)
+        card.bind("<Leave>", on_leave)
 
         for widget in [card, icon_label, title_label]:
             widget.bind("<Button-1>", lambda e, name=action_name: self.app.navigate_and_record(name))
+            if widget != card:
+                widget.bind("<Enter>", on_enter)
+                widget.bind("<Leave>", on_leave)
         
         return card
             
@@ -158,123 +226,471 @@ class HomeFrame(ctk.CTkFrame):
         # 동의 여부 확인
         already_agreed = False
         try:
-            # MainApp에서 config path 가져오기 (self.app.login_window가 없으므로 직접 구성하거나 MainApp에서 가져와야 함)
-            # 하지만 여기서 단순하게 PROJECT_ROOT/config.ini (main.py 방식) 따라감
-            # 정확히는 main.py의 CONFIG_FILE_PATH와 동일해야 함.
-            # self.app이 MainApp 인스턴스이므로, 만약 app에 config_path가 있다면 좋겠지만...
-            # 안전하게 config.ini 경로 추정 (main.py와 로직 동일하게)
-            
-            # 1. exe 실행 폴더의 config.ini 확인
+            # 1. AppData 및 로컬 config.ini 경로 탐색
+            appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'CosRnD')
+            target_config = os.path.join(appdata_dir, 'config.ini')
             exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else PROJECT_ROOT
-            config_path = os.path.join(exe_dir, 'config.ini')
-            
-            config = configparser.ConfigParser()
-            config.read(config_path, encoding='utf-8')
-            
-            if config.has_section('Legal'):
-                agreed_ver = config.get('Legal', 'agreed_version', fallback=None)
-                # Normalize agreed_ver for comparison
-                if agreed_ver:
-                    agreed_ver = agreed_ver.strip()
-                    if not agreed_ver.startswith('v') and re.match(r'^\d+(?:\.\d+)*$', agreed_ver):
-                        agreed_ver = 'v' + agreed_ver
-                if agreed_ver == ver:
-                    already_agreed = True
+            local_config = os.path.join(exe_dir, 'config.ini')
+
+            config_path = target_config if os.path.exists(target_config) else local_config
+
+            if os.path.exists(config_path):
+                config = configparser.ConfigParser()
+                config.read(config_path, encoding='utf-8')
+                if config.has_section('Legal'):
+                    agreed_ver = config.get('Legal', 'agreed_version', fallback='')
+                    # 동의 값이 존재하면 이미 동의한 것으로 처리 (체크박스 체크됨)
+                    if agreed_ver and agreed_ver.strip() != '':
+                        already_agreed = True
         except Exception as e:
             print(f"[Home] Config check failed: {e}")
 
         # callbacks and config_path are not needed if already_agreed is True
         LegalNoticeDialog(self.winfo_toplevel(), ver, lambda: None, None, already_agreed=already_agreed)
 
+
+    def _on_filter_changed(self, value=None):
+        """필터 탭 변경 시 피드를 다시 로드합니다."""
+        self.load_recent_material_changes()
+
     def load_recent_material_changes(self):
-        """DB에서 최근 변경된 원료(성분)를 다음 형식으로 표시합니다.
-        - 좌측: [YYYY-MM-DD HH:MM] 변경명 • 원료명 (N건)  ← 전체 클릭 가능
-        - 우측: 변경된 항목 요약 (콤마로 나열)         ← 클릭 시 동일 동작
-        클릭 시 성분 관리 화면으로 이동하여 해당 원료를 선택합니다.
-        """
-        # 패널 초기화
+        """DB에서 처방, 원료, 거래처의 최신 변경 이력을 수집하여 깔끔하고 세련된 통합 타임라인 피드로 표시합니다."""
         for w in list(self.changes_panel.winfo_children()):
             try:
                 w.destroy()
             except Exception:
                 pass
 
+        filter_mode = getattr(self, 'feed_filter_var', None).get() if hasattr(self, 'feed_filter_var') else "전체"
+
         session = db_manager.get_session()
         try:
-            # 최신 항목을 넉넉히 가져와서(예: 50개) 실제 '변경'이 있는 것만 골라 10개 표시
-            candidates = session.query(Material).order_by(
-                desc(Material.updated_at), desc(Material.created_at)
-            ).limit(50).all()
+            feed_items = []
 
-            # 요약 생성 및 필터링
-            rows = []
-            for material in candidates:
-                info = self._get_latest_change_info(material, max_items=8)
-                if info and info.get('summary'):
-                    rows.append((material, info))
-                if len(rows) >= 10:
-                    break
+            # 1. 처방 변경 이력 수집
+            if filter_mode in ["전체", "🧪 처방"]:
+                formulations = session.query(Formulation).filter(
+                    Formulation.change_log.isnot(None),
+                    Formulation.change_log != ""
+                ).order_by(desc(Formulation.created_at)).limit(30).all()
+                
+                for form in formulations:
+                    info = self._parse_change_blocks(form.change_log, entity_type="처방", target_name=form.experiment_name or form.lab_no)
+                    if info:
+                        info['entity_type'] = "처방"
+                        info['id'] = form.id
+                        info['target_name'] = form.experiment_name or form.lab_no
+                        info['code'] = form.lab_no or ""
+                        feed_items.append(info)
+
+            # 2. 원료 변경 이력 수집 (실제 변경이 있는 항목 우선, 없으면 신규 항목 수집)
+            if filter_mode in ["전체", "🌿 원료"]:
+                materials = session.query(Material).filter(
+                    Material.change_log.isnot(None),
+                    Material.change_log != ""
+                ).order_by(desc(Material.updated_at), desc(Material.created_at)).limit(50).all()
+
+                for mat in materials:
+                    info = self._parse_change_blocks(mat.change_log, entity_type="원료", target_name=mat.name)
+                    if info:
+                        info['entity_type'] = "원료"
+                        info['id'] = mat.id
+                        info['target_name'] = mat.name or ""
+                        info['code'] = mat.code or ""
+                        feed_items.append(info)
+
+            # 3. 거래처 변경 이력 수집
+            if filter_mode in ["전체", "🏢 거래처"]:
+                clients = session.query(Client).filter(
+                    Client.change_log.isnot(None),
+                    Client.change_log != ""
+                ).order_by(desc(Client.created_at)).limit(30).all()
+
+                for cli in clients:
+                    info = self._parse_change_blocks(cli.change_log, entity_type="거래처", target_name=cli.name)
+                    if info:
+                        info['entity_type'] = "거래처"
+                        info['id'] = cli.id
+                        info['target_name'] = cli.name or ""
+                        info['code'] = cli.client_type or ""
+                        feed_items.append(info)
+
+            # 1순위: '신규 생성 (엑셀 가져오기)'가 아닌 실제 수정/갱신된 내역 우선
+            # 2순위: 타임스탬프 최신순
+            feed_items.sort(key=lambda x: (not x.get('is_excel_init', False), x.get('timestamp', '')), reverse=True)
+            rows = feed_items[:12]
 
             if not rows:
-                empty = ctk.CTkLabel(self.changes_panel, text="최근 성분 변경 이력이 없습니다.", text_color="gray")
-                empty.grid(row=0, column=0, padx=6, pady=6, sticky="w")
+                empty = ctk.CTkLabel(
+                    self.changes_panel, 
+                    text=f"선택한 조건({filter_mode})에 해당하는 최근 변경 이력이 없습니다.", 
+                    text_color="gray",
+                    font=ctk.CTkFont(size=12)
+                )
+                empty.grid(row=0, column=0, padx=10, pady=30, sticky="w")
             else:
-                # 행 구성: 각 행은 2단(좌/우) 구역을 가진 컨테이너로 만들고, 교차 배경색 적용
-                for r_idx, (material, info) in enumerate(rows):
-                    ts = info.get('timestamp') or ''
-                    action = info.get('action') or ''
-                    count = info.get('count') or 0
-                    header_text = f"[{ts}] {action} • {material.name or ''} ({count}건)".strip()
+                is_dark = (ctk.get_appearance_mode() == "Dark")
+                # CustomTkinter 표준 다크 테마(Level 2/3)와 완벽한 조화를 이루는 팔레트
+                card_bg = ("#F4F6FA", "#2B2B2B")
+                card_hover = ("#E9EFF7", "#363636")
+                border_color = ("#E2E8F0", "#3E3E3E")
 
-                    left_color, right_color, hover_tint = self._get_dual_tone_colors(r_idx)
+                icon_map = {"처방": "🧪", "원료": "🌿", "거래처": "🏢"}
+                tag_color_map = {
+                    "처방": ("#0284C7", "#38BDF8"),
+                    "원료": ("#16A34A", "#4ADE80"),
+                    "거래처": ("#EA580C", "#FB923C"),
+                }
 
-                    # 행 컨테이너 (모서리 둥글게, 살짝 여백)
-                    row_container = ctk.CTkFrame(self.changes_panel, corner_radius=10, fg_color="transparent")
-                    row_container.grid(row=r_idx, column=0, sticky="ew", pady=(0, 8))
-                    row_container.grid_columnconfigure(0, weight=0)
-                    row_container.grid_columnconfigure(1, weight=1)
+                for r_idx, item in enumerate(rows):
+                    etype = item.get('entity_type', '원료')
+                    ts = item.get('timestamp') or ''
+                    action = item.get('action') or ''
+                    target_name = item.get('target_name') or ''
+                    summary = item.get('summary') or ''
+                    tag_color = tag_color_map.get(etype, ("#888888", "#AAAAAA"))
 
-                    # 좌측 영역 (타임스탬프/액션/원료명)
-                    left_cell = ctk.CTkFrame(row_container, fg_color=left_color, corner_radius=10, cursor="hand2")
-                    left_cell.grid(row=0, column=0, sticky="nsw")
-                    left_label = ctk.CTkLabel(
-                        left_cell,
-                        text=header_text,
-                        font=ctk.CTkFont(size=10, weight="bold"),
-                        anchor="w"
+                    # 하나의 통합 모던 카드
+                    card = ctk.CTkFrame(
+                        self.changes_panel,
+                        corner_radius=8,
+                        fg_color=card_bg,
+                        border_width=1,
+                        border_color=border_color,
+                        cursor="hand2"
                     )
-                    left_label.pack(padx=8, pady=6)
+                    card.grid(row=r_idx, column=0, sticky="ew", pady=(0, 6), padx=2)
+                    card.grid_columnconfigure(1, weight=1)
 
-                    # 우측 영역 (요약)
-                    right_cell = ctk.CTkFrame(row_container, fg_color=right_color, corner_radius=10, cursor="hand2")
-                    right_cell.grid(row=0, column=1, sticky="nsew")
-                    right_label = ctk.CTkLabel(
-                        right_cell,
-                        text=info.get('summary', ''),
-                        font=ctk.CTkFont(size=12),
-                        text_color="gray70",
-                        wraplength=520,
-                        justify="left",
+                    # 1열: 고정폭 메타 구역 [날짜 | 아이콘 구분 | 대상명]
+                    meta_frame = ctk.CTkFrame(card, fg_color="transparent")
+                    meta_frame.grid(row=0, column=0, padx=(12, 8), pady=8, sticky="w")
+
+                    # 날짜 라벨
+                    ctk.CTkLabel(
+                        meta_frame,
+                        text=f"[{ts}]",
+                        font=ctk.CTkFont(size=11),
+                        text_color=("gray50", "gray65")
+                    ).pack(side="left", padx=(0, 6))
+
+                    # 구분 텍스트 (깔끔한 텍스트 뱃지)
+                    ctk.CTkLabel(
+                        meta_frame,
+                        text=f"{icon_map.get(etype, '')} {etype}",
+                        font=ctk.CTkFont(size=11, weight="bold"),
+                        text_color=tag_color
+                    ).pack(side="left", padx=(0, 8))
+
+                    # 대상 명칭 (볼드)
+                    ctk.CTkLabel(
+                        meta_frame,
+                        text=target_name,
+                        font=ctk.CTkFont(size=11, weight="bold"),
+                        text_color=("#1E293B", "#FFFFFF")
+                    ).pack(side="left")
+
+                    # 2열: 우측 변경 상세 내용 구역
+                    desc_frame = ctk.CTkFrame(card, fg_color="transparent")
+                    desc_frame.grid(row=0, column=1, padx=(0, 12), pady=8, sticky="ew")
+
+                    # [액션유형] + 변경요약 텍스트
+                    summary_display = f"• [{action}] {summary}" if action else f"• {summary}"
+                    ctk.CTkLabel(
+                        desc_frame,
+                        text=summary_display,
+                        font=ctk.CTkFont(size=11),
+                        text_color=("gray30", "gray80"),
                         anchor="w"
-                    )
-                    right_label.pack(padx=8, pady=6)
+                    ).pack(side="left", fill="x", expand=True)
 
-                    # 클릭: 행 전체 어느 영역을 눌러도 이동
-                    self._bind_click_open([row_container, left_cell, left_label, right_cell, right_label], material.id)
+                    # 클릭 이벤트 바인딩
+                    all_click_widgets = [card, meta_frame, desc_frame] + meta_frame.winfo_children() + desc_frame.winfo_children()
+                    self._bind_entity_click(all_click_widgets, etype, item.get('id'))
 
-                    # 호버: 살짝 강조감 (배경색을 미묘하게 바꿔줌)
-                    self._bind_hover_tint([left_cell, right_cell], [left_color, right_color], hover_tint)
+                    # 호버 인터랙션
+                    self._bind_single_card_hover(card, card_bg, card_hover)
 
-                # 레이아웃 늘림
                 self.changes_panel.grid_rowconfigure(tuple(range(len(rows))), weight=0)
 
         except Exception as e:
-            print(f"최근 성분 변경 이력 로드 중 오류: {e}")
-            # 오류 셀 표시
+            print(f"통합 R&D 변경 피드 로드 중 오류: {e}")
             err = ctk.CTkLabel(self.changes_panel, text="이력 로드 중 오류가 발생했습니다.", text_color="red")
             err.grid(row=0, column=0, padx=6, pady=6, sticky="w")
         finally:
             session.close()
+
+    def export_feed_history_to_excel(self):
+        """현재 DB에 축적된 처방, 원료, 거래처의 전체 R&D 변경 이력을 변경 항목별 1행씩 일렬로 상세히 엑셀로 내보냅니다."""
+        session = db_manager.get_session()
+        try:
+            sheets = {}
+            from modules import excel_handler
+
+            # 1. 항목별 1행 데이터 취합
+            all_rows = []
+
+            # (1) 처방
+            for f in session.query(Formulation).filter(Formulation.change_log.isnot(None)).all():
+                parsed_items = self._split_all_log_lines(f.change_log, "처방", f.experiment_name or f.lab_no, f.lab_no or "", f.manager_name or "")
+                all_rows.extend(parsed_items)
+
+            # (2) 원료
+            for m in session.query(Material).filter(Material.change_log.isnot(None)).all():
+                parsed_items = self._split_all_log_lines(m.change_log, "원료", m.name or "", m.code or "", "")
+                all_rows.extend(parsed_items)
+
+            # (3) 거래처
+            for c in session.query(Client).filter(Client.change_log.isnot(None)).all():
+                parsed_items = self._split_all_log_lines(c.change_log, "거래처", c.name or "", c.client_type or "", c.manager_name or "")
+                all_rows.extend(parsed_items)
+
+            if not all_rows:
+                messagebox.showinfo("알림", "내보낼 변경 이력 데이터가 없습니다.", parent=self)
+                return
+
+            # 일시 기준 최신순 정렬
+            all_rows.sort(key=lambda x: x.get("발생일시", ""), reverse=True)
+
+            # 표준 테이블 헤더: [발생일시, 구분, 식별코드/LAB, 대상명, 작업자, 구분(생성/변경), 변경항목, 변경 전 내용, 변경 후 내용, 전체로그]
+            excel_headers = ["발생일시", "구분", "식별코드/LAB", "대상명", "작업자", "변경유형", "변경항목", "변경 전 내용", "변경 후 내용", "전체로그"]
+            
+            def make_table_data(row_list):
+                return [
+                    [r["발생일시"], r["구분"], r["식별코드/LAB"], r["대상명"], r["작업자"], r["변경유형"], r["변경항목"], r["변경전"], r["변경후"], r["전체로그"]]
+                    for r in row_list
+                ]
+
+            # 시트 1: 통합 타임라인
+            sheets["통합 타임라인"] = {"headers": excel_headers, "data": make_table_data(all_rows), "style": True}
+
+            # 시트 2: 처방 이력
+            form_logs = [r for r in all_rows if r["구분"] == "처방"]
+            if form_logs:
+                sheets["처방 변경 이력"] = {"headers": excel_headers, "data": make_table_data(form_logs), "style": True}
+
+            # 시트 3: 원료 이력
+            mat_logs = [r for r in all_rows if r["구분"] == "원료"]
+            if mat_logs:
+                sheets["원료_성분 변경 이력"] = {"headers": excel_headers, "data": make_table_data(mat_logs), "style": True}
+
+            # 시트 4: 거래처 이력
+            cli_logs = [r for r in all_rows if r["구분"] == "거래처"]
+            if cli_logs:
+                sheets["거래처 변경 이력"] = {"headers": excel_headers, "data": make_table_data(cli_logs), "style": True}
+
+            default_filename = f"RD_통합변경이력_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+            excel_handler.export_all_change_logs(sheets, default_filename=default_filename)
+
+        except Exception as e:
+            messagebox.showerror("오류", f"이력 내보내기 중 오류가 발생했습니다:\n{e}", parent=self)
+        finally:
+            session.close()
+
+    def _split_all_log_lines(self, change_log_text: str, entity_type: str, target_name: str, code: str, default_user: str):
+        """로그 블록 내의 각 변경 항목(줄)마다 1행씩 분리하여 엑셀용 정밀 데이터를 생성합니다."""
+        if not change_log_text:
+            return []
+        blocks = [b.strip() for b in str(change_log_text).split('\n\n') if b.strip()]
+        result = []
+
+        for b in blocks:
+            lines = [ln.strip() for ln in b.splitlines() if ln.strip()]
+            if not lines:
+                continue
+            header = lines[0]
+            ts = ""
+            user = default_user
+            action = ""
+            if header.startswith('[') and ']' in header:
+                ts = header.split(']', 1)[0].lstrip('[').strip()
+            if ' by ' in header:
+                try:
+                    user = header.split(' by ', 1)[1].split(' - ', 1)[0].strip()
+                except Exception:
+                    pass
+            if ' - ' in header:
+                try:
+                    action = header.split(' - ', 1)[1].split('(', 1)[0].strip()
+                except Exception:
+                    pass
+
+            detail_lines = [ln.lstrip('- ').strip() for ln in lines[1:] if ln.startswith('-')]
+
+            if not detail_lines:
+                # 상세 라인이 없으면 블록 자체를 1행으로
+                result.append({
+                    "발생일시": ts,
+                    "구분": entity_type,
+                    "식별코드/LAB": code,
+                    "대상명": target_name,
+                    "작업자": user,
+                    "변경유형": action or "정보 갱신",
+                    "변경항목": "전체",
+                    "변경전": "-",
+                    "변경후": action,
+                    "전체로그": b
+                })
+            else:
+                for dln in detail_lines:
+                    field_name = ""
+                    before_val = ""
+                    after_val = ""
+
+                    if "->" in dln:
+                        # 예: "단가: '15000' -> '18000'"
+                        parts = dln.split('->', 1)
+                        left_part = parts[0].strip()
+                        after_val = parts[1].strip().strip("'\"")
+                        if ':' in left_part:
+                            field_name = left_part.split(':', 1)[0].strip()
+                            before_val = left_part.split(':', 1)[1].strip().strip("'\"")
+                        else:
+                            field_name = left_part
+                            before_val = "-"
+                    elif ':' in dln:
+                        # 예: "전성분 추가: 판테놀 | 조성비 2.0"
+                        field_name = dln.split(':', 1)[0].strip()
+                        after_val = dln.split(':', 1)[1].strip()
+                        before_val = "-"
+                    else:
+                        field_name = "기타"
+                        after_val = dln
+                        before_val = "-"
+
+                    result.append({
+                        "발생일시": ts,
+                        "구분": entity_type,
+                        "식별코드/LAB": code,
+                        "대상명": target_name,
+                        "작업자": user,
+                        "변경유형": action or "수정",
+                        "변경항목": field_name,
+                        "변경전": before_val,
+                        "변경후": after_val,
+                        "전체로그": b
+                    })
+
+        return result
+
+    def _parse_change_blocks(self, change_log_text: str, entity_type: str = "원료", target_name: str = ""):
+        """가장 최근 로그 블록을 분석하여 [변경항목: 전 -> 후 (외 N건)] 형식으로 깔끔하게 축약합니다."""
+        if not change_log_text:
+            return None
+        blocks = [b.strip() for b in str(change_log_text).split('\n\n') if b.strip()]
+        if not blocks:
+            return None
+        
+        # 1. '신규 생성 (엑셀 가져오기)'가 아닌 실제 변경 블록을 우선 탐색
+        selected_block = None
+        for b in reversed(blocks):
+            if "신규 생성 (엑셀 가져오기)" not in b and "신규 생성" not in b:
+                selected_block = b
+                break
+        
+        is_excel_init = False
+        if not selected_block:
+            selected_block = blocks[-1]
+            if "엑셀 가져오기" in selected_block:
+                is_excel_init = True
+
+        lines = [ln.strip() for ln in selected_block.splitlines() if ln.strip()]
+        if not lines:
+            return None
+
+        header = lines[0]
+        ts = ""
+        action = ""
+        if header.startswith('[') and ']' in header:
+            ts = header.split(']', 1)[0].lstrip('[').strip()
+            if len(ts) > 16:
+                ts = ts[:16]
+        if ' - ' in header:
+            try:
+                action = header.split(' - ', 1)[1].split('(', 1)[0].strip()
+            except Exception:
+                pass
+
+        # 본문 변경 상세 항목 파싱
+        change_items = []
+        for ln in lines[1:]:
+            if not ln.startswith('-'):
+                continue
+            ln_clean = ln.lstrip('- ').strip()
+            
+            if '->' in ln_clean:
+                # "단가: '15000' -> '18000'" -> "단가: 15000 → 18000"
+                parts = ln_clean.split('->', 1)
+                left = parts[0].strip()
+                after_val = parts[1].strip().strip("'\"")
+                if ':' in left:
+                    field = left.split(':', 1)[0].strip()
+                    before_val = left.split(':', 1)[1].strip().strip("'\"")
+                    change_items.append(f"{field}: {before_val} → {after_val}")
+                else:
+                    change_items.append(f"{left} → {after_val}")
+            elif '전성분 추가' in ln_clean or '전성분 삭제' in ln_clean or '전성분 변경' in ln_clean:
+                change_items.append(ln_clean)
+            elif '신규 생성' in action or is_excel_init:
+                field = ln_clean.split(':', 1)[0].strip()
+                if field not in ["코드", "원료명"]:
+                    val = ln_clean.split(':', 1)[1].strip().strip("'\"") if ':' in ln_clean else ""
+                    change_items.append(f"{field}: {val}" if val else field)
+
+        # 포맷팅: 1개면 그대로, 여러 개면 "첫 번째 항목 (외 N건)"으로 간결화
+        if change_items:
+            first_item = change_items[0]
+            if len(change_items) > 1:
+                summary = f"{first_item} (외 {len(change_items)-1}건)"
+            else:
+                summary = first_item
+        else:
+            summary = action or "정보 갱신"
+
+        return {
+            'timestamp': ts,
+            'action': action or "수정",
+            'summary': summary,
+            'is_excel_init': is_excel_init
+        }
+
+    def _bind_single_card_hover(self, card, base_color: str, hover_color: str):
+        """단일 카드에 마우스 진입/이탈 시 부드러운 호버 배경색 적용"""
+        def on_enter(_):
+            try:
+                card.configure(fg_color=hover_color)
+            except Exception:
+                pass
+        def on_leave(_):
+            try:
+                card.configure(fg_color=base_color)
+            except Exception:
+                pass
+        try:
+            card.bind("<Enter>", on_enter)
+            card.bind("<Leave>", on_leave)
+        except Exception:
+            pass
+
+    def _bind_entity_click(self, widgets, entity_type: str, target_id: int):
+        """엔티티 유형별 1클릭 화면 이동 핸들러 바인딩"""
+        for w in widgets:
+            try:
+                w.bind("<Button-1>", lambda e, et=entity_type, tid=target_id: self._open_entity(et, tid))
+            except Exception:
+                pass
+
+    def _open_entity(self, entity_type: str, target_id: int):
+        """클릭 시 해당 엔티티 화면(처방/원료/거래처)으로 바로 이동합니다."""
+        try:
+            if entity_type == "처방":
+                self.app.navigate_and_record("formulation/all")
+            elif entity_type == "원료":
+                self._open_material(target_id)
+            elif entity_type == "거래처":
+                self.app.navigate_and_record("data/client_mgt")
+        except Exception as e:
+            print(f"[경고] 화면 이동 실패: {e}")
 
     def refresh_data(self):
         """홈 프레임에 표시되는 데이터를 새로고침합니다."""
