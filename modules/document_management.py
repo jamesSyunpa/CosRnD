@@ -222,9 +222,9 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 pass
             return
 
-        # 최상위 탭 뷰
+        # 최상위 탭 뷰 (테두리 겹침 방지를 위해 border_width=0 적용)
         self.tab_view = ctk.CTkTabview(
-            self, command=self.on_tab_change, border_width=1,
+            self, command=self.on_tab_change, border_width=0,
             border_color=("gray80", "gray30"),
             segmented_button_selected_color=("#3B8ED0", "#1F6AA5"),
             segmented_button_unselected_color=("gray92", "gray20"),
@@ -232,7 +232,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             segmented_button_selected_hover_color=("#3671A8", "#144870"),
             segmented_button_unselected_hover_color=("gray85", "gray28")
         )
-        self.tab_view.grid(row=0, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.tab_view.grid(row=0, column=0, sticky="nsew", padx=6, pady=(0, 6))
 
         # 탭 구성 (모드별 구성 요소 제어)
         self.tab_map = {}
@@ -502,7 +502,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             segmented_button_selected_hover_color=("#3671A8", "#144870"),
             segmented_button_unselected_hover_color=("gray85", "gray28")
         )
-        self.formulation_sub_tab_view.grid(row=0, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        self.formulation_sub_tab_view.grid(row=0, column=0, padx=4, pady=(0, 4), sticky="nsew")
 
         # --- 언어별 텍스트 ---
         texts = {
