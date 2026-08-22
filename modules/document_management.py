@@ -2115,24 +2115,17 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.formulation_tree.configure(xscrollcommand=form_h_scroll.set)
         form_h_scroll.grid(row=2, column=0, columnspan=2, sticky='ew')
 
-        # --- [v65 모던 표준 액션 바: 좌우 완벽 수평 정렬] ---
-        bottom_button_frame = ctk.CTkFrame(
-            parent_tab, 
-            fg_color=("gray92", "#1E2228"), 
-            border_width=1,
-            border_color=("gray80", "#2D323B"),
-            corner_radius=8, 
-            height=46
-        )
-        bottom_button_frame.grid(row=2, column=0, padx=10, pady=(4, 8), sticky="ew")
+        # --- [v65 하단 액션 바: 상단 헤더와 일관된 깔끔한 투명 레이아웃] ---
+        bottom_button_frame = ctk.CTkFrame(parent_tab, fg_color="transparent")
+        bottom_button_frame.grid(row=2, column=0, padx=10, pady=(6, 10), sticky="ew")
         bottom_button_frame.grid_columnconfigure(0, weight=1)
 
         bar_inner = ctk.CTkFrame(bottom_button_frame, fg_color="transparent")
-        bar_inner.pack(fill="both", expand=True, padx=8, pady=4)
+        bar_inner.pack(fill="x", expand=True)
 
         # [좌측 그룹: 핵심 작성 & 편집]
         left_grp = ctk.CTkFrame(bar_inner, fg_color="transparent")
-        left_grp.pack(side="left", fill="y")
+        left_grp.pack(side="left")
 
         btn_font = ctk.CTkFont(size=12, weight="bold")
         btn_h = 32
