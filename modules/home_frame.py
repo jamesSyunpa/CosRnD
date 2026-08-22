@@ -330,7 +330,7 @@ class HomeFrame(ctk.CTkFrame):
 
         def _fetch_worker():
             try:
-                articles = CafeNoticeManager.get_notice_list(menu_ids=[3, 4], per_page=10)
+                articles = CafeNoticeManager.get_notice_list(menu_ids=[13, 4, 10, 3], per_page=10)
                 # 각 글의 본문도 긁어와 딕셔너리에 추가
                 for a in articles:
                     a['content'] = CafeNoticeManager.get_article_content(a.get('id')) or a.get('summary', '')
@@ -535,16 +535,36 @@ class HomeFrame(ctk.CTkFrame):
         self.update_textbox.insert("1.0", default_text)
         self.update_textbox.configure(state="disabled")
 
-        # GitHub Releases API로부터 실시간 최신 릴리즈 패치노트 비동기 로드
-        def _fetch_github_updates():
+        # 네이버 공식 카페 및 GitHub Releases API로부터 실시간 최신 공지/패치노트 비동기 로드
+        def _fetch_live_updates():
             try:
+                # 1. 네이버 카페 13번(공지 및 업데이트) 및 4번 최신글 로드
+                cafe_articles = CafeNoticeManager.get_notice_list(menu_ids=[13, 4], per_page=5)
                 found, tag, info = UpdateManager.check_github_release()
-                if found and info:
+                
+                live_text = ""
+                if cafe_articles:
+                    latest_art = cafe_articles[0]
+                    art_id = latest_art.get("id")
+                    title = latest_art.get("subject", "")
+                    date_str = latest_art.get("date", "")
+                    writer = latest_art.get("writer", "관리자")
+                    content = CafeNoticeManager.get_article_content(art_id) or latest_art.get("summary", "")
+                    
+                    live_text = (
+                        f"📢 [네이버 카페 공식 공지: {title}]\n"
+                        f"작성일: {date_str} | 작성자: {writer}\n"
+                        f"--------------------------------------------------\n"
+                        f"{content.strip()}\n\n"
+                        f"--------------------------------------------------\n"
+                        f"🌐 카페 원문 보기: https://cafe.naver.com/cosrqd/{art_id}"
+                    )
+                elif found and info:
                     body = info.get("summary", "").strip()
                     title = info.get("title", f"CosRQD {tag}")
                     pub_date = info.get("date", "")
                     
-                    gh_text = (
+                    live_text = (
                         f"🚀 [공식 릴리즈 업데이트: {tag} ({pub_date})]\n"
                         f"📢 {title}\n"
                         f"--------------------------------------------------\n"
@@ -553,18 +573,19 @@ class HomeFrame(ctk.CTkFrame):
                         f"🌐 공식 배포처: 네이버 카페 (https://cafe.naver.com/cosrqd)"
                     )
 
+                if live_text:
                     def _update_ui():
                         if hasattr(self, 'update_textbox') and self.update_textbox.winfo_exists():
                             self.update_textbox.configure(state="normal")
                             self.update_textbox.delete("1.0", "end")
-                            self.update_textbox.insert("1.0", gh_text)
+                            self.update_textbox.insert("1.0", live_text)
                             self.update_textbox.configure(state="disabled")
 
                     self.after(0, _update_ui)
             except Exception as e:
-                print(f"[Home] GitHub 업데이트 내역 로드 오류: {e}")
+                print(f"[Home] 실시간 업데이트 내역 로드 오류: {e}")
 
-        threading.Thread(target=_fetch_github_updates, daemon=True).start()
+        threading.Thread(target=_fetch_live_updates, daemon=True).start()
 
 
     def _on_filter_changed(self, value=None):
