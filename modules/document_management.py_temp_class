@@ -1,0 +1,44 @@
+
+class ColumnSelectionPopup(ctk.CTkToplevel):
+    """열 선택을 위한 팝업 창 (여러 개 선택 가능)"""
+    def __init__(self, master, treeview, columns_config, callback, x, y):
+        super().__init__(master)
+        
+        # 창 설정
+        self.title("컬럼 선택")
+        self.geometry(f"+{x}+{y}")
+        self.resizable(False, False)
+        self.attributes("-topmost", True)
+        self.transient(master)  # 부모 창 위에 표시
+        # self.overrideredirect(True) # 타이틀바 제거 (선택사항, 제거하면 닫기 버튼을 직접 만들어야 함)
+        
+        self.treeview = treeview
+        self.columns_config = columns_config
+        self.callback = callback
+
+        # 메인 프레임
+        self.frame = ctk.CTkFrame(self)
+        self.frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # 체크박스 목록 생성
+        for col_id, config in columns_config.items():
+            # BooleanVar가 없으면 생성 (config에 저장하여 상태 유지)
+            if "variable" not in config:
+                config["variable"] = tk.BooleanVar(value=config.get("visible", True))
+            
+            var = config["variable"]
+            
+            cb = ctk.CTkCheckBox(
+                self.frame, 
+                text=config["text"], 
+                variable=var,
+                command=lambda: self.callback(self.treeview, self.columns_config)
+            )
+            cb.pack(anchor="w", padx=10, pady=2)
+        
+        # 닫기 버튼 (overrideredirect를 안 쓰면 타이틀바 X버튼이 있음)
+        # 다만 편의를 위해 하단에 버튼 추가
+        ctk.CTkButton(self.frame, text="닫기", width=100, command=self.destroy).pack(pady=10)
+
+        # 포커스 설정 (창이 열리면 포커스를 가져옴)
+            self.after(10, lambda: self.focus_force() if getattr(self, 'winfo_exists', lambda: False)() and self.winfo_exists() else None)
