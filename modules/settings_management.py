@@ -11,6 +11,7 @@ from database.models import Base, Formulation, FormulationItem, Material, Client
 from sqlalchemy import create_engine, text, inspect
 from modules.ui_components import HelpPopup
 from utils import center_window_on_mouse_display
+from utils.update_manager import UpdateManager, UpdateDialog
 from modules.translation import get_texts
 from modules import excel_handler
 
@@ -173,6 +174,35 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self._save_config('Appearance', 'language', lang_code)
         self.app.recreate_main_ui()
 
+    def change_update_mode_event(self, selected_mode: str):
+        """업데이트 모드(자동/수동) 변경 시 config.ini에 저장합니다."""
+        mode_code = "auto" if "자동" in selected_mode else "manual"
+        UpdateManager.save_update_mode(mode_code)
+        self._save_config('Update', 'mode', mode_code)
+        print(f"[Settings] 업데이트 모드 변경 저장됨: {mode_code}")
+
+    def check_update_now_event(self):
+        """수동으로 최신 버전을 즉시 확인하고 결과를 팝업으로 안내합니다."""
+        self.check_update_btn.configure(state="disabled", text="⏳ 확인 중...")
+
+        def _worker():
+            try:
+                is_available, cur_ver, lat_ver, info = UpdateManager.check_for_remote_update()
+            except Exception as e:
+                is_available, cur_ver, lat_ver, info = False, UpdateManager.get_current_version(), UpdateManager.get_current_version(), {"summary": f"확인 중 오류: {e}"}
+
+            def _show():
+                try:
+                    self.check_update_btn.configure(state="normal", text="🔍 지금 최신 버전 확인")
+                    UpdateDialog(self.winfo_toplevel(), cur_ver, lat_ver, info, is_new=is_available)
+                except Exception as ex:
+                    print(f"[Settings] 업데이트 다이얼로그 팝업 오류: {ex}")
+
+            self.after(0, _show)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
     def setup_settings_tab(self, tab_frame):
         scrollable_frame = ctk.CTkScrollableFrame(tab_frame, fg_color="transparent")
         scrollable_frame.pack(fill="both", expand=True)
@@ -208,9 +238,47 @@ class SettingsManagementFrame(ctk.CTkFrame):
         excel_browse_button = ctk.CTkButton(path_frame, text="찾아보기", command=self.browse_excel_path)
         excel_browse_button.grid(row=1, column=2, padx=10, pady=10)
 
-        # --- 저장 버튼 ---
-        save_button = ctk.CTkButton(scrollable_frame, text="경로 저장 및 재시작", command=self.save_paths)
-        save_button.grid(row=2, column=0, pady=20, padx=20, sticky="e")
+        # 경로 저장 버튼
+        save_button = ctk.CTkButton(path_frame, text="경로 저장 및 재시작", command=self.save_paths)
+        save_button.grid(row=2, column=1, columnspan=2, pady=(0, 10), padx=10, sticky="e")
+
+        # --- 소프트웨어 업데이트 설정 ---
+        update_cfg_frame = ctk.CTkFrame(scrollable_frame)
+        update_cfg_frame.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="ew")
+        update_cfg_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(update_cfg_frame, text="업데이트 방식", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        
+        self.update_mode_segmented = ctk.CTkSegmentedButton(
+            update_cfg_frame,
+            values=["자동 업데이트 (권장)", "수동 업데이트"],
+            command=self.change_update_mode_event,
+            height=28
+        )
+        self.update_mode_segmented.grid(row=0, column=1, padx=10, pady=10, sticky="w")
+
+        curr_ver = UpdateManager.get_current_version()
+        self.update_ver_lbl = ctk.CTkLabel(
+            update_cfg_frame, 
+            text=f"현재 버전: {curr_ver} (태성 배포용)", 
+            font=ctk.CTkFont(size=12), 
+            text_color=("gray30", "gray75")
+        )
+        self.update_ver_lbl.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
+
+        btn_box = ctk.CTkFrame(update_cfg_frame, fg_color="transparent")
+        btn_box.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="w")
+
+        self.check_update_btn = ctk.CTkButton(
+            btn_box,
+            text="🔍 지금 최신 버전 확인",
+            width=150,
+            height=26,
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+            command=self.check_update_now_event
+        )
+        self.check_update_btn.pack(side="left")
 
         # --- DB 백업/복원 기능 ---
         if self.current_user.is_admin:
@@ -331,6 +399,16 @@ class SettingsManagementFrame(ctk.CTkFrame):
         
         self.excel_path_entry.delete(0, 'end')
         self.excel_path_entry.insert(0, excel_path)
+
+        # 업데이트 모드 불러오기
+        try:
+            update_mode = UpdateManager.get_update_mode()
+            if hasattr(self, 'update_mode_segmented'):
+                self.update_mode_segmented.set("자동 업데이트 (권장)" if update_mode == 'auto' else "수동 업데이트")
+            if hasattr(self, 'update_ver_lbl'):
+                self.update_ver_lbl.configure(text=f"현재 버전: {UpdateManager.get_current_version()} (태성 배포용)")
+        except Exception as up_err:
+            print(f"[Settings] 업데이트 모드 로딩 실패: {up_err}")
 
     def browse_db_path(self):
         path = filedialog.askdirectory(title="공유 DB 경로 선택")

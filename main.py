@@ -1319,9 +1319,38 @@ class App(ctk.CTk):
                     self.start_db_sync_check()
                 print(f"{datetime.now()}: Main window displayed")
 
+                # [자동 업데이트] 실행 시 자동 버전 체크 및 팝업 안내 기동
+                self.after(600, self._check_auto_update_on_startup)
+
             self.show_post_login_splash(on_complete=show_main_window)
 
         self.after(50, show_splash_and_main_ui)
+
+    def _check_auto_update_on_startup(self):
+        """프로그램 실행 시 업데이트 모드가 'auto'인 경우 최신 버전을 감지하여 팝업으로 안내합니다."""
+        try:
+            from utils.update_manager import UpdateManager, UpdateDialog
+            if UpdateManager.get_update_mode() != 'auto':
+                return
+
+            def _worker():
+                try:
+                    is_available, cur_ver, lat_ver, info = UpdateManager.check_for_remote_update()
+                    if is_available:
+                        def _show_dialog():
+                            try:
+                                if self.winfo_exists():
+                                    UpdateDialog(self, cur_ver, lat_ver, info, is_new=True)
+                            except Exception as pop_err:
+                                print(f"[Update] 시작 시 업데이트 팝업 오류: {pop_err}")
+                        self.after(0, _show_dialog)
+                except Exception as e:
+                    print(f"[Update] 시작 시 버전 체크 오류: {e}")
+
+            import threading
+            threading.Thread(target=_worker, daemon=True).start()
+        except Exception as ex:
+            print(f"[Update] 자동 업데이트 체크 기동 실패: {ex}")
 
     def load_app_settings(self):
         """config.ini에서 앱 설정을 로드합니다 (테마, 언어 등)."""
@@ -1463,10 +1492,10 @@ class App(ctk.CTk):
             self._current_active_btn = btn_widget
             btn_widget.configure(fg_color=("#D0D0D0", "#333333"))
 
-            # 드롭다운 창 생성 (모던 플랫 다크 테마)
+            # 드롭다운 창 생성 (메인 창에 종속되는 모던 플랫 서브 윈도우)
             dropdown = ctk.CTkToplevel(self)
             dropdown.overrideredirect(True)
-            dropdown.attributes("-topmost", True)
+            dropdown.transient(self)  # 메인 창에 귀속 (단독 최상위 방지)
             self._current_dropdown_window = dropdown
 
             # 메인 컨테이너 프레임
@@ -1498,11 +1527,15 @@ class App(ctk.CTk):
                 )
                 item_btn.pack(fill="x", padx=4, pady=2)
 
-            # 위치 계산
+            # 위치 계산 (버튼 바로 아래에 밀착)
             dropdown.update_idletasks()
             x = btn_widget.winfo_rootx()
             y = btn_widget.winfo_rooty() + btn_widget.winfo_height() + 2
             dropdown.geometry(f"+{x}+{y}")
+
+            # 드롭다운 포커스 아웃 시 자동 닫기
+            dropdown.bind("<FocusOut>", lambda e: close_dropdown())
+            dropdown.focus_set()
 
         def on_hover_btn(key, btn_widget):
             # 이미 다른 메뉴가 열려 있는 상태라면 마우스가 이동하는 순간 해당 메뉴로 즉시 전환
@@ -1516,7 +1549,7 @@ class App(ctk.CTk):
                     widget.bind("<Enter>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
                     widget.bind("<Motion>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
 
-        # 전역 클릭 시 메뉴 닫기 바인딩
+        # 전역 클릭 및 윈도우 전환 시 메뉴 닫기 바인딩
         def on_global_click(event):
             if self._current_dropdown_window:
                 w = event.widget
@@ -1535,6 +1568,9 @@ class App(ctk.CTk):
                     close_dropdown()
 
         self.bind_all("<Button-1>", on_global_click, add="+")
+        self.bind("<FocusOut>", lambda e: close_dropdown(), add="+")
+        self.bind("<Unmap>", lambda e: close_dropdown(), add="+")
+        self.bind("<Configure>", lambda e: close_dropdown(), add="+")
 
         btn_font = ctk.CTkFont(size=12, weight="normal")
 
@@ -1626,6 +1662,7 @@ class App(ctk.CTk):
 
         # Static keys for actions
         self.ACTION_CONFIG = {
+            # 연구소 (Document / Research)
             "document/lookup": {"icon": "🔍", "title": "원료/성분 조회"},
             "document/list": {"icon": "📋", "title": "처방 목록"},
             "document/quote": {"icon": "💰", "title": "견적 작성"},
@@ -1633,18 +1670,25 @@ class App(ctk.CTk):
             "document/production": {"icon": "🏭", "title": "생산 처방"},
             "document/property_spec": {"icon": "📝", "title": "실험일지 (물성 규격)"},
             "document/report": {"icon": "📊", "title": "기능성 보고서"},
-            "document/formulation_mgt": {"icon": "℞", "title": self.texts.get('formulation_mgt', 'Formulation Mgt.')},
-            "document/document_sub": {"icon": "📄", "title": self.texts.get('document_sub', 'Documents')},
-            "data/ingredient_mgt": {"icon": "🧪", "title": self.texts.get('ingredient_mgt', 'Ingredient Mgt.')},
-            "data/client_mgt": {"icon": "🏢", "title": self.texts.get('client_mgt', 'Client Mgt.')},
-            "data/user_mgt": {"icon": "👥", "title": self.texts.get('user_mgt', 'User Mgt.')},
-            "settings/settings_sub": {"icon": "⚙️", "title": self.texts.get('settings_sub', 'Settings')},
-            "quality/coa": {"icon": "🔬", "title": "COA (성적서)"},
-            "quality/msds": {"icon": "🔬", "title": "MSDS (물질안전보건자료)"},
-            "quality/prod_standard": {"icon": "🔬", "title": "제품표준서"},
-            "quality/mfg_record": {"icon": "🔬", "title": "제조기록서"},
-            "quality/ingredient_report": {"icon": "🔬", "title": "원료목록보고"},
-            "package": {"icon": "📦", "title": "문서 관리 (패키지)"},  # 패키지 관리 추가
+            "document/formulation_mgt": {"icon": "℞", "title": self.texts.get('formulation_mgt', '처방 관리')},
+            "document/document_sub": {"icon": "📄", "title": self.texts.get('document_sub', '연구 서류')},
+
+            # 품질관리 (Quality Management)
+            "quality/coa": {"icon": "📄", "title": "COA (성적서)"},
+            "quality/msds": {"icon": "📑", "title": "MSDS (물질안전보건자료)"},
+            "quality/ingredient_report": {"icon": "📋", "title": "원료목록보고"},
+            "quality/mat_inspection": {"icon": "🔍", "title": "원료 입고검사"},
+            "quality/prod_standard": {"icon": "📜", "title": "제품표준서"},
+            "quality/mfg_record": {"icon": "🏭", "title": "제조관리기록서 (BMR)"},
+            "quality/stability_test": {"icon": "⏳", "title": "안정성 시험 (경시변화)"},
+            "quality/compatibility_test": {"icon": "🧴", "title": "용기 상용성 시험"},
+
+            # 데이터 & 설정 (Data & Settings)
+            "data/ingredient_mgt": {"icon": "🧪", "title": self.texts.get('ingredient_mgt', '성분 관리')},
+            "data/client_mgt": {"icon": "🏢", "title": self.texts.get('client_mgt', '거래처 관리')},
+            "data/user_mgt": {"icon": "👥", "title": self.texts.get('user_mgt', '사용자 관리')},
+            "settings/settings_sub": {"icon": "⚙️", "title": self.texts.get('settings_sub', '시스템 설정')},
+            "package": {"icon": "📦", "title": "문서 관리 (패키지)"},
         }
 
         # Build reverse lookup from displayed title -> action key for resolving
@@ -1679,7 +1723,15 @@ class App(ctk.CTk):
 
         # Rebuild title map in case normalization or ACTION_CONFIG changed
         rebuild_action_title_map()
-        self.title("R&D Management System (v64)" if self.language == "english" else "화장품 연구소 관리 시스템 (v64)")
+        
+        # 현재 버전 동적 로드
+        try:
+            from utils.update_manager import UpdateManager
+            current_app_ver = UpdateManager.get_current_version()
+        except:
+            current_app_ver = "v65.0.1"
+            
+        self.title(f"R&D Management System ({current_app_ver})" if self.language == "english" else f"화장품 연구소 관리 시스템 ({current_app_ver})")
 
         self.navigation_frame_label = ctk.CTkLabel(
             self.navigation_frame, 

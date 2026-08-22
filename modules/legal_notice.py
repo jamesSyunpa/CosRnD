@@ -42,14 +42,14 @@ class LegalNoticeDialog(ctk.CTkToplevel):
         self.textbox = ctk.CTkTextbox(self.main_frame, wrap="word", font=ctk.CTkFont(size=12))
         self.textbox.pack(fill="both", expand=True, pady=10)
         
-        self.text_content = """[실무요약] 본 프로그램은 화장품 연구소의 내부 연구 및 관리 효율 향상을 위한 도구이며, 최종 품질 판단 및 법적 책임은 전적으로 사용자에게 있습니다.
+        self.text_content = f"""[실무요약] 본 프로그램은 화장품 연구소의 내부 연구 및 관리 효율 향상을 위한 도구이며, 최종 품질 판단 및 법적 책임은 전적으로 사용자에게 있습니다.
 
 0.1 프로그램 개요
     0.1.1 프로그램 명칭
-        국문: 화장품 연구소 관리 시스템
-        영문: Cosmetic Research & Quality Data System (CosRQD)
+        국문: 화장품 연구소 관리 시스템 (CosRnD)
+        영문: Cosmetic Research & Quality Data System
     0.1.2 개발 목적
-        본 프로그램은 화장품 연구소의 연구 데이터 관리, 성분 정보 관리, 시험 및 연구 이력 관리를 효율적으로 수행하기 위해 개발된 내부 연구 지원용 소프트웨어입니다.
+        본 프로그램은 화장품 연구소의 연구 데이터 관리, 성분 정보 관리, 시험 및 연구 이력 관리를 효율적으로 수행하기 위해 개발된 연구 지원용 소프트웨어입니다.
         연구 업무의 편의성과 관리 효율 향상을 주목적으로 하며, 최종 제품의 품질 판단이나 법적 적합성 판단을 대체하는 목적이 아님을 명시합니다.
 
 0.2 사용 범위 및 제한 사항
@@ -61,16 +61,15 @@ class LegalNoticeDialog(ctk.CTkToplevel):
         - 기타 연구소 내부 관리 업무 지원
 
     0.2.2 사용 제한
-        대외비 (Internal Use Only): 본 프로그램은 외부 배포, 판매, 재가공, 무단 복제를 엄격히 금지합니다.
+        대외비 (Internal Use Only): 본 프로그램은 외부 무단 복제 및 변조를 엄격히 금지합니다.
         법적 효력 부존재: 본 프로그램은 화장품 제조 및 판매 허가에 대한 법적 판단 도구로 사용될 수 없습니다.
         참고용 자료: 프로그램의 모든 출력 결과는 참고 자료(Reference)이며, 최종 판단은 반드시 관련 법규 및 내부 절차(SOP)에 따라 수행되어야 합니다.
 
 0.3 책임 범위 및 면책 조항 (중요)
-    !! Warning 주의 (Disclaimer) !!
     3.1 면책 조항
     본 프로그램은 연구 및 내부 관리 편의를 위해 제공됩니다. 본 프로그램을 통해 생성된 계산 결과, 분석 정보, 관리 데이터는 최종 제품의 품질, 안전성, 법적 적합성을 보장하지 않습니다. 본 프로그램의 사용으로 인해 발생하는 모든 유형/무형의 결과에 대한 최종 책임은 사용자에게 있으며, 개발자 및 제공자는 이에 대한 어떠한 법적 책임도 지지 않습니다.
 
-    ** 3.2 데이터 입력 책임 **
+    3.2 데이터 입력 책임
     본 프로그램에 입력되는 모든 데이터(성분명, 함량, 배합비, 수치 정보 등)의 정확성에 대한 책임은 사용자에게 있습니다. 사용자의 입력 오류 또는 관리 부주의로 인해 발생한 문제에 대해서는 개발자가 책임을 지지 않습니다.
 
 0.4 사용자 동의 및 고지
@@ -83,28 +82,21 @@ class LegalNoticeDialog(ctk.CTkToplevel):
 
 0.5 저작권 및 지식재산권
     0.5.1 저작권 정보
-        Copyright © 2025-2026 luckfortma. All rights reserved.
+        Copyright © 2025-2026 luckfortma & TaeSung Chem. All rights reserved.
         본 프로그램의 소스코드, UI 구성, 기능 설계 및 설명 문서는 대한민국 저작권법의 보호를 받습니다.
-        사전 승인 없이 본 프로그램의 전부 또는 일부를 복제, 배포, 수정, 재사용하는 행위를 금지합니다.
 
-    0.5.2 개발 정보
-        개발자: luckfortma
-        이메일: luckfortma@gmail.com
-        개발 목적: 화장품 연구소 내부 관리 및 R&D 플랫폼
+    0.5.2 개발 및 배포 정보
+        개발사: luckfortma / (주)태성켐
+        개발 목적: 화장품 연구소 R&D 플랫폼 및 원료 정보 연동
 
 0.6 버전 및 변경 이력 관리
     0.6.1 버전 정보
-        프로그램 버전: v64
-        배포 상태: 정식 릴리즈 (최초 공식 배포 준비 중 / 미배포)
-    0.6.2 변경 이력
-        본 프로그램은 기능 개선 및 안정성 확보를 위해 지속적으로 업데이트될 수 있습니다. 주요 변경 사항은 본 설명서의 개정본 또는 별도의 Release Note를 통해 관리합니다.
-
+        프로그램 버전: {self.version_str} (태성 배포판)
+        배포 상태: 정식 릴리즈
 
 0.7 오픈소스 사용 고지
     본 프로그램은 개발 과정에서 다음의 오픈소스 소프트웨어를 활용하였습니다. 각 라이브러리는 해당 라이선스 정책을 따릅니다.
-    Python, PyQt (or Tkinter), pandas, Numpy 등
-
-※ 본 고지 사항의 상세 내용은 제14장 '법적 고지 및 면책 조항'을 따른다.
+    Python, CustomTkinter, pandas, openpyxl, SQLAlchemy, SQLite3 등
 """
         self.textbox.insert("0.0", self.text_content)
         self.textbox.configure(state="disabled") # 읽기 전용으로 설정

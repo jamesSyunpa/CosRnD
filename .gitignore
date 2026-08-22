@@ -1,22 +1,25 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.env
 venv/
 .venv/
+
+# Build & Dist
 build/
 dist/
 temp/
+*.spec
+!build_scripts/*.spec
+
+# Database & User Data (사용자 개인 데이터 보호)
 *.db
 *.db-shm
 *.db-wal
-*.zip
-*.7z
-*.rar
-*.tar
-*.gz
-*.exe
-*.pkg
-*.dll
 backups/
 data/backups/
+
+# Release (대용량 빌드 산출물은 GitHub Releases에 별도 업로드)
+CosRnD_Release/*.exe
+CosRnD_Release/*.zip*

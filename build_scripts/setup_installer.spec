@@ -12,7 +12,7 @@ a = Analysis(
         (os.path.join(project_root, 'dist', 'app.zip'), '.'),
         (os.path.join(project_root, 'Icon.ico'), '.')
     ],
-    hiddenimports=['PyQt6', 'psutil', 'requests'],
+    hiddenimports=['PyQt6', 'psutil', 'requests', 'customtkinter', 'PIL', 'win32api', 'win32con'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -28,7 +28,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Setup_화장품연구관리_v1.0.3',
+    name='Setup_화장품연구관리_v65.0.1',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

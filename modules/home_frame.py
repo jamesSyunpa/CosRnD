@@ -12,6 +12,10 @@ from database.models import Material, Formulation, Client
 from sqlalchemy import desc
 from datetime import datetime
 import re
+import threading
+import webbrowser
+from utils.cafe_manager import CafeNoticeManager
+from utils.update_manager import UpdateManager, UpdateDialog
 
 class HomeFrame(ctk.CTkFrame):
     def __init__(self, master, user, app, recent_actions, action_config):
@@ -35,11 +39,11 @@ class HomeFrame(ctk.CTkFrame):
         
         ctk.CTkLabel(header_frame, text="최근 활동", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
         
-        # 도움말 버튼 추가
+        # 도움말/설명서 버튼 추가
         self.help_btn = ctk.CTkButton(
             header_frame, 
-            text="도움말 (?)", 
-            width=80, 
+            text="도움말/설명서", 
+            width=95, 
             height=24,
             font=ctk.CTkFont(size=11),
             command=self.open_help
@@ -68,21 +72,70 @@ class HomeFrame(ctk.CTkFrame):
         bottom_frame.grid_columnconfigure(1, weight=1) # 우측 변경 이력
         bottom_frame.grid_rowconfigure(0, weight=1)
 
-        # --- 하단 좌측: 공지사항 ---
-        notice_frame = ctk.CTkFrame(bottom_frame)
-        notice_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        # --- 하단 좌측: 공지사항 & 업데이트 컨테이너 (상하 2단 분리) ---
+        left_bottom_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
+        left_bottom_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        left_bottom_frame.grid_columnconfigure(0, weight=1)
+        left_bottom_frame.grid_rowconfigure(0, weight=1) # 상단 공지사항: 남은 화면 영역을 100% 독점 확장
+        left_bottom_frame.grid_rowconfigure(1, weight=0) # 하단 업데이트: 컴팩트 고정 높이만 차지하여 바닥에 착 붙음
+
+        # 1. 상단: 공지사항 프레임 (대폭 확장)
+        notice_frame = ctk.CTkFrame(left_bottom_frame)
+        notice_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
         notice_frame.grid_rowconfigure(1, weight=1)
         notice_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(notice_frame, text="공지사항 / 업데이트", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, padx=15, pady=10, sticky="w")
+        notice_header = ctk.CTkFrame(notice_frame, fg_color="transparent")
+        notice_header.grid(row=0, column=0, padx=15, pady=(8, 4), sticky="ew")
+        notice_header.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(notice_header, text="📢 공지사항", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, sticky="w")
+
+        notice_btn_box = ctk.CTkFrame(notice_header, fg_color="transparent")
+        notice_btn_box.grid(row=0, column=2, sticky="e")
+
+        ctk.CTkButton(
+            notice_btn_box,
+            text="🌐 카페 바로가기",
+            width=95,
+            height=24,
+            font=ctk.CTkFont(size=11),
+            fg_color="#3b82f6",
+            hover_color="#2563eb",
+            command=lambda: webbrowser.open("https://cafe.naver.com/cosrqd")
+        ).pack(side="left", padx=(0, 4))
+
+        ctk.CTkButton(
+            notice_btn_box,
+            text="🔄",
+            width=28,
+            height=24,
+            font=ctk.CTkFont(size=12),
+            fg_color="gray50",
+            hover_color="gray40",
+            command=self.load_cafe_notices
+        ).pack(side="left")
         
-        self.notice_textbox = ctk.CTkTextbox(notice_frame, wrap="word", font=ctk.CTkFont(family="Malgun Gothic", size=12))
-        self.notice_textbox.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
-        self.notice_textbox.insert("1.0", "시스템 공지사항 또는 업데이트 내역이 여기에 표시됩니다.\n\n"
-                                          "v1.0.0 (2026-06-05)\n"
-                                          "- 최초 버전 릴리즈\n"
-                                          "- 주요 기능: 처방 관리, 데이터 관리, 품질 관리")
-        self.notice_textbox.configure(state="disabled")
+        # 공지사항 리스트 스크롤 컨테이너 (시원하게 넓은 공간 확보)
+        self.notice_panel = ctk.CTkScrollableFrame(notice_frame, fg_color="transparent")
+        self.notice_panel.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.notice_panel.grid_columnconfigure(0, weight=1)
+
+        # 2. 하단: 업데이트 내역 프레임 (슬림하게 하단 고정)
+        update_frame = ctk.CTkFrame(left_bottom_frame, height=130)
+        update_frame.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        update_frame.grid_rowconfigure(1, weight=1)
+        update_frame.grid_columnconfigure(0, weight=1)
+
+        update_header = ctk.CTkFrame(update_frame, fg_color="transparent")
+        update_header.grid(row=0, column=0, padx=15, pady=(6, 2), sticky="ew")
+        update_header.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(update_header, text="🚀 시스템 업데이트 내역", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, sticky="w")
+        
+        self.update_textbox = ctk.CTkTextbox(update_frame, height=100, wrap="word", font=ctk.CTkFont(family="Malgun Gothic", size=11))
+        self.update_textbox.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 8))
+        self._load_system_updates()
 
         # --- 하단 우측: 최근 R&D 변경 이력 (통합 피드 & 다운로드) ---
         changes_frame = ctk.CTkFrame(bottom_frame)
@@ -142,25 +195,35 @@ class HomeFrame(ctk.CTkFrame):
 
         self.refresh_cards()
         self.load_recent_material_changes()
+        self.load_cafe_notices()
 
     def refresh_cards(self):
         """최근 활동 카드를 다시 그립니다."""
         for widget in self.cards_frame.winfo_children():
             widget.destroy()
 
-        valid_actions = [action for action in self.recent_actions if action in self.action_config and action not in ['quality/msds', 'quality/prod_standard', 'quality/mfg_record']]
+        def resolve_config(act):
+            if act in self.action_config:
+                return act, self.action_config[act]
+            for k, v in self.action_config.items():
+                if k.endswith('/' + act) or k == act:
+                    return k, v
+            return act, {"icon": "📌", "title": act}
 
-        if not valid_actions:
+        valid_items = []
+        for act in self.recent_actions:
+            resolved_key, cfg = resolve_config(act)
+            valid_items.append((resolved_key, cfg))
+
+        if not valid_items:
             ctk.CTkLabel(self.cards_frame, text="최근 활동이 없습니다.", font=ctk.CTkFont(size=11), text_color="gray").pack(pady=20)
             return
 
-        # [수정] pack() 대신 grid()를 사용하여 5열 레이아웃으로 꽉 채워 표시
-        num_columns = 5
-        self.cards_frame.grid_columnconfigure(tuple(range(num_columns)), weight=1)
+        # 5열 레이아웃으로 꽉 채워 표시
+        self.cards_frame.grid_columnconfigure(tuple(range(5)), weight=1)
 
-        for i, action in enumerate(valid_actions):
-            config = self.action_config.get(action, {"icon": "❓", "title": action})
-            card = self.create_action_card(self.cards_frame, config["icon"], config["title"], action)
+        for i, (resolved_key, config) in enumerate(valid_items[:5]):
+            card = self.create_action_card(self.cards_frame, config.get("icon", "📌"), config.get("title", resolved_key), resolved_key)
             card.grid(row=0, column=i, padx=10, pady=10, sticky="nsew")
 
     def create_action_card(self, master, icon, title, action_name):
@@ -205,8 +268,9 @@ class HomeFrame(ctk.CTkFrame):
         return card
             
     def open_help(self):
-        """도움말 안내 메시지를 엽니다 (추후 블로그/유튜브 링크 예정)."""
-        messagebox.showinfo("도움말 안내", "도움말 서비스를 준비 중입니다.\n추후 블로그 또는 유튜브 가이드로 업데이트될 예정입니다.")
+        """도움말 및 네이버 카페 가이드 센터를 엽니다."""
+        from modules.help_viewer import HelpViewer
+        HelpViewer(self.winfo_toplevel())
 
     def open_legal_notice(self):
         """법적 고지 팝업을 엽니다."""
@@ -247,6 +311,247 @@ class HomeFrame(ctk.CTkFrame):
 
         # callbacks and config_path are not needed if already_agreed is True
         LegalNoticeDialog(self.winfo_toplevel(), ver, lambda: None, None, already_agreed=already_agreed)
+
+    def load_cafe_notices(self):
+        """네이버 카페에서 최신 공지사항 목록과 본문을 비동기로 가져와 아코디언 카드 리스트로 렌더링합니다."""
+        for w in list(self.notice_panel.winfo_children()):
+            try:
+                w.destroy()
+            except:
+                pass
+
+        loading_label = ctk.CTkLabel(
+            self.notice_panel,
+            text="⏳ 네이버 카페(CosRQD)에서 최신 공지사항을 불러오는 중입니다...",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        loading_label.pack(pady=20)
+
+        def _fetch_worker():
+            try:
+                articles = CafeNoticeManager.get_notice_list(menu_ids=[3, 4], per_page=10)
+                # 각 글의 본문도 긁어와 딕셔너리에 추가
+                for a in articles:
+                    a['content'] = CafeNoticeManager.get_article_content(a.get('id')) or a.get('summary', '')
+            except Exception as e:
+                print(f"[Home] 공지 로드 실패: {e}")
+                articles = []
+
+            def _update_ui():
+                try:
+                    if hasattr(self, 'notice_panel') and self.notice_panel.winfo_exists():
+                        self._render_notice_cards(articles)
+                except Exception as ex:
+                    print(f"[Home] 공지사항 UI 갱신 실패: {ex}")
+
+            self.after(0, _update_ui)
+
+        threading.Thread(target=_fetch_worker, daemon=True).start()
+
+    def _render_notice_cards(self, articles):
+        """공지사항 목록을 우측 변경이력처럼 모던한 아코디언 카드(칸칸)로 렌더링합니다."""
+        for w in list(self.notice_panel.winfo_children()):
+            try:
+                w.destroy()
+            except:
+                pass
+
+        if not articles:
+            empty = ctk.CTkLabel(
+                self.notice_panel,
+                text="📢 현재 등록된 공지사항이 없습니다.",
+                font=ctk.CTkFont(size=12),
+                text_color="gray"
+            )
+            empty.pack(pady=20)
+            return
+
+        card_bg = ("#F4F6FA", "#2B2B2B")
+        card_hover = ("#E9EFF7", "#363636")
+        border_color = ("#E2E8F0", "#3E3E3E")
+
+        for r_idx, item in enumerate(articles):
+            art_id = item.get("id")
+            subject = item.get("subject", "제목 없음")
+            date_str = item.get("date", "")
+            writer = item.get("writer", "관리자")
+            content = item.get("content", "").strip() or "본문 내용이 없습니다."
+            url = item.get("url", "https://cafe.naver.com/cosrqd")
+
+            # 개별 공지 카드 프레임 (칸칸)
+            card = ctk.CTkFrame(
+                self.notice_panel,
+                corner_radius=8,
+                fg_color=card_bg,
+                border_width=1,
+                border_color=border_color,
+                cursor="hand2"
+            )
+            card.pack(fill="x", pady=(0, 6), padx=2)
+
+            # 1. 헤더 구역 (항상 보임)
+            header_frame = ctk.CTkFrame(card, fg_color="transparent")
+            header_frame.pack(fill="x", padx=10, pady=8)
+            header_frame.grid_columnconfigure(2, weight=1)
+
+            # 날짜 라벨
+            ctk.CTkLabel(
+                header_frame,
+                text=f"[{date_str}]",
+                font=ctk.CTkFont(size=11),
+                text_color=("gray50", "gray65")
+            ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+
+            # 📢 공지 뱃지
+            ctk.CTkLabel(
+                header_frame,
+                text="📢 공지",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=("#0284C7", "#38BDF8")
+            ).grid(row=0, column=1, sticky="w", padx=(0, 8))
+
+            # 제목 라벨 (길면 자동 줄바꿈)
+            title_lbl = ctk.CTkLabel(
+                header_frame,
+                text=subject,
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=("#1E293B", "#FFFFFF"),
+                anchor="w"
+            )
+            title_lbl.grid(row=0, column=2, sticky="ew")
+
+            # 우측 버튼/토글 구역
+            btn_area = ctk.CTkFrame(header_frame, fg_color="transparent")
+            btn_area.grid(row=0, column=3, sticky="e", padx=(8, 0))
+
+            # 원문 보기 작은 버튼
+            link_btn = ctk.CTkButton(
+                btn_area,
+                text="🌐 원문",
+                width=48,
+                height=20,
+                font=ctk.CTkFont(size=10),
+                fg_color="#3b82f6",
+                hover_color="#2563eb",
+                command=lambda u=url: webbrowser.open(u)
+            )
+            link_btn.pack(side="left", padx=(0, 4))
+
+            # 토글 화살표 라벨
+            toggle_lbl = ctk.CTkLabel(
+                btn_area,
+                text="펼치기 ▼",
+                font=ctk.CTkFont(size=10, weight="bold"),
+                text_color=("gray50", "gray65")
+            )
+            toggle_lbl.pack(side="left")
+
+            # 2. 본문 구역 (펼치기/접기 대상)
+            body_frame = ctk.CTkFrame(card, fg_color="transparent")
+
+            # 구분선
+            ctk.CTkFrame(body_frame, height=1, fg_color=border_color).pack(fill="x", pady=(2, 6))
+
+            # 본문 텍스트박스 (워드랩 적용)
+            content_box = ctk.CTkTextbox(
+                body_frame,
+                wrap="word",
+                font=ctk.CTkFont(family="Malgun Gothic", size=11),
+                fg_color=("#FFFFFF", "#1E1E1E"),
+                border_width=0,
+                height=130
+            )
+            content_box.pack(fill="x", expand=True, pady=(0, 6))
+            content_box.insert("1.0", content)
+            content_box.configure(state="disabled")
+
+            # 첫 번째 글은 기본으로 펼쳐둠, 나머지는 접힘
+            is_expanded = [r_idx == 0]
+            if is_expanded[0]:
+                body_frame.pack(fill="x", padx=10, pady=(0, 8))
+                toggle_lbl.configure(text="접기 ▲", text_color=("#0284C7", "#38BDF8"))
+
+            # 토글 함수 (클릭 시 펼치기/접기)
+            def make_toggle(b_frame=body_frame, t_lbl=toggle_lbl, exp=is_expanded):
+                def _toggle(e=None):
+                    if exp[0]:
+                        b_frame.pack_forget()
+                        t_lbl.configure(text="펼치기 ▼", text_color=("gray50", "gray65"))
+                        exp[0] = False
+                    else:
+                        b_frame.pack(fill="x", padx=10, pady=(0, 8))
+                        t_lbl.configure(text="접기 ▲", text_color=("#0284C7", "#38BDF8"))
+                        exp[0] = True
+                return _toggle
+
+            toggle_fn = make_toggle()
+
+            # 헤더 전체 클릭 시 토글 연결
+            for w in [card, header_frame, title_lbl, toggle_lbl]:
+                w.bind("<Button-1>", lambda e, fn=toggle_fn: fn())
+
+            # 마우스 호버 피드백
+            def make_hover(c=card):
+                def on_enter(e):
+                    c.configure(fg_color=card_hover)
+                def on_leave(e):
+                    c.configure(fg_color=card_bg)
+                return on_enter, on_leave
+
+            enter_fn, leave_fn = make_hover()
+            card.bind("<Enter>", enter_fn)
+            card.bind("<Leave>", leave_fn)
+
+
+    def _load_system_updates(self):
+        """현재 프로그램의 버전 정보 및 최신 업데이트/패치 내역을 표시합니다."""
+        try:
+            with open(os.path.join(PROJECT_ROOT, 'VERSION'), 'r', encoding='utf-8') as f:
+                ver = f.read().strip()
+                if ver and not ver.startswith('v') and re.match(r'^\d+(?:\.\d+)*$', ver):
+                    ver = 'v' + ver
+        except:
+            ver = "v65"
+
+        update_text = (
+            f"🚀 [현재 버전: {ver} - 태성 배포용]\n"
+            f"--------------------------------------------------\n"
+            f"✨ [{ver} 주요 업데이트 내역]\n"
+            f"• 🌿 태성켐 원료 1순위 추천 및 샘플/견적 신청 연동\n"
+            f"• 📄 품질관리 시험성적서(COA) 및 원료목록보고서 자동화\n"
+            f"• 📢 네이버 공식 카페(CosRQD) 실시간 공지사항 연동\n"
+            f"• ⚙️ 시스템 설정에서 업데이트 방식(자동/수동) 제어 지원\n"
+            f"• 🔒 다중 실행 방지 소켓 락 및 시스템 무결성 보안 강화\n"
+            f"• 🧪 처방 개발 버전 관리 및 통합 R&D 변경 타임라인 피드\n"
+            f"• ⚡ 데이터베이스(DB) 마이그레이션 및 자동 복구 스위트 탑재\n"
+            f"--------------------------------------------------\n"
+            f"💡 추가 기능 제안 및 버그 제보는 네이버 카페를 이용해 주세요."
+        )
+
+        self.update_textbox.configure(state="normal")
+        self.update_textbox.delete("1.0", "end")
+        self.update_textbox.insert("1.0", update_text)
+        self.update_textbox.configure(state="disabled")
+
+        # 자동 업데이트 모드일 경우 백그라운드에서 조용히 최신 버전 확인
+        if UpdateManager.get_update_mode() == 'auto':
+            def _auto_check():
+                try:
+                    is_avail, cur_v, lat_v, info = UpdateManager.check_for_remote_update()
+                    if is_avail:
+                        def _notify_ui():
+                            if hasattr(self, 'update_textbox') and self.update_textbox.winfo_exists():
+                                self.update_textbox.configure(state="normal")
+                                banner = f"🔥 [새 버전 {lat_v} 업데이트 발견!]\n• 최신 버전이 출시되었습니다. (시스템 설정에서 확인 가능)\n--------------------------------------------------\n"
+                                current_content = self.update_textbox.get("1.0", "end")
+                                self.update_textbox.delete("1.0", "end")
+                                self.update_textbox.insert("1.0", banner + current_content)
+                                self.update_textbox.configure(state="disabled")
+                        self.after(0, _notify_ui)
+                except Exception as e:
+                    print(f"[Home] 자동 버전 체크 오류: {e}")
+            threading.Thread(target=_auto_check, daemon=True).start()
 
 
     def _on_filter_changed(self, value=None):
