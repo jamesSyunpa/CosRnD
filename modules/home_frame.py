@@ -505,19 +505,20 @@ class HomeFrame(ctk.CTkFrame):
 
 
     def _load_system_updates(self):
-        """현재 프로그램의 버전 정보 및 최신 업데이트/패치 내역을 표시합니다."""
+        """GitHub Releases 실시간 패치노트 및 현재 프로그램의 버전 정보를 연동하여 표시합니다."""
         try:
             with open(os.path.join(PROJECT_ROOT, 'VERSION'), 'r', encoding='utf-8') as f:
                 ver = f.read().strip()
                 if ver and not ver.startswith('v') and re.match(r'^\d+(?:\.\d+)*$', ver):
                     ver = 'v' + ver
         except:
-            ver = "v65"
+            ver = "v65.0.1"
 
-        update_text = (
+        # 기본 로컬 패치노트 (즉시 렌더링)
+        default_text = (
             f"🚀 [현재 버전: {ver} - 태성 배포용]\n"
             f"--------------------------------------------------\n"
-            f"✨ [{ver} 주요 업데이트 내역]\n"
+            f"✨ [{ver} 주요 기능 및 변경 내역]\n"
             f"• 🌿 태성켐 원료 1순위 추천 및 샘플/견적 신청 연동\n"
             f"• 📄 품질관리 시험성적서(COA) 및 원료목록보고서 자동화\n"
             f"• 📢 네이버 공식 카페(CosRQD) 실시간 공지사항 연동\n"
@@ -526,32 +527,45 @@ class HomeFrame(ctk.CTkFrame):
             f"• 🧪 처방 개발 버전 관리 및 통합 R&D 변경 타임라인 피드\n"
             f"• ⚡ 데이터베이스(DB) 마이그레이션 및 자동 복구 스위트 탑재\n"
             f"--------------------------------------------------\n"
-            f"💡 추가 기능 제안 및 버그 제보는 네이버 카페를 이용해 주세요."
+            f"🌐 GitHub 공식 저장소: https://github.com/jamesSyunpa/CosRnD"
         )
 
         self.update_textbox.configure(state="normal")
         self.update_textbox.delete("1.0", "end")
-        self.update_textbox.insert("1.0", update_text)
+        self.update_textbox.insert("1.0", default_text)
         self.update_textbox.configure(state="disabled")
 
-        # 자동 업데이트 모드일 경우 백그라운드에서 조용히 최신 버전 확인
-        if UpdateManager.get_update_mode() == 'auto':
-            def _auto_check():
-                try:
-                    is_avail, cur_v, lat_v, info = UpdateManager.check_for_remote_update()
-                    if is_avail:
-                        def _notify_ui():
-                            if hasattr(self, 'update_textbox') and self.update_textbox.winfo_exists():
-                                self.update_textbox.configure(state="normal")
-                                banner = f"🔥 [새 버전 {lat_v} 업데이트 발견!]\n• 최신 버전이 출시되었습니다. (시스템 설정에서 확인 가능)\n--------------------------------------------------\n"
-                                current_content = self.update_textbox.get("1.0", "end")
-                                self.update_textbox.delete("1.0", "end")
-                                self.update_textbox.insert("1.0", banner + current_content)
-                                self.update_textbox.configure(state="disabled")
-                        self.after(0, _notify_ui)
-                except Exception as e:
-                    print(f"[Home] 자동 버전 체크 오류: {e}")
-            threading.Thread(target=_auto_check, daemon=True).start()
+        # GitHub Releases API로부터 실시간 최신 릴리즈 패치노트 비동기 로드
+        def _fetch_github_updates():
+            try:
+                found, tag, info = UpdateManager.check_github_release()
+                if found and info:
+                    body = info.get("summary", "").strip()
+                    title = info.get("title", f"CosRQD {tag}")
+                    pub_date = info.get("date", "")
+                    
+                    gh_text = (
+                        f"🚀 [GitHub 공식 릴리즈: {tag} ({pub_date})]\n"
+                        f"📢 {title}\n"
+                        f"--------------------------------------------------\n"
+                        f"{body if body else '태성켐 원료 추천 및 시스템 성능 안정화 패치가 포함되어 있습니다.'}\n\n"
+                        f"--------------------------------------------------\n"
+                        f"🛡️ 개발 연대기: 2025년 4월 ~ 현재 (36개 개발 단계 영구 박제)\n"
+                        f"🌐 GitHub 배포처: https://github.com/jamesSyunpa/CosRnD"
+                    )
+
+                    def _update_ui():
+                        if hasattr(self, 'update_textbox') and self.update_textbox.winfo_exists():
+                            self.update_textbox.configure(state="normal")
+                            self.update_textbox.delete("1.0", "end")
+                            self.update_textbox.insert("1.0", gh_text)
+                            self.update_textbox.configure(state="disabled")
+
+                    self.after(0, _update_ui)
+            except Exception as e:
+                print(f"[Home] GitHub 업데이트 내역 로드 오류: {e}")
+
+        threading.Thread(target=_fetch_github_updates, daemon=True).start()
 
 
     def _on_filter_changed(self, value=None):
