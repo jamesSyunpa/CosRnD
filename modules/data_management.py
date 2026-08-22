@@ -73,6 +73,36 @@ class DataManagementFrame(ctk.CTkFrame):
             self.setup_user_management_tab(self.tab_view.tab(tab_texts["user"]))
             self.update_role_options()
 
+        self.apply_theme_to_trees()
+
+    def apply_theme_to_trees(self):
+        """현재 테마에 맞게 client_tree, user_tree 및 하위 material_frame의 row 태그 색상을 즉시 적용합니다."""
+        theme = ctk.get_appearance_mode().lower()
+        if theme == 'light':
+            odd_bg = "#F9FAFB"
+            even_bg = "#FFFFFF"
+            tree_fg = "#1F2937"
+        else:
+            odd_bg = "#282A2E"
+            even_bg = "#202124"
+            tree_fg = "#E8EAED"
+
+        for tree in [getattr(self, 'client_tree', None), getattr(self, 'user_tree', None)]:
+            if tree:
+                try:
+                    tree.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+                    tree.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+                    tree.tag_configure("group_odd", background=odd_bg, foreground=tree_fg)
+                    tree.tag_configure("group_even", background=even_bg, foreground=tree_fg)
+                except Exception:
+                    pass
+
+        if hasattr(self, 'material_frame') and hasattr(self.material_frame, 'apply_theme_to_trees'):
+            try:
+                self.material_frame.apply_theme_to_trees()
+            except Exception:
+                pass
+
     def show_help(self):
         """데이터 관리 도움말을 표시합니다."""
         title = self.texts['data_mgt_help_title']

@@ -31,7 +31,31 @@ class MaterialManagementFrame(ctk.CTkFrame):
         # 권한에 따른 UI 요소 제어
         self.setup_permission_controls()
 
+        self.apply_theme_to_trees()
         self.refresh_data()
+
+    def apply_theme_to_trees(self):
+        """현재 테마에 맞게 material_tree 및 ingredient_tree의 row 태그 색상을 즉시 적용합니다."""
+        theme = ctk.get_appearance_mode().lower()
+        if theme == 'light':
+            odd_bg = "#F9FAFB"
+            even_bg = "#FFFFFF"
+            tree_fg = "#1F2937"
+        else:
+            odd_bg = "#282A2E"
+            even_bg = "#202124"
+            tree_fg = "#E8EAED"
+
+        for tree in [getattr(self, 'material_tree', None), getattr(self, 'ingredient_tree', None)]:
+            if tree:
+                try:
+                    tree.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+                    tree.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+                    tree.tag_configure("group_odd", background=odd_bg, foreground=tree_fg)
+                    tree.tag_configure("group_even", background=even_bg, foreground=tree_fg)
+                    tree.tag_configure("material_row", foreground=tree_fg)
+                except Exception:
+                    pass
 
     def get_client_list(self, db_manager):
         return [row[0] for row in db_manager.get_all_clients()]
@@ -81,6 +105,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
             
     def refresh_data(self):
         """이 화면에 필요한 모든 데이터를 DB에서 새로 불러옵니다."""
+        self.apply_theme_to_trees()
         # Load clients asynchronously (non-blocking) and materials in background
         try:
             # clients loader already runs in background

@@ -2158,39 +2158,73 @@ class App(ctk.CTk):
                         print(f"[경고] 메뉴 '{menu_attr}' 색상 업데이트 실패: {e}")
 
     def update_treeview_style(self):
-        """현재 테마에 맞게 모든 Treeview의 스타일을 업데이트합니다."""
+        """현재 테마에 맞게 모든 Treeview의 스타일 및 행 태그(oddrow/evenrow)를 실시간 업데이트합니다."""
         theme = ctk.get_appearance_mode()
         style = ttk.Style()
         
         if theme.lower() == 'light':
             style.theme_use("default")
-            style.configure("Treeview", background="#FFFFFF", foreground="#1F2937", fieldbackground="#FFFFFF", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
-            style.configure("Treeview.Heading", background="#F3F4F6", foreground="#111827", font=('Malgun Gothic', 9, 'bold'), borderwidth=1, relief="flat")
-            style.map('Treeview', background=[('selected', '#3B82F6')], foreground=[('selected', '#FFFFFF')])
-            style.map('Treeview.Heading', background=[('active', '#E5E7EB')])
-            style.configure("folder", font=('Malgun Gothic', 9, 'bold'))
-            style.configure("group_odd", background="#F9FAFB")
-            style.configure("group_even", background="#FFFFFF")
-            style.map("group_odd", background=[('selected', '#3B82F6')])
-            style.map("group_even", background=[('selected', '#3B82F6')])
+            tree_bg = "#FFFFFF"
+            tree_fg = "#1F2937"
+            odd_bg = "#F9FAFB"
+            even_bg = "#FFFFFF"
+            head_bg = "#F3F4F6"
+            head_fg = "#111827"
+            head_act = "#E5E7EB"
+            sel_bg = "#3B82F6"
+            sel_fg = "#FFFFFF"
         else: # 다크 테마 설정 (차분하고 세련된 모던 슬레이트 다크)
             style.theme_use("default")
-            style.configure("Treeview", background="#202124", foreground="#E8EAED", fieldbackground="#202124", borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
-            style.configure("Treeview.Heading", background="#2D3035", foreground="#F1F3F4", font=('Malgun Gothic', 9, 'bold'), borderwidth=1, relief="flat")
-            style.map('Treeview', background=[('selected', '#1A73E8')], foreground=[('selected', '#FFFFFF')])
-            style.map('Treeview.Heading', background=[('active', '#3C4043')])
-            style.configure("folder", font=('Malgun Gothic', 9, 'bold'))
-            style.configure("group_odd", background="#282A2E")
-            style.configure("group_even", background="#202124")
-            style.map("group_odd", background=[('selected', '#1A73E8')])
-            style.map("group_even", background=[('selected', '#1A73E8')])
+            tree_bg = "#202124"
+            tree_fg = "#E8EAED"
+            odd_bg = "#282A2E"
+            even_bg = "#202124"
+            head_bg = "#2D3035"
+            head_fg = "#F1F3F4"
+            head_act = "#3C4043"
+            sel_bg = "#1A73E8"
+            sel_fg = "#FFFFFF"
+
+        style.configure("Treeview", background=tree_bg, foreground=tree_fg, fieldbackground=tree_bg, borderwidth=0, rowheight=26, font=('Malgun Gothic', 9))
+        style.configure("Treeview.Heading", background=head_bg, foreground=head_fg, font=('Malgun Gothic', 9, 'bold'), borderwidth=1, relief="flat")
+        style.map('Treeview', background=[('selected', sel_bg)], foreground=[('selected', sel_fg)])
+        style.map('Treeview.Heading', background=[('active', head_act)])
+        style.configure("folder", font=('Malgun Gothic', 9, 'bold'))
+        style.configure("group_odd", background=odd_bg)
+        style.configure("group_even", background=even_bg)
+        style.map("group_odd", background=[('selected', sel_bg)])
+        style.map("group_even", background=[('selected', sel_bg)])
+
+        # 모든 현재 열려있는 화면/팝업 내의 ttk.Treeview 위젯을 찾아 태그 색상 동적 갱신
+        def _update_all_treeviews(widget):
+            try:
+                if isinstance(widget, ttk.Treeview):
+                    widget.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+                    widget.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+                    widget.tag_configure("group_odd", background=odd_bg, foreground=tree_fg)
+                    widget.tag_configure("group_even", background=even_bg, foreground=tree_fg)
+                    widget.tag_configure("material_row", foreground=tree_fg)
+                    widget.configure(style="Treeview")
+            except Exception:
+                pass
+            
+            try:
+                for child in widget.winfo_children():
+                    _update_all_treeviews(child)
+            except Exception:
+                pass
+
+        try:
+            _update_all_treeviews(self)
+        except Exception as e:
+            print(f"[경고] 하위 Treeview 태그 업데이트 실패: {e}")
 
         try:
             self.update_menubar_style()
         except Exception as e:
             print(f"[경고] 메뉴바 스타일 업데이트 실패: {e}")
 
-        print(f"{datetime.now()}: Treeview 및 메뉴바 스타일을 '{theme}' 테마로 업데이트했습니다.")
+        print(f"{datetime.now()}: Treeview 및 메뉴바 스타일을 '{theme}' 테마로 완벽 업데이트했습니다.")
 
     def autosize_treeview_columns(self, treeview, padding=10, min_width=20, max_width=None):
         """
