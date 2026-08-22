@@ -319,23 +319,26 @@ class SettingsManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(export_frame, text="사용자 템플릿", command=self.export_user_template).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
         ctk.CTkButton(export_frame, text="처방 템플릿", command=self.export_formulation_template).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
 
-        # --- 마스터 보안 복구 센터 (Master Key 보호) ---
-        recovery_frame = ctk.CTkFrame(parent_frame, fg_color="#1E293B")
-        recovery_frame.grid(row=5, column=0, padx=20, pady=(20, 10), sticky="ew")
-        recovery_frame.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(recovery_frame, text="🛡️ 마스터 보안 데이터 복구 센터", font=ctk.CTkFont(size=14, weight="bold"), text_color="#38BDF8").grid(row=0, column=0, pady=(10, 2))
-        ctk.CTkLabel(recovery_frame, text="각 PC의 AppData 심층 은닉 볼트에 암호화 보관된 삭제 데이터(처방/원료/거래처/사용자/DB)를 마스터키로 복구합니다.", font=ctk.CTkFont(size=11), text_color="#94A3B8").grid(row=1, column=0, pady=(0, 8))
+        # --- 마스터 보안 복구 센터 (오직 최고 마스터/대표 전용 - 일반 관리자 및 직원은 완전 은닉) ---
+        is_master_owner = (getattr(self.current_user, 'role', '') == 'MSAD') or (getattr(self.current_user, 'username', '').lower() in ['admin', 'master', 'ceo'])
         
-        master_recovery_btn = ctk.CTkButton(
-            recovery_frame,
-            text="🔑 마스터키 인증 및 데이터 복구 센터 열기",
-            command=self.open_master_recovery_vault,
-            fg_color="#0284C7",
-            hover_color="#0369A1",
-            height=36,
-            font=ctk.CTkFont(weight="bold")
-        )
-        master_recovery_btn.grid(row=2, column=0, padx=20, pady=(0, 12), sticky="ew")
+        if is_master_owner:
+            recovery_frame = ctk.CTkFrame(parent_frame, fg_color="#1E293B")
+            recovery_frame.grid(row=5, column=0, padx=20, pady=(20, 10), sticky="ew")
+            recovery_frame.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(recovery_frame, text="🛡️ 마스터 보안 데이터 복구 센터 (대표 전용)", font=ctk.CTkFont(size=14, weight="bold"), text_color="#38BDF8").grid(row=0, column=0, pady=(10, 2))
+            ctk.CTkLabel(recovery_frame, text="각 PC의 AppData 심층 은닉 볼트에 암호화 보관된 삭제 데이터(처방/원료/거래처/사용자/DB)를 대표 마스터키로 완벽 복구합니다.", font=ctk.CTkFont(size=11), text_color="#94A3B8").grid(row=1, column=0, pady=(0, 8))
+            
+            master_recovery_btn = ctk.CTkButton(
+                recovery_frame,
+                text="🔑 대표 마스터 인증 및 데이터 복구 센터 열기",
+                command=self.open_master_recovery_vault,
+                fg_color="#0284C7",
+                hover_color="#0369A1",
+                height=36,
+                font=ctk.CTkFont(weight="bold")
+            )
+            master_recovery_btn.grid(row=2, column=0, padx=20, pady=(0, 12), sticky="ew")
 
         # --- 데이터 리셋 ---
         reset_frame = ctk.CTkFrame(parent_frame)
@@ -350,15 +353,21 @@ class SettingsManagementFrame(ctk.CTkFrame):
         ctk.CTkButton(reset_frame, text="전체 데이터", command=lambda: self.confirm_reset("all"), **all_reset_style).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
 
     def open_master_recovery_vault(self):
-        """마스터키 인증 후 복구 센터 팝업 대화상자를 엽니다."""
-        # 마스터키 입력 다이얼로그
-        key_dialog = ctk.CTkInputDialog(text="마스터 보안 복구키 (Master Secret Key)를 입력하세요:\n(기본 마스터키 또는 MSAD 계정 비밀번호)", title="마스터 보안 인증")
+        """마스터키 인증 후 복구 센터 팝업 대화상자를 엽니다. (대표 권한 엄격 검증)"""
+        # 1차 권한 검증: 오직 최고 마스터(MSAD / admin / master)만 실행 가능
+        is_master_owner = (getattr(self.current_user, 'role', '') == 'MSAD') or (getattr(self.current_user, 'username', '').lower() in ['admin', 'master', 'ceo'])
+        if not is_master_owner:
+            messagebox.showerror("접근 거부", "이 기능은 최고 대표 관리자(MSAD) 전용 보안 기능입니다.\n접근 권한이 없습니다.", parent=self)
+            return
+
+        # 2차 마스터키 입력 다이얼로그
+        key_dialog = ctk.CTkInputDialog(text="대표 마스터 보안 복구키 (Master Secret Key)를 입력하세요:\n(대표 본인 로그인 비밀번호 또는 마스터키)", title="대표 마스터 보안 인증")
         entered_key = key_dialog.get_input()
         
         if not entered_key:
             return
 
-        # 마스터키 검증: 기본 마스터키 'master777!' 또는 현재 로그인된 MSAD 비밀번호 검증
+        # 마스터키 검증: 대표 본인의 로그인 비밀번호 또는 마스터키
         is_valid = False
         if entered_key.strip() in ["master777!", "luxforma2026!", "admin"]:
             is_valid = True
@@ -371,7 +380,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
                 pass
 
         if not is_valid:
-            messagebox.showerror("인증 실패", "마스터 보안 복구키가 올바르지 않습니다.\n접근이 거부되었습니다.", parent=self)
+            messagebox.showerror("인증 실패", "대표 마스터 보안 복구키가 올바르지 않습니다.\n접근이 거부되었습니다.", parent=self)
             return
 
         # 마스터 복구 대화상자 열기
