@@ -1856,10 +1856,10 @@ class App(ctk.CTk):
         if not self.restore_working_state():
             self.select_frame_by_name(FRAME_HOME)
 
-        # 우측 하단 카피라이트 표기 (박제)
+        # 우측 하단 카피라이트 표기 (버전 동적 연동 및 2025-2026 저작권 표기)
         self.copyright_label = ctk.CTkLabel(
             self,
-            text="v64 | Copyright © 2026 luckfortma. All rights reserved.",
+            text=f"{current_app_ver} | Copyright © 2025-2026 luckfortma. All rights reserved.",
             font=ctk.CTkFont(size=10),
             text_color="gray50"
         )

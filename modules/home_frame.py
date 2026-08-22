@@ -550,8 +550,7 @@ class HomeFrame(ctk.CTkFrame):
                         f"--------------------------------------------------\n"
                         f"{body if body else '태성켐 원료 추천 및 시스템 성능 안정화 패치가 포함되어 있습니다.'}\n\n"
                         f"--------------------------------------------------\n"
-                        f"🛡️ 개발 연대기: 2025년 4월 ~ 현재 (36개 개발 단계 영구 박제)\n"
-                        f"🌐 GitHub 배포처: https://github.com/jamesSyunpa/CosRnD"
+                        f"🌐 GitHub 공식 배포처: https://github.com/jamesSyunpa/CosRnD"
                     )
 
                     def _update_ui():
