@@ -352,14 +352,22 @@ class AddMaterialDialog(ctk.CTkToplevel):
         materials = db_manager.search_materials(search_term, load_ingredients=True, search_ingredients=True)
 
         try:
-            for mat in materials:
+            theme = ctk.get_appearance_mode().lower()
+            odd_bg = "#F9FAFB" if theme == 'light' else "#282A2E"
+            even_bg = "#FFFFFF" if theme == 'light' else "#202124"
+            tree_fg = "#1F2937" if theme == 'light' else "#E8EAED"
+            self.material_tree.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+            self.material_tree.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+
+            for idx, mat in enumerate(materials):
                 # 전성분 목록을 문자열로 만듭니다 (최대 3개).
                 # 이제 mat.ingredients에 접근해도 DetachedInstanceError가 발생하지 않습니다.
                 ing_names = [ing.name_en for ing in mat.ingredients[:3]]
                 ing_str = ", ".join(ing_names)
                 if len(mat.ingredients) > 3:
                     ing_str += "..."
-                self.material_tree.insert("", "end", iid=mat.id, values=(mat.code, mat.name, ing_str))
+                tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
+                self.material_tree.insert("", "end", iid=mat.id, tags=(tag,), values=(mat.code, mat.name, ing_str))
         except Exception as e:
             print(f"원료 목록 표시 중 오류 발생: {e}")
 

@@ -448,6 +448,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.formulation_item_tree.configure(yscrollcommand=tree_scrollbar.set)
         tree_scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 5), pady=(0, 5))
 
+        self.apply_theme_to_trees()
 
         # --- 처방 내용 요약 ---
         summary_frame = ctk.CTkFrame(content_pane, fg_color="transparent")
@@ -460,6 +461,38 @@ class FormulationEditPopup(ctk.CTkToplevel):
         ctk.CTkLabel(summary_frame, text=self.texts['total_amount_label_short'], font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(10, 2))
         self.total_amount_label = ctk.CTkLabel(summary_frame, text="0.0000 g", font=ctk.CTkFont(weight="bold"))
         self.total_amount_label.pack(side="left", padx=(0, 5))
+
+    def apply_theme_to_trees(self):
+        """현재 테마에 맞게 formulation_item_tree의 oddrow / evenrow 배경색을 적용합니다."""
+        theme = ctk.get_appearance_mode().lower()
+        if theme == 'light':
+            odd_bg = "#F9FAFB"
+            even_bg = "#FFFFFF"
+            tree_fg = "#1F2937"
+        else:
+            odd_bg = "#282A2E"
+            even_bg = "#202124"
+            tree_fg = "#E8EAED"
+
+        if hasattr(self, 'formulation_item_tree') and self.formulation_item_tree:
+            try:
+                self.formulation_item_tree.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+                self.formulation_item_tree.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+                self.formulation_item_tree.tag_configure("group_odd", background=odd_bg, foreground=tree_fg)
+                self.formulation_item_tree.tag_configure("group_even", background=even_bg, foreground=tree_fg)
+            except Exception:
+                pass
+
+    def reapply_row_striping(self):
+        """Treeview의 모든 행 순서에 맞춰 oddrow / evenrow 교차 줄무늬를 100% 재배열합니다."""
+        self.apply_theme_to_trees()
+        if hasattr(self, 'formulation_item_tree') and self.formulation_item_tree:
+            for idx, item_id in enumerate(self.formulation_item_tree.get_children()):
+                tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
+                try:
+                    self.formulation_item_tree.item(item_id, tags=(tag,))
+                except Exception:
+                    pass
 
         # --- 하단 버튼 프레임 ---
         bottom_button_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -652,8 +685,9 @@ class FormulationEditPopup(ctk.CTkToplevel):
             total_amount = Decimal('0')
             # 정렬할 때 order가 None인 항목이 섞여 있어 TypeError가 발생할 수 있음
             # None은 마지막에 오도록 튜플 키로 안전하게 정렬합니다.
-            for item in sorted(form.items, key=lambda x: (x.order is None, x.order if x.order is not None else 0)):
-                self.formulation_item_tree.insert("", "end", values=(
+            for idx, item in enumerate(sorted(form.items, key=lambda x: (x.order is None, x.order if x.order is not None else 0))):
+                tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
+                self.formulation_item_tree.insert("", "end", tags=(tag,), values=(
                     item.phase or "",
                     item.material_code or "---",
                     item.material_name or "---",
@@ -667,6 +701,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.main_total_amount_entry.delete(0, "end")
             self.main_total_amount_entry.insert(0, decimal_to_str_full(total_amount))
 
+            self.reapply_row_striping()
             self.update_formulation_summary()
             # DB에 저장된 lab_no가 있으면 그것을 우선 표시합니다.
             if form.lab_no:
@@ -1116,12 +1151,14 @@ class FormulationEditPopup(ctk.CTkToplevel):
             self.formulation_item_tree.move(selected_item, "", self.formulation_item_tree.index(prev_item))
             self.formulation_item_tree.focus(selected_item)
             self.formulation_item_tree.selection_set(selected_item) # noqa
+            self.reapply_row_striping()
         return 'break'
 
     def move_item_down(self, event=None):
         selected_item = self.formulation_item_tree.focus()
         if not selected_item: return
         self.formulation_item_tree.move(selected_item, self.formulation_item_tree.parent(selected_item), self.formulation_item_tree.index(selected_item) + 1)
+        self.reapply_row_striping()
 
     def calculate_single_amount(self, ratio) -> str:
         try:
@@ -1162,6 +1199,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
                     continue
         self.total_ratio_label.configure(text=f"{decimal_to_str_full(total_ratio)} %")
         self.total_amount_label.configure(text=f"{decimal_to_str_full(total_amount)} g")
+        self.reapply_row_striping()
 
     def toggle_target_info(self):
         if self.target_info_var.get():

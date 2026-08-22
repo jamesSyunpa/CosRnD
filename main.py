@@ -2271,6 +2271,7 @@ class App(ctk.CTk):
                 if max_width:
                     width = min(width, max_width)
                 treeview.column(col, width=int(width))
+            self.apply_zebra_striping(treeview)
         except Exception as e:
             print(f"[경고] autosize_treeview_columns 실패: {e}")
 
@@ -2402,9 +2403,42 @@ class App(ctk.CTk):
             pass
         return res
 
+    def apply_zebra_striping(self, treeview):
+        """지정된 Treeview의 모든 행에 oddrow / evenrow 교차 줄무늬를 100% 전수 적용합니다."""
+        if not treeview:
+            return
+        theme = ctk.get_appearance_mode().lower()
+        if theme == 'light':
+            odd_bg = "#F9FAFB"
+            even_bg = "#FFFFFF"
+            tree_fg = "#1F2937"
+        else:
+            odd_bg = "#282A2E"
+            even_bg = "#202124"
+            tree_fg = "#E8EAED"
+
+        try:
+            treeview.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+            treeview.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+            treeview.tag_configure("group_odd", background=odd_bg, foreground=tree_fg)
+            treeview.tag_configure("group_even", background=even_bg, foreground=tree_fg)
+            treeview.tag_configure("material_row", foreground=tree_fg)
+        except Exception:
+            pass
+
+        try:
+            for idx, iid in enumerate(treeview.get_children()):
+                tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
+                current_tags = list(treeview.item(iid, 'tags') or ())
+                base_tags = [t for t in current_tags if t not in ['oddrow', 'evenrow', 'group_odd', 'group_even']]
+                base_tags.append(tag)
+                treeview.item(iid, tags=tuple(base_tags))
+        except Exception:
+            pass
+
     def normalize_group_column_to_row_numbers(self, treeview, header_name='구분', force=False):
         """
-        '구분' 헤더의 값이 ID 목록일 때 행 번호로 대체합니다.
+        '구분' 헤더의 값이 ID 목록일 때 행 번호로 대체하고, 모든 행의 교차 줄무늬를 재적용합니다.
         """
         cols = list(treeview["columns"]) if treeview["columns"] else []
         target_col = None
@@ -2429,44 +2463,44 @@ class App(ctk.CTk):
             except Exception:
                 pass
 
-        if not target_col:
-            return
+        if target_col:
+            listnum_re = re.compile(r'^\s*\d+(?:\s*,\s*\d+\s*)*$')
 
-        listnum_re = re.compile(r'^\s*\d+(?:\s*,\s*\d+\s*)*$')
+            for idx, iid in enumerate(treeview.get_children(), start=1):
+                try:
+                    if target_col == '#0':
+                        cur = str(treeview.item(iid).get('text', '') or '')
+                    else:
+                        cur = str(treeview.set(iid, target_col) or '')
+                except Exception:
+                    cur = ''
 
-        for idx, iid in enumerate(treeview.get_children(), start=1):
-            try:
-                if target_col == '#0':
-                    cur = str(treeview.item(iid).get('text', '') or '')
-                else:
-                    cur = str(treeview.set(iid, target_col) or '')
-            except Exception:
-                cur = ''
+                need_replace = force or (cur and listnum_re.match(cur))
+                if need_replace:
+                    new_val = str(idx)
+                    if target_col == '#0':
+                        try:
+                            treeview.item(iid, text=new_val)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            treeview.set(iid, target_col, new_val)
+                            continue
+                        except Exception:
+                            pass
+                        try:
+                            vals = list(treeview.item(iid).get('values', ())) # noqa
+                            col_index = cols.index(target_col) if target_col in cols else None
+                            if col_index is not None:
+                                while len(vals) <= col_index:
+                                    vals.append('')
+                                vals[col_index] = new_val
+                                treeview.item(iid, values=tuple(vals))
+                        except Exception:
+                            pass
 
-            need_replace = force or (cur and listnum_re.match(cur))
-            if need_replace:
-                new_val = str(idx)
-                if target_col == '#0':
-                    try:
-                        treeview.item(iid, text=new_val)
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        treeview.set(iid, target_col, new_val)
-                        continue
-                    except Exception:
-                        pass
-                    try:
-                        vals = list(treeview.item(iid).get('values', ())) # noqa
-                        col_index = cols.index(target_col) if target_col in cols else None
-                        if col_index is not None:
-                            while len(vals) <= col_index:
-                                vals.append('')
-                            vals[col_index] = new_val
-                            treeview.item(iid, values=tuple(vals))
-                    except Exception:
-                        pass
+        self.apply_zebra_striping(treeview)
         return
 
     def logout(self):
