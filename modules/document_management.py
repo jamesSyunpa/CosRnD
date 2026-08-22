@@ -2115,72 +2115,78 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.formulation_tree.configure(xscrollcommand=form_h_scroll.set)
         form_h_scroll.grid(row=2, column=0, columnspan=2, sticky='ew')
 
-        # --- [v64 모던 3단 표준 액션 바] ---
-        bottom_button_frame = ctk.CTkFrame(parent_tab, fg_color=("gray92", "gray17"), corner_radius=8, height=44)
+        # --- [v65 모던 표준 액션 바: 좌우 완벽 수평 정렬] ---
+        bottom_button_frame = ctk.CTkFrame(
+            parent_tab, 
+            fg_color=("gray92", "#1E2228"), 
+            border_width=1,
+            border_color=("gray80", "#2D323B"),
+            corner_radius=8, 
+            height=46
+        )
         bottom_button_frame.grid(row=2, column=0, padx=10, pady=(4, 8), sticky="ew")
-        bottom_button_frame.grid_columnconfigure(1, weight=1)
+        bottom_button_frame.grid_columnconfigure(0, weight=1)
+
+        bar_inner = ctk.CTkFrame(bottom_button_frame, fg_color="transparent")
+        bar_inner.pack(fill="both", expand=True, padx=8, pady=4)
 
         # [좌측 그룹: 핵심 작성 & 편집]
-        left_grp = ctk.CTkFrame(bottom_button_frame, fg_color="transparent")
-        left_grp.pack(side="left", padx=8, pady=5)
+        left_grp = ctk.CTkFrame(bar_inner, fg_color="transparent")
+        left_grp.pack(side="left", fill="y")
+
+        btn_font = ctk.CTkFont(size=12, weight="bold")
+        btn_h = 32
 
         self.new_button = ctk.CTkButton(
-            left_grp, text="➕ 신규 처방", width=95, height=30,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color="#1565C0", hover_color="#0D47A1",
+            left_grp, text="➕ 신규 처방", width=95, height=btn_h, corner_radius=6,
+            font=btn_font, fg_color="#1D4ED8", hover_color="#1E40AF",
             command=lambda: self.open_formulation_popup(edit_mode=False)
         )
         self.new_button.pack(side="left", padx=3)
 
         self.edit_button = ctk.CTkButton(
-            left_grp, text="✏️ 수정", width=70, height=30,
-            font=ctk.CTkFont(size=12),
-            fg_color="#0288D1", hover_color="#01579B",
+            left_grp, text="✏️ 수정", width=75, height=btn_h, corner_radius=6,
+            font=btn_font, fg_color="#0284C7", hover_color="#0369A1",
             command=lambda: self.open_formulation_popup(edit_mode=True)
         )
         self.edit_button.pack(side="left", padx=3)
 
         self.copy_button = ctk.CTkButton(
-            left_grp, text="📋 처방 복사", width=85, height=30,
-            font=ctk.CTkFont(size=12),
-            fg_color="#2E7D32", hover_color="#1B5E20",
+            left_grp, text="📋 처방 복사", width=90, height=btn_h, corner_radius=6,
+            font=btn_font, fg_color="#16A34A", hover_color="#15803D",
             command=self.copy_formulation
         )
         self.copy_button.pack(side="left", padx=3)
 
         self.change_client_button = ctk.CTkButton(
-            left_grp, text="🏢 업체 변경", width=85, height=30,
-            font=ctk.CTkFont(size=12),
-            fg_color="#E65100", hover_color="#BF360C",
+            left_grp, text="🏢 업체 변경", width=90, height=btn_h, corner_radius=6,
+            font=btn_font, fg_color="#EA580C", hover_color="#C2410C",
             command=self.change_formulation_client
         )
         self.change_client_button.pack(side="left", padx=3)
 
         self.create_package_button = ctk.CTkButton(
-            left_grp, text="📦 패키지 저장", width=90, height=30,
-            font=ctk.CTkFont(size=12),
-            fg_color="#455A64", hover_color="#263238",
+            left_grp, text="📦 패키지 저장", width=95, height=btn_h, corner_radius=6,
+            font=btn_font, fg_color="#475569", hover_color="#334155",
             command=self.create_document_package
         )
         self.create_package_button.pack(side="left", padx=3)
 
         self.delete_button = ctk.CTkButton(
-            left_grp, text="🗑️ 삭제", width=65, height=30,
-            font=ctk.CTkFont(size=12),
-            fg_color="#C62828", hover_color="#8E0000",
+            left_grp, text="🗑️ 삭제", width=70, height=btn_h, corner_radius=6,
+            font=btn_font, fg_color="#DC2626", hover_color="#B91C1C",
             command=self.delete_formulation
         )
         self.delete_button.pack(side="left", padx=3)
 
         # [우측 그룹: 엑셀 출력 & 관리자 일괄 관리]
-        right_grp = ctk.CTkFrame(bottom_button_frame, fg_color="transparent")
-        right_grp.pack(side="right", padx=8, pady=5)
+        right_grp = ctk.CTkFrame(bar_inner, fg_color="transparent")
+        right_grp.pack(side="right", fill="y")
 
-        # 단일/전체 엑셀 내보내기 콤보 액션
+        # 단일/전체 엑셀 내보내기
         self.export_single_button = ctk.CTkButton(
-            right_grp, text="📥 처방 엑셀 내보내기", width=135, height=30,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color="#00695C", hover_color="#004D40",
+            right_grp, text="📥 처방 엑셀 내보내기", width=145, height=btn_h, corner_radius=6,
+            font=btn_font, fg_color="#0D9488", hover_color="#0F766E",
             command=self.export_selected_formulation_to_excel
         )
         self.export_single_button.pack(side="left", padx=3)
@@ -2188,36 +2194,32 @@ class DocumentManagementFrame(ctk.CTkFrame):
         if self.current_user.is_admin:
             # 관리자 일괄 옵션 메뉴
             self.export_all_button = ctk.CTkButton(
-                right_grp, text="전체 내보내기", width=95, height=30,
-                font=ctk.CTkFont(size=11),
-                fg_color="gray40", hover_color="gray30",
+                right_grp, text="📤 전체 내보내기", width=105, height=btn_h, corner_radius=6,
+                font=btn_font, fg_color="#4B5563", hover_color="#374151",
                 command=self.export_all_formulations
             )
-            self.export_all_button.pack(side="left", padx=2)
+            self.export_all_button.pack(side="left", padx=3)
 
             self.import_all_button = ctk.CTkButton(
-                right_grp, text="전체 가져오기", width=95, height=30,
-                font=ctk.CTkFont(size=11),
-                fg_color="gray40", hover_color="gray30",
+                right_grp, text="📂 전체 가져오기", width=105, height=btn_h, corner_radius=6,
+                font=btn_font, fg_color="#4B5563", hover_color="#374151",
                 command=self.import_all_formulations
             )
-            self.import_all_button.pack(side="left", padx=2)
+            self.import_all_button.pack(side="left", padx=3)
 
             self.export_logs_button = ctk.CTkButton(
-                right_grp, text="이력", width=50, height=30,
-                font=ctk.CTkFont(size=11),
-                fg_color="gray40", hover_color="gray30",
+                right_grp, text="📜 이력", width=65, height=btn_h, corner_radius=6,
+                font=btn_font, fg_color="#4B5563", hover_color="#374151",
                 command=self.export_change_logs
             )
-            self.export_logs_button.pack(side="left", padx=2)
+            self.export_logs_button.pack(side="left", padx=3)
 
             self.delete_all_button = ctk.CTkButton(
-                right_grp, text="전체 삭제", width=75, height=30,
-                font=ctk.CTkFont(size=11),
-                fg_color="#B71C1C", hover_color="#7F0000",
+                right_grp, text="⚠️ 전체 삭제", width=85, height=btn_h, corner_radius=6,
+                font=btn_font, fg_color="#B91C1C", hover_color="#991B1B",
                 command=self.delete_all_formulations
             )
-            self.delete_all_button.pack(side="left", padx=2)
+            self.delete_all_button.pack(side="left", padx=3)
 
         self.show_folder_view() # 초기 화면은 폴더 뷰
 
