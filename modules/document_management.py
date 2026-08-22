@@ -2017,11 +2017,13 @@ class DocumentManagementFrame(ctk.CTkFrame):
     def setup_formulation_list_tab(self, parent_tab):
         """'처방 목록' 서브 탭의 UI를 설정합니다. (폴더 카드 UI)"""
         parent_tab.grid_columnconfigure(0, weight=1)
+        parent_tab.grid_rowconfigure(0, weight=0)
         parent_tab.grid_rowconfigure(1, weight=1)
+        parent_tab.grid_rowconfigure(2, weight=0, minsize=54)
 
         # --- 헤더 및 필터 ---
         header_frame = ctk.CTkFrame(parent_tab, fg_color="transparent")
-        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(0, 5))
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(4, 4))
         header_frame.grid_columnconfigure(1, weight=1)
 
         self.list_header_label = ctk.CTkLabel(header_frame, text=self.texts['formulation_folders'], font=ctk.CTkFont(size=16, weight="bold"))
@@ -2046,7 +2048,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         # --- 컨텐츠 영역 (폴더/파일 목록) ---
         self.content_frame = ctk.CTkFrame(parent_tab, fg_color="transparent")
-        self.content_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        self.content_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(2, 6))
         self.content_frame.grid_columnconfigure(0, weight=1)
         self.content_frame.grid_rowconfigure(0, weight=1)
 
@@ -2117,7 +2119,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         # --- [v65 하단 액션 바: 상단 헤더와 일관된 깔끔한 투명 레이아웃] ---
         bottom_button_frame = ctk.CTkFrame(parent_tab, fg_color="transparent")
-        bottom_button_frame.grid(row=2, column=0, padx=10, pady=(6, 10), sticky="ew")
+        bottom_button_frame.grid(row=2, column=0, padx=10, pady=(4, 14), sticky="ew")
         bottom_button_frame.grid_columnconfigure(0, weight=1)
 
         bar_inner = ctk.CTkFrame(bottom_button_frame, fg_color="transparent")
