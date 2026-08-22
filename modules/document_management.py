@@ -222,7 +222,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
                 pass
             return
 
-        # 최상위 탭 뷰 (테두리 겹침 방지를 위해 border_width=0 적용)
+        # 최상위 단일 탭 뷰 (1단 플랫 통합 구조, 테두리 겹침 원천 방지)
         self.tab_view = ctk.CTkTabview(
             self, command=self.on_tab_change, border_width=0,
             border_color=("gray80", "gray30"),
@@ -234,36 +234,56 @@ class DocumentManagementFrame(ctk.CTkFrame):
         )
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=6, pady=(0, 6))
 
-        # 탭 구성 (모드별 구성 요소 제어)
+        # 탭 정의 (단일 플랫 통합 구조)
         self.tab_map = {}
-        formulation_tab_label = self.texts.get("formulation_mgt", "처방 관리")
-        document_tab_label = self.texts.get("document_sub", "문서")
+        
+        tab_list_label = "처방 목록"
+        tab_lookup_label = "원료/성분 조회"
+        tab_quote_label = "견적"
+        tab_ingredient_label = "전성분"
+        tab_production_label = self.texts.get("production_formulation", "생산 처방")
+        tab_spec_label = self.texts.get("property_spec", "물성규격")
+        tab_report_label = self.texts.get("report", "기능성보고서")
+        tab_package_label = self.texts.get("package", "패키지")
 
-        # 연구/전체 모드에서는 처방 탭 포함
-        include_formulation_tab = self.mode in ("research", "full")
-        if include_formulation_tab:
-            self.tab_map[formulation_tab_label] = "document/formulation_mgt"
-            self.tab_view.add(formulation_tab_label)
+        self.tab_map[tab_list_label] = "document/formulation_mgt"
+        self.tab_map[tab_lookup_label] = "document/ingredient_lookup"
+        self.tab_map[tab_quote_label] = "document/quotation"
+        self.tab_map[tab_ingredient_label] = "document/ingredient_list"
+        self.tab_map[tab_production_label] = "document/production_formulation"
+        self.tab_map[tab_spec_label] = "document/property_spec"
+        self.tab_map[tab_report_label] = "document/report"
+        self.tab_map[tab_package_label] = "document/package"
 
-        # 문서 탭은 항상 유지하되, 서브 탭 구성은 모드에 따라 조정
-        self.tab_map[document_tab_label] = "document/document_sub"
-        self.tab_view.add(document_tab_label)
+        # 단일 탭뷰에 8대 핵심 탭 직접 등록 (이중 중첩 완전 제거)
+        self.tab_view.add(tab_list_label)
+        self.tab_view.add(tab_lookup_label)
+        self.tab_view.add(tab_quote_label)
+        self.tab_view.add(tab_ingredient_label)
+        self.tab_view.add(tab_production_label)
+        self.tab_view.add(tab_spec_label)
+        self.tab_view.add(tab_report_label)
+        self.tab_view.add(tab_package_label)
 
-        if include_formulation_tab:
-            self.setup_formulation_tab(self.tab_view.tab(formulation_tab_label))
+        # 각 탭의 UI 1:1 직접 연결
+        self.setup_formulation_list_tab(self.tab_view.tab(tab_list_label))
+        self.setup_ingredient_lookup_tab(self.tab_view.tab(tab_lookup_label))
+        self.setup_quotation_tab(self.tab_view.tab(tab_quote_label))
+        self.setup_ingredient_list_tab(self.tab_view.tab(tab_ingredient_label))
+        self.setup_production_tab(self.tab_view.tab(tab_production_label))
+        self.setup_lab_journal_tab(self.tab_view.tab(tab_spec_label))
+        self.setup_functional_report_tab(self.tab_view.tab(tab_report_label))
+        self.setup_package_tab(self.tab_view.tab(tab_package_label))
 
-        include_package_sub_tab = self.mode in ("full",)
-        self.setup_document_sub_tabs(
-            self.tab_view.tab(document_tab_label),
-            include_package_tab=include_package_sub_tab
-        )
+        self.package_tab_label = tab_package_label
+        self.production_tab_label = tab_production_label
+        self.ingredient_lookup_tab_label = tab_lookup_label
 
-        # 초기 데이터 로드 (처방 탭이 존재할 때만 수행)
-        if include_formulation_tab:
-            try:
-                self.load_formulations()
-            except Exception:
-                pass
+        # 초기 데이터 로드
+        try:
+            self.load_formulations()
+        except Exception:
+            pass
 
     # ------------------------------
     # 권한/상태 헬퍼
@@ -376,18 +396,37 @@ class DocumentManagementFrame(ctk.CTkFrame):
         if static_key:
             self.app.record_action(static_key)
 
+        # 탭 전환 시 데이터 자동 동기화
+        try:
+            if selected_tab == "처방 목록":
+                self.load_formulations()
+            elif selected_tab == "원료/성분 조회":
+                pass
+            elif selected_tab == "견적":
+                self.load_formulation_for_quotation()
+            elif selected_tab == "전성분":
+                self.generate_all_ingredient_lists()
+            elif selected_tab == self.texts.get("production_formulation", "생산 처방"):
+                if hasattr(self, 'search_production_list'):
+                    self.search_production_list()
+            elif selected_tab == self.texts.get("property_spec", "물성규격"):
+                if hasattr(self, 'load_lab_journal'):
+                    self.load_lab_journal()
+            elif selected_tab == self.texts.get("package", "패키지"):
+                if hasattr(self, 'refresh_package_list'):
+                    self.refresh_package_list()
+        except Exception as e:
+            print(f"[DocumentManagement] 탭 전환 데이터 동기화 실패: {e}")
+
     def switch_to_tab(self, tab_name):
         if not getattr(self, 'tab_view', None):
             return
         
-        # 1. 상단 탭 버튼들 숨기기 + row minsize 0으로 리셋 (버튼 공간까지 완전히 제거)
+        # 1. 상단 탭 버튼들 숨기기 + row minsize 0으로 리셋
         def _hide_tabview_header(tv):
-            """CTkTabview의 세그먼트 버튼과 그 row 공간을 완전히 숨깁니다."""
             try:
                 if hasattr(tv, '_segmented_button'):
                     tv._segmented_button.grid_forget()
-                # CTkTabview 내부 grid: row0=outer_spacing, row1=button_overhang, row2=button_body
-                # grid_forget()만 하면 minsize가 남아 여백이 생기므로 minsize를 0으로 리셋
                 for r in (0, 1, 2):
                     tv.grid_rowconfigure(r, weight=0, minsize=0)
             except Exception as e:
@@ -395,53 +434,29 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         try:
             _hide_tabview_header(self.tab_view)
-            if hasattr(self, 'formulation_sub_tab_view'):
-                _hide_tabview_header(self.formulation_sub_tab_view)
-            if hasattr(self, 'doc_sub_tab_view'):
-                _hide_tabview_header(self.doc_sub_tab_view)
-        except Exception as e:
-            print(f"[UI] 탭 세그먼트 숨기기 실패: {e}")
+        except Exception:
+            pass
             
-        # 2. 탭 이름 매핑 사전 구성
+        # 2. 탭 이름 매핑 사전 구성 (모든 기존 서브 탭 키를 단일 탭으로 100% 호환 매핑)
         tab_name_mapping = {
-            "formulation_mgt": self.texts.get("formulation_mgt", "처방 관리"),
-            "document_sub": self.texts.get("document_sub", "문서"),
-            # 서브 탭 매핑
+            "formulation_mgt": "처방 목록",
+            "document_sub": self.texts.get("property_spec", "물성규격"),
             "lookup": "원료/성분 조회",
             "list": "처방 목록",
             "quote": "견적",
             "ingredient": "전성분",
             "production": self.texts.get("production_formulation", "생산 처방"),
-            # 문서 서브 탭
             "property_spec": self.texts.get("property_spec", "물성규격"),
-            "report": self.texts.get("report", "기능성보고서")
+            "report": self.texts.get("report", "기능성보고서"),
+            "package": self.texts.get("package", "패키지")
         }
         
         target_tab = tab_name_mapping.get(tab_name, tab_name)
         
-        # 최상위 탭 세팅
+        # 최상위 단일 탭 전환
         if target_tab in self.tab_view._name_list:
             self.tab_view.set(target_tab)
-            return
-
-        # 서브 탭 세팅
-        sub_tabs_formulation = ["원료/성분 조회", "처방 목록", "견적", "전성분", self.texts.get("production_formulation", "생산 처방")]
-        if target_tab in sub_tabs_formulation:
-            formulation_tab_label = self.texts.get("formulation_mgt", "처방 관리")
-            if formulation_tab_label in self.tab_view._name_list:
-                self.tab_view.set(formulation_tab_label)
-            if hasattr(self, 'formulation_sub_tab_view') and target_tab in self.formulation_sub_tab_view._name_list:
-                self.formulation_sub_tab_view.set(target_tab)
-            return
-
-        # 문서 서브 탭 세팅 (물성규격, 기능성보고서)
-        sub_tabs_document = [self.texts.get("property_spec", "물성규격"), self.texts.get("report", "기능성보고서")]
-        if target_tab in sub_tabs_document:
-            document_tab_label = self.texts.get("document_sub", "문서")
-            if document_tab_label in self.tab_view._name_list:
-                self.tab_view.set(document_tab_label)
-            if hasattr(self, 'doc_sub_tab_view') and target_tab in self.doc_sub_tab_view._name_list:
-                self.doc_sub_tab_view.set(target_tab)
+            self.on_tab_change()
             return
 
     def refresh_data(self):
