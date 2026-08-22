@@ -403,7 +403,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             elif selected_tab == "원료/성분 조회":
                 pass
             elif selected_tab == "견적":
-                self.load_formulation_for_quotation()
+                self.load_formulation_for_quotation(silent=True)
             elif selected_tab == "전성분":
                 self.generate_all_ingredient_lists()
             elif selected_tab == self.texts.get("production_formulation", "생산 처방"):
@@ -2430,10 +2430,11 @@ class DocumentManagementFrame(ctk.CTkFrame):
         # [기본 모드: 반제품] UI 필드 초기 상태 즉시 반영 (용기비/수량 등 숨김 처리)
         self._on_quotation_type_changed()
 
-    def load_formulation_for_quotation(self):
+    def load_formulation_for_quotation(self, silent: bool = False):
         """'처방 목록'에서 선택된 처방을 '견적' 탭의 Treeview로 불러옵니다."""
         if not self._selected_formulation_id:
-            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
+            if not silent:
+                messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_first'], parent=self)
             return
 
         for item in self.quotation_tree.get_children():
