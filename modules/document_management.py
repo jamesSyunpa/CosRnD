@@ -5964,8 +5964,14 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             link_scroll.pack(side="right", fill="y")
             link_tree.configure(yscrollcommand=link_scroll.set)
             
-            # 문서 링크 데이터 로딩
+            # 문서 링크 및 품질 서류(제품표준서) 데이터 로딩
             try:
+                prod_std = full_snapshot.get("product_standard")
+                if prod_std:
+                    p_name = prod_std.get("품명", "")
+                    p_lab = prod_std.get("LAB NO", "")
+                    link_tree.insert("", "end", values=("ProductStandard (제품표준서)", f"{p_name} [{p_lab}] - 성상 및 규격 스냅샷 완비"))
+
                 for l in (pkg.links or []):
                     ref_label = str(l.ref_id)
                     if l.doc_type == 'IngredientReport':
@@ -6517,7 +6523,34 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             print(f"생산처방 정보 로드 실패: {e}")
             package_snapshot["production_formulation"] = None
 
-        # 5) 패키지 DB 저장
+        # 5) 제품표준서 및 품질관리 서류 스냅샷 추가
+        try:
+            package_snapshot["product_standard"] = {
+                "문서명": "제품표준서 (Product Standard)",
+                "품명": (prod.product_name if prod else formulation.experiment_name),
+                "LAB NO": (prod.lab_no if prod else formulation.lab_no) or "",
+                "차수": (prod.revision if prod else formulation.revision) or "",
+                "실험일": formulation.experiment_date or "",
+                "성상_물성치": {
+                    "초기 pH": formulation.experiment_ph_initial or "",
+                    "익일 pH": formulation.experiment_ph_next_day or "",
+                    "초기 점도": formulation.experiment_viscosity_initial or "",
+                    "익일 점도": formulation.experiment_viscosity_next_day or "",
+                    "제조기기": formulation.experiment_machine or "",
+                },
+                "특이사항_비고": formulation.experiment_comment or "",
+                "생산처방연동": bool(prod)
+            }
+            package_snapshot["quality_documents"] = {
+                "제품표준서": package_snapshot["product_standard"],
+                "시험성적서_COA": {"연동처방ID": formulation.id},
+                "MSDS": {"연동처방ID": formulation.id},
+                "원료목록보고": {"연동처방ID": formulation.id}
+            }
+        except Exception as q_err:
+            print(f"[Package] 제품표준서 스냅샷 생성 실패: {q_err}")
+
+        # 6) 패키지 DB 저장
         try:
             pkg = DocumentPackage(
                 name=f"{(prod.product_name if prod else formulation.experiment_name)} 패키지 {datetime.now().strftime('%Y%m%d_%H%M')}",
