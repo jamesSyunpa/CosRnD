@@ -527,7 +527,7 @@ class HomeFrame(ctk.CTkFrame):
             f"• 🧪 처방 개발 버전 관리 및 통합 R&D 변경 타임라인 피드\n"
             f"• ⚡ 데이터베이스(DB) 마이그레이션 및 자동 복구 스위트 탑재\n"
             f"--------------------------------------------------\n"
-            f"🌐 GitHub 공식 저장소: https://github.com/jamesSyunpa/CosRnD"
+            f"🌐 공식 배포처: 네이버 카페 (https://cafe.naver.com/cosrqd)"
         )
 
         self.update_textbox.configure(state="normal")
@@ -545,12 +545,12 @@ class HomeFrame(ctk.CTkFrame):
                     pub_date = info.get("date", "")
                     
                     gh_text = (
-                        f"🚀 [GitHub 공식 릴리즈: {tag} ({pub_date})]\n"
+                        f"🚀 [공식 릴리즈 업데이트: {tag} ({pub_date})]\n"
                         f"📢 {title}\n"
                         f"--------------------------------------------------\n"
                         f"{body if body else '태성켐 원료 추천 및 시스템 성능 안정화 패치가 포함되어 있습니다.'}\n\n"
                         f"--------------------------------------------------\n"
-                        f"🌐 GitHub 공식 배포처: https://github.com/jamesSyunpa/CosRnD"
+                        f"🌐 공식 배포처: 네이버 카페 (https://cafe.naver.com/cosrqd)"
                     )
 
                     def _update_ui():
