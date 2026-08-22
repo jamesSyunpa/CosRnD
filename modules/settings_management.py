@@ -344,7 +344,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
         reset_frame = ctk.CTkFrame(parent_frame)
         reset_frame.grid(row=6, column=0, padx=20, pady=(40, 20), sticky="ew")
         reset_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
-        ctk.CTkLabel(reset_frame, text="데이터 초기화 (주의: 은닉 볼트 자동 백업 후 삭제)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
+        ctk.CTkLabel(reset_frame, text="데이터 초기화", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
         reset_button_style = {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}
         ctk.CTkButton(reset_frame, text="원료 데이터", command=lambda: self.confirm_reset("materials"), **reset_button_style).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
         ctk.CTkButton(reset_frame, text="거래처 데이터", command=lambda: self.confirm_reset("clients"), **reset_button_style).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
