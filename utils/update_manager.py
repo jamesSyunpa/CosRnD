@@ -183,8 +183,8 @@ class UpdateManager:
                 latest_ver_found = gh_tag
                 best_release = gh_info
 
-        # 2순위: 네이버 카페 게시글 스캔
-        articles = CafeNoticeManager.get_notice_list(menu_ids=[13, 4, 10, 3], per_page=10)
+        # 2순위: 네이버 카페 게시글 스캔 (메뉴 13: 공지 및 업데이트 단독)
+        articles = CafeNoticeManager.get_notice_list(menu_ids=[13], per_page=10)
         for art in articles:
             subj = art.get('subject', '')
             m = re.search(r'[vV]?(\d+\.\d+\.\d+|\d+\.\d+|\d+)', subj)

@@ -21,9 +21,9 @@ class CafeNoticeManager:
     }
 
     @classmethod
-    def get_notice_list(cls, menu_ids=[13, 4, 10, 3], per_page=10):
+    def get_notice_list(cls, menu_ids=[13], per_page=10):
         """
-        공지사항 게시판(메뉴 13: 공지 및 업데이트, 메뉴 4: 배포공지, 메뉴 10: 가이드 등)의 글 목록을 가져옵니다.
+        공지사항 게시판(오직 메뉴 13: 공지 및 업데이트 단독)의 글 목록을 가져옵니다.
         """
         articles = []
         for m_id in menu_ids:
@@ -95,7 +95,7 @@ class CafeNoticeManager:
         """
         홈 화면에 그대로 뿌려줄 수 있는 최신 공지사항 전문(제목+날짜+본문)을 가공하여 반환합니다.
         """
-        articles = cls.get_notice_list(menu_ids=[13, 4, 10, 3])
+        articles = cls.get_notice_list(menu_ids=[13])
         
         if not articles:
             # 공지글이 없을 경우 기본 안내 텍스트

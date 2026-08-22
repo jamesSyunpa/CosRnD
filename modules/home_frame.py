@@ -330,7 +330,7 @@ class HomeFrame(ctk.CTkFrame):
 
         def _fetch_worker():
             try:
-                articles = CafeNoticeManager.get_notice_list(menu_ids=[13, 4, 10, 3], per_page=10)
+                articles = CafeNoticeManager.get_notice_list(menu_ids=[13], per_page=10)
                 # 각 글의 본문도 긁어와 딕셔너리에 추가
                 for a in articles:
                     a['content'] = CafeNoticeManager.get_article_content(a.get('id')) or a.get('summary', '')
@@ -373,7 +373,12 @@ class HomeFrame(ctk.CTkFrame):
 
         for r_idx, item in enumerate(articles):
             art_id = item.get("id")
-            subject = item.get("subject", "제목 없음")
+            raw_subject = item.get("subject", "제목 없음")
+            clean_subject = raw_subject
+            for prefix in ["📢 [공지]", "[공지]", "📢"]:
+                if clean_subject.startswith(prefix):
+                    clean_subject = clean_subject[len(prefix):].strip()
+
             date_str = item.get("date", "")
             writer = item.get("writer", "관리자")
             content = item.get("content", "").strip() or "본문 내용이 없습니다."
@@ -414,7 +419,7 @@ class HomeFrame(ctk.CTkFrame):
             # 제목 라벨 (길면 자동 줄바꿈)
             title_lbl = ctk.CTkLabel(
                 header_frame,
-                text=subject,
+                text=clean_subject,
                 font=ctk.CTkFont(size=11, weight="bold"),
                 text_color=("#1E293B", "#FFFFFF"),
                 anchor="w"
@@ -538,8 +543,8 @@ class HomeFrame(ctk.CTkFrame):
         # 네이버 공식 카페 및 GitHub Releases API로부터 실시간 최신 공지/패치노트 비동기 로드
         def _fetch_live_updates():
             try:
-                # 1. 네이버 카페 13번(공지 및 업데이트) 및 4번 최신글 로드
-                cafe_articles = CafeNoticeManager.get_notice_list(menu_ids=[13, 4], per_page=5)
+                # 1. 네이버 카페 13번(공지 및 업데이트) 최신글 로드
+                cafe_articles = CafeNoticeManager.get_notice_list(menu_ids=[13], per_page=5)
                 found, tag, info = UpdateManager.check_github_release()
                 
                 live_text = ""
