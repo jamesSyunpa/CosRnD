@@ -423,8 +423,8 @@ class FormulationEditPopup(ctk.CTkToplevel):
 
         # --- 처방 내용 Treeview ---
         formulation_item_cols = self.texts['formulation_item_tree_columns']
-        # columns 인자에는 딕셔너리의 키 리스트를 명시적으로 전달해야 합니다.
-        self.formulation_item_tree = ttk.Treeview(content_pane, columns=list(formulation_item_cols.keys()), show="headings", selectmode="browse")
+        # columns 인자에는 딕셔너리의 키 리스트를 명시적으로 전달해야 합니다. (Shift 범위 다중 선택을 위해 extended 적용)
+        self.formulation_item_tree = ttk.Treeview(content_pane, columns=list(formulation_item_cols.keys()), show="headings", selectmode="extended")
         self.formulation_item_tree.heading("phase", text=formulation_item_cols['phase']); self.formulation_item_tree.column("phase", width=50, minwidth=40, anchor="center")
         self.formulation_item_tree.heading("code", text=formulation_item_cols['code']); self.formulation_item_tree.column("code", width=85, minwidth=70)
         self.formulation_item_tree.heading("name", text=formulation_item_cols['name']); self.formulation_item_tree.column("name", width=160, minwidth=120, stretch=True)
@@ -929,12 +929,20 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.update_formulation_summary()
 
     def delete_selected_item(self):
-        """처방 내용 Treeview에서 선택된 항목을 삭제합니다."""
-        selected_item = self.formulation_item_tree.selection()
-        if not selected_item:
+        """처방 내용 Treeview에서 선택된 모든 항목(Shift 범위 선택 / Ctrl 다중 선택)을 일괄 삭제합니다."""
+        selected_items = self.formulation_item_tree.selection()
+        if not selected_items:
             messagebox.showwarning(self.texts['selection_error'], self.texts['select_item_to_delete'], parent=self)
             return
-        self.formulation_item_tree.delete(selected_item)
+        
+        # 선택된 모든 항목 일괄 삭제
+        for item_id in selected_items:
+            try:
+                self.formulation_item_tree.delete(item_id)
+            except Exception:
+                pass
+
+        self.reapply_row_striping()
         self.update_formulation_summary()
 
     def edit_item_ratio(self, event):
