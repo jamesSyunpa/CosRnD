@@ -526,13 +526,24 @@ $Shortcut.Save()
             if start_menu_dir and start_menu_dir.exists() and start_menu_dir not in target_dirs:
                 target_dirs.append(start_menu_dir)
 
+            # 기존 구버전 바로가기 파일들 일괄 삭제 (버전 불일치 및 중복 방지)
+            patterns = ["*CosRQD*.lnk", "*CosRnD*.lnk", "*화장품연구관리*.lnk", "*화장품연구*.lnk", "*화장품*.lnk"]
+            for base_dir in target_dirs:
+                if base_dir.exists():
+                    for pat in patterns:
+                        for old_lnk in base_dir.glob(pat):
+                            try:
+                                old_lnk.unlink()
+                            except Exception:
+                                pass
+
             success_count = 0
             for base_dir in target_dirs:
                 shortcut_path = base_dir / f"{shortcut_name}.lnk"
                 if self._create_single_shortcut(target_exe, shortcut_path, working_dir, icon_path):
                     success_count += 1
             
-            logger.info(f"Successfully created {success_count} unique shortcuts (Desktop: {target_desktop}, StartMenu: {start_menu_dir})")
+            logger.info(f"Successfully created {success_count} unique shortcuts: {shortcut_name} (Desktop: {target_desktop}, StartMenu: {start_menu_dir})")
             
             # 윈도우 쉘 아이콘 캐시 새로고침
             if sys.platform.startswith('win'):

@@ -58,6 +58,87 @@ def get_clean_subproc_env(extra_env=None):
 
     return env
 
+def update_desktop_shortcuts(new_ver: str):
+    """
+    자동 업데이트 완료 시 바탕화면 및 시작메뉴의 구버전 바로가기들을 깨끗하게 정리하고,
+    최신 버전(CosRQD 또는 CosRQD_{new_ver})으로 바로가기 아이콘을 자동 갱신합니다.
+    """
+    if not sys.platform.startswith('win'):
+        return
+    try:
+        from pathlib import Path
+        user_profile = Path(os.environ.get("USERPROFILE", ""))
+        
+        # 1. 대상 바로가기 폴더 목록 (바탕화면 & 시작메뉴)
+        target_dirs = []
+        try:
+            import ctypes
+            from ctypes import wintypes
+            buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, 0x0000, None, 0, buf)
+            if buf.value and Path(buf.value).exists():
+                target_dirs.append(Path(buf.value))
+        except Exception:
+            pass
+
+        desk_def = user_profile / "Desktop"
+        if desk_def.exists() and desk_def not in target_dirs:
+            target_dirs.append(desk_def)
+
+        start_menu = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+        if start_menu.exists():
+            target_dirs.append(start_menu)
+
+        # 2. 실행 파일 및 아이콘 경로 결정
+        if getattr(sys, 'frozen', False):
+            target_exe = Path(sys.executable)
+        else:
+            target_exe = Path(PROJECT_ROOT) / "dist" / "CosRQD.exe"
+            if not target_exe.exists():
+                target_exe = Path(PROJECT_ROOT) / "main.exe"
+
+        icon_path = target_exe.parent / "Icon.ico"
+        if not icon_path.exists():
+            icon_path = Path(PROJECT_ROOT) / "Icon.ico"
+
+        # 3. 기존 구버전 바로가기 삭제
+        patterns = ["*CosRQD*.lnk", "*CosRnD*.lnk", "*화장품연구관리*.lnk", "*화장품연구*.lnk", "*화장품*.lnk"]
+        for d in target_dirs:
+            if d.exists():
+                for pat in patterns:
+                    for old_lnk in d.glob(pat):
+                        try:
+                            old_lnk.unlink()
+                        except Exception:
+                            pass
+
+        # 4. 최신 버전 바로가기 생성 (PowerShell COM)
+        new_shortcut_name = f"CosRQD_{new_ver}" if new_ver else "CosRQD"
+        tgt_str = str(target_exe).replace("'", "''")
+        cwd_str = str(target_exe.parent).replace("'", "''")
+        ico_str = str(icon_path).replace("'", "''") if icon_path.exists() else ""
+        
+        for d in target_dirs:
+            lnk_str = str(d / f"{new_shortcut_name}.lnk").replace("'", "''")
+            ps_cmd = (
+                f"$s=(New-Object -COM WScript.Shell).CreateShortcut('{lnk_str}');"
+                f"$s.TargetPath='{tgt_str}';"
+                f"$s.WorkingDirectory='{cwd_str}';"
+            )
+            if ico_str:
+                ps_cmd += f"$s.IconLocation='{ico_str}';"
+            ps_cmd += "$s.Save();"
+            
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True)
+
+        # 5. 윈도우 쉘 아이콘 캐시 새로고침
+        import ctypes
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+        print(f"[UpdateManager] 바로가기 최신화 완료: {new_shortcut_name}")
+    except Exception as lnk_err:
+        print(f"[UpdateManager] 바로가기 갱신 실패: {lnk_err}")
+
+
 class UpdateManager:
     CAFE_ID = 31737320
     GITHUB_REPO = "jamesSyunpa/CosRnD"  # GitHub 공식 배포 리포지토리 (소유자: jamesSyunpa)
@@ -430,13 +511,17 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             # VERSION 파일 갱신
             with open(os.path.join(PROJECT_ROOT, "VERSION"), "w", encoding="utf-8") as f:
                 f.write(self.latest_ver)
+
+            # 3. 바탕화면 및 시작메뉴 바로가기 최신화 (구버전 정리 및 최신 버전명 반영)
+            update_desktop_shortcuts(self.latest_ver)
         except Exception as ex:
-            print(f"[Update] 압축 해제 오류: {ex}")
+            print(f"[Update] 압축 해제 및 바로가기 갱신 오류: {ex}")
 
         messagebox.showinfo(
             "업데이트 완료",
             f"✨ 최신 버전({self.latest_ver})으로 성공적으로 업데이트되었습니다!\n\n"
             f"• 기존 연구 데이터가 완벽하게 보존되었습니다.\n"
+            f"• 바탕화면 바로가기가 최신 버전({self.latest_ver})으로 갱신되었습니다.\n"
             f"• 확인을 누르면 프로그램이 새로 재실행됩니다.",
             parent=self
         )
