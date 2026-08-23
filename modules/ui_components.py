@@ -236,7 +236,7 @@ class CustomDropdown(ctk.CTkFrame):
             super().configure(**kwargs)
 
 class AddMaterialDialog(ctk.CTkToplevel):
-    """처방에 원료를 추가하기 위한 팝업창"""
+    """처방에 원료를 추가하기 위한 팝업창 (단일/복합/코드/원료명/전성분 다기준 초고속 정렬 지원)"""
     def __init__(self, master, on_add_callback, on_line_break_callback):
         import re
         super().__init__(master)
@@ -244,39 +244,102 @@ class AddMaterialDialog(ctk.CTkToplevel):
         self.on_add_callback = on_add_callback
         self.on_line_break_callback = on_line_break_callback
 
-        self.language = master.language
+        self.language = getattr(master, 'language', 'korean')
         self.texts = get_texts(self.language)
-        self.title(self.texts['add_material_title'])
-        self.geometry("600x500")
+        self.title(self.texts.get('add_material_title', '원료 추가'))
+        self.geometry("700x560")
+        self.minsize(620, 480)
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-        self.search_timer = None # 검색 디바운싱을 위한 타이머
+        self.grid_rowconfigure(2, weight=1)
+        self.search_timer = None # 검색 디바운싱 타이머
 
-        # --- 검색 프레임 ---
+        # 정렬 및 필터 상태
+        self.raw_search_results = []   # 검색된 원본 원료 리스트
+        self.filtered_materials = []   # 필터/정렬 적용된 원료 리스트
+        self.current_sort_col = "code" # 현재 정렬 컬럼
+        self.sort_reverse = False      # 내림차순 여부
+        self.current_type_filter = "전체" # 전체 / 단일 / 복합
+
+        # --- 1. 상단 검색 프레임 ---
         search_frame = ctk.CTkFrame(self, fg_color="transparent")
-        search_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        search_frame.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="ew")
         search_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(search_frame, text=self.texts['material_search']).grid(row=0, column=0, padx=5)
-        self.search_entry = ctk.CTkEntry(search_frame)
+        ctk.CTkLabel(search_frame, text=self.texts.get('material_search', '원료 검색:'), font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=(0, 5))
+        self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="원료코드, 원료명(한글/영문), 전성분명 검색...")
         self.search_entry.grid(row=0, column=1, padx=5, sticky="ew")
         self.search_entry.bind("<Return>", self.search_materials)
         self.search_entry.bind("<KeyRelease>", self.on_material_search)
-        ctk.CTkButton(search_frame, text=self.texts['search'], width=60, command=self.search_materials).grid(row=0, column=2, padx=5)
-        ctk.CTkButton(search_frame, text=self.texts['reset'], width=60, command=self.reset_search).grid(row=0, column=3, padx=5)
+        ctk.CTkButton(search_frame, text=self.texts.get('search', '검색'), width=60, command=self.search_materials).grid(row=0, column=2, padx=3)
+        ctk.CTkButton(search_frame, text=self.texts.get('reset', '초기화'), width=60, fg_color="gray50", hover_color="gray40", command=self.reset_search).grid(row=0, column=3, padx=3)
 
-        # --- 원료 목록 Treeview (탭 뷰 제거) ---
+        # --- 2. 정렬 및 유형 필터 툴바 ---
+        filter_toolbar = ctk.CTkFrame(self, fg_color=("gray92", "#242526"), corner_radius=6)
+        filter_toolbar.grid(row=1, column=0, padx=12, pady=4, sticky="ew")
+        filter_toolbar.grid_columnconfigure(3, weight=1)
+
+        # 단일/복합 유형 세그먼트 버튼
+        ctk.CTkLabel(filter_toolbar, text="유형:", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=0, padx=(10, 4), pady=6)
+        self.type_filter_seg = ctk.CTkSegmentedButton(
+            filter_toolbar,
+            values=["전체", "단일 원료", "복합 원료"],
+            command=self._on_type_filter_changed,
+            height=26,
+            font=ctk.CTkFont(size=11)
+        )
+        self.type_filter_seg.set("전체")
+        self.type_filter_seg.grid(row=0, column=1, padx=4, pady=6)
+
+        # 정렬 기준 콤보박스
+        ctk.CTkLabel(filter_toolbar, text="정렬:", font=ctk.CTkFont(size=12, weight="bold")).grid(row=0, column=2, padx=(12, 4), pady=6)
+        self.sort_combo = ctk.CTkComboBox(
+            filter_toolbar,
+            values=[
+                "코드순 (오름차순 ▲)",
+                "코드순 (내림차순 ▼)",
+                "단일 원료 우선 (단일 ➡️ 복합)",
+                "복합 원료 우선 (복합 ➡️ 단일)",
+                "원료명 (가나다순 ▲)",
+                "원료명 (역순 ▼)",
+                "전성분 (가나다순 ▲)",
+                "전성분 개수 (많은순 ▼)",
+                "전성분 개수 (적은순 ▲)"
+            ],
+            width=185,
+            height=26,
+            command=self._on_sort_combo_changed,
+            state="readonly",
+            font=ctk.CTkFont(size=11)
+        )
+        self.sort_combo.set("코드순 (오름차순 ▲)")
+        self.sort_combo.grid(row=0, column=3, padx=(4, 10), pady=6, sticky="w")
+
+        # 결과 건수 라벨
+        self.count_label = ctk.CTkLabel(filter_toolbar, text="총 0건", font=ctk.CTkFont(size=11), text_color=("gray40", "gray70"))
+        self.count_label.grid(row=0, column=4, padx=(0, 12), pady=6, sticky="e")
+
+        # --- 3. 원료 목록 Treeview ---
         tree_frame = ctk.CTkFrame(self, fg_color="transparent")
-        tree_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        tree_frame.grid(row=2, column=0, padx=12, pady=4, sticky="nsew")
         tree_frame.grid_columnconfigure(0, weight=1)
         tree_frame.grid_rowconfigure(0, weight=1)
 
-        tree_columns = ("code", "name", "ingredients")
+        tree_columns = ("type", "code", "name", "ingredients")
         self.material_tree = ttk.Treeview(tree_frame, columns=tree_columns, show="headings", selectmode="browse")
-        self.material_tree.heading("code", text=self.texts['code']); self.material_tree.column("code", width=120) # noqa
-        self.material_tree.heading("name", text=self.texts['material_name']); self.material_tree.column("name", width=150) # noqa
-        self.material_tree.heading("ingredients", text=self.texts['all_ingredients']); self.material_tree.column("ingredients", width=200, stretch=True) # noqa
+        
+        # 헤더 설정 및 클릭 정렬 이벤트 연결
+        self.material_tree.heading("type", text="구분 ↕", command=lambda: self._sort_by_column("type"))
+        self.material_tree.column("type", width=70, minwidth=60, anchor="center", stretch=False)
+        
+        self.material_tree.heading("code", text="코드 ▲", command=lambda: self._sort_by_column("code"))
+        self.material_tree.column("code", width=110, minwidth=80, stretch=False)
+        
+        self.material_tree.heading("name", text="원료명 ↕", command=lambda: self._sort_by_column("name"))
+        self.material_tree.column("name", width=180, minwidth=130, stretch=False)
+        
+        self.material_tree.heading("ingredients", text="대표 전성분 (배합비 순) ↕", command=lambda: self._sort_by_column("ingredients"))
+        self.material_tree.column("ingredients", width=280, stretch=True)
 
         self.material_tree.grid(row=0, column=0, sticky="nsew")
 
@@ -285,27 +348,28 @@ class AddMaterialDialog(ctk.CTkToplevel):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.material_tree.bind("<<TreeviewSelect>>", self.on_material_select)
         self.material_tree.bind("<Double-1>", self.on_double_click_add)
+        self.material_tree.bind("<Return>", lambda e: self.on_add())
 
-        # --- 전성분 상세 정보 프레임 ---
+        # --- 4. 전성분 상세 정보 프레임 ---
         details_frame = ctk.CTkFrame(self, fg_color="transparent")
-        details_frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        details_frame.grid(row=3, column=0, padx=12, pady=4, sticky="ew")
         details_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(details_frame, text=f"{self.texts['all_ingredients']}:").grid(row=0, column=0, padx=5, sticky="nw")
-        self.ingredient_details_textbox = ctk.CTkTextbox(details_frame, height=60, state="disabled", wrap="word")
+        ctk.CTkLabel(details_frame, text=f"{self.texts.get('all_ingredients', '전성분 상세')}:", font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=5, sticky="nw")
+        self.ingredient_details_textbox = ctk.CTkTextbox(details_frame, height=55, state="disabled", wrap="word", font=ctk.CTkFont(size=11))
         self.ingredient_details_textbox.grid(row=0, column=1, padx=5, sticky="ew")
 
-
-        # --- 버튼 프레임 ---
+        # --- 5. 버튼 프레임 ---
         button_frame = ctk.CTkFrame(self, fg_color="transparent")
-        button_frame.grid(row=3, column=0, pady=10)
-        ctk.CTkButton(button_frame, text=self.texts['add_material'], command=self.on_add).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text=self.texts['line_break'], command=self.on_line_break_callback).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text=self.texts['close'], fg_color="gray50", hover_color="gray35", command=self.destroy).pack(side="left", padx=10)
+        button_frame.grid(row=4, column=0, pady=(4, 12))
+        ctk.CTkButton(button_frame, text=f"➕ {self.texts.get('add_material', '원료 추가')}", font=ctk.CTkFont(weight="bold"), command=self.on_add).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text=self.texts.get('line_break', '줄 내림'), command=self.on_line_break_callback).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text=self.texts.get('close', '닫기'), fg_color="gray50", hover_color="gray35", command=self.destroy).pack(side="left", padx=10)
 
-        self.search_materials() # 초기 전체 목록 로드
+        # 초기 전체 목록 로드
+        self.search_materials()
 
-        # 메인 창 중앙에 배치 후 deiconify
+        # 메인 창 중앙에 배치 및 포커스 락인
         self.update_idletasks()
         parent = master
         if parent:
@@ -318,63 +382,247 @@ class AddMaterialDialog(ctk.CTkToplevel):
             x = parent_x + (parent_w - win_w) // 2
             y = parent_y + (parent_h - win_h) // 2
             self.geometry(f"+{x}+{y}")
+        
         self.deiconify()
+        self.after(50, lambda: self.search_entry.focus_set())
+        self.after(50, lambda: self.search_entry.focus_force())
 
     def reset_search(self):
-        """검색창을 비우고 전체 목록을 다시 불러옵니다."""
+        """검색창 및 필터를 초기화하고 전체 목록을 다시 불러옵니다."""
         self.search_entry.delete(0, "end")
+        self.type_filter_seg.set("전체")
+        self.current_type_filter = "전체"
+        self.sort_combo.set("코드순 (오름차순 ▲)")
+        self.current_sort_col = "code"
+        self.sort_reverse = False
         self.search_materials()
+        self.after(30, lambda: self.search_entry.focus_set())
 
     def on_material_search(self, event=None):
         """검색창 입력 시 디바운싱을 적용하여 검색을 실행합니다."""
         if self.search_timer:
             self.after_cancel(self.search_timer)
-        # 500ms(0.5초) 후에 search_materials 함수를 실행
-        self.search_timer = self.after(500, self.search_materials)
+        self.search_timer = self.after(300, self.search_materials)
 
     def _get_numeric_part(self, code_str: str):
         """문자열에서 숫자 부분을 추출하여 정수로 반환합니다."""
         import re
         if not isinstance(code_str, str):
-            return None
+            return 0
         match = re.search(r'\d+', code_str)
-        return int(match.group(0)) if match else None
+        return int(match.group(0)) if match else 0
+
+    def _natural_sort_key(self, s: str):
+        """자연스러운 정렬을 위한 키 생성 (예: MAT-2가 MAT-10보다 먼저 오도록 처리)"""
+        import re
+        if not s:
+            return []
+        return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', str(s))]
 
     def search_materials(self, event=None):
-        """DB에서 원료를 검색하여 단일 Treeview에 표시합니다."""
+        """DB에서 원료를 검색하여 인메모리에 적재 후 필터 및 정렬을 적용합니다."""
         search_term = self.search_entry.get().strip()
 
-        # Treeview 초기화
-        for item in self.material_tree.get_children():
-            self.material_tree.delete(item)
-
-        # `load_ingredients=True`를 전달하여 전성분 정보를 함께 로드합니다.
+        # 전성분 정보를 함께 고속 로드
         materials = db_manager.search_materials(search_term, load_ingredients=True, search_ingredients=True)
 
-        try:
-            theme = ctk.get_appearance_mode().lower()
-            odd_bg = "#F9FAFB" if theme == 'light' else "#282A2E"
-            even_bg = "#FFFFFF" if theme == 'light' else "#202124"
-            tree_fg = "#1F2937" if theme == 'light' else "#E8EAED"
-            self.material_tree.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
-            self.material_tree.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+        processed_data = []
+        for mat in materials:
+            ings = mat.ingredients if mat.ingredients else []
+            ing_count = len(ings)
+            is_blend = ing_count >= 2
 
-            for idx, mat in enumerate(materials):
-                # 전성분 목록을 문자열로 만듭니다 (최대 3개).
-                # 이제 mat.ingredients에 접근해도 DetachedInstanceError가 발생하지 않습니다.
-                ing_names = [ing.name_en for ing in mat.ingredients[:3]]
-                ing_str = ", ".join(ing_names)
-                if len(mat.ingredients) > 3:
-                    ing_str += "..."
-                tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
-                self.material_tree.insert("", "end", iid=mat.id, tags=(tag,), values=(mat.code, mat.name, ing_str))
-        except Exception as e:
-            print(f"원료 목록 표시 중 오류 발생: {e}")
+            # 구분 텍스트 (단일 / 복합)
+            if ing_count == 0:
+                type_text = "단일"
+            elif ing_count == 1:
+                type_text = "단일"
+            else:
+                type_text = f"복합({ing_count})"
+
+            # 대표 전성분 문자열 (배합비 높은 순 상위 3개)
+            sorted_ings = sorted(ings, key=lambda x: getattr(x, 'composition_ratio', 0) or 0, reverse=True)
+            ing_names = []
+            for ing in sorted_ings[:3]:
+                n = ing.name_ko or ing.name_en or ""
+                r = f"({ing.composition_ratio}%)" if getattr(ing, 'composition_ratio', None) else ""
+                ing_names.append(f"{n}{r}")
+            
+            ing_str = ", ".join(ing_names) if ing_names else "-"
+            if ing_count > 3:
+                ing_str += f" 외 {ing_count - 3}종"
+
+            # 전체 전성분 상세 문자열
+            full_ing_list = []
+            for ing in sorted_ings:
+                n_ko = ing.name_ko or ""
+                n_en = ing.name_en or ""
+                name_disp = f"{n_ko} ({n_en})" if n_ko and n_en else (n_ko or n_en)
+                r_str = f" [{ing.composition_ratio}%]" if getattr(ing, 'composition_ratio', None) else ""
+                full_ing_list.append(f"{name_disp}{r_str}")
+            full_ing_str = ", ".join(full_ing_list) if full_ing_list else self.texts.get('no_ingredients_registered', '등록된 전성분이 없습니다.')
+
+            processed_data.append({
+                "id": mat.id,
+                "code": mat.code or "",
+                "name": mat.name or "",
+                "name_en": mat.name_en or "",
+                "type_text": type_text,
+                "is_blend": is_blend,
+                "ing_count": ing_count,
+                "ing_str": ing_str,
+                "full_ing_str": full_ing_str,
+                "raw_mat": mat
+            })
+
+        self.raw_search_results = processed_data
+        self._apply_filter_and_sort()
+
+    def _on_type_filter_changed(self, selected_type):
+        """단일/복합 유형 세그먼트 변경 시 인메모리 필터링 즉각 반영"""
+        self.current_type_filter = selected_type
+        self._apply_filter_and_sort()
+
+    def _on_sort_combo_changed(self, selected_option):
+        """정렬 콤보박스 변경 시 정렬 기준 갱신 및 즉각 반영"""
+        if "코드순 (오름차순" in selected_option:
+            self.current_sort_col = "code"
+            self.sort_reverse = False
+        elif "코드순 (내림차순" in selected_option:
+            self.current_sort_col = "code"
+            self.sort_reverse = True
+        elif "단일 원료 우선" in selected_option:
+            self.current_sort_col = "single_first"
+            self.sort_reverse = False
+        elif "복합 원료 우선" in selected_option:
+            self.current_sort_col = "complex_first"
+            self.sort_reverse = False
+        elif "원료명 (가나다순" in selected_option:
+            self.current_sort_col = "name"
+            self.sort_reverse = False
+        elif "원료명 (역순" in selected_option:
+            self.current_sort_col = "name"
+            self.sort_reverse = True
+        elif "전성분 (가나다순" in selected_option:
+            self.current_sort_col = "ingredients"
+            self.sort_reverse = False
+        elif "전성분 개수 (많은순" in selected_option:
+            self.current_sort_col = "ing_count"
+            self.sort_reverse = True
+        elif "전성분 개수 (적은순" in selected_option:
+            self.current_sort_col = "ing_count"
+            self.sort_reverse = False
+
+        self._update_header_indicators()
+        self._apply_filter_and_sort()
+
+    def _sort_by_column(self, col):
+        """Treeview 헤더 클릭 시 오름차순/내림차순 토글 정렬"""
+        if self.current_sort_col == col:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            self.current_sort_col = col
+            self.sort_reverse = False
+
+        # 콤보박스 값도 일치하도록 동기화
+        if col == "code":
+            self.sort_combo.set("코드순 (내림차순 ▼)" if self.sort_reverse else "코드순 (오름차순 ▲)")
+        elif col == "type":
+            self.sort_combo.set("복합 원료 우선 (복합 ➡️ 단일)" if self.sort_reverse else "단일 원료 우선 (단일 ➡️ 복합)")
+        elif col == "name":
+            self.sort_combo.set("원료명 (역순 ▼)" if self.sort_reverse else "원료명 (가나다순 ▲)")
+        elif col == "ingredients":
+            self.sort_combo.set("전성분 (가나다순 ▲)")
+
+        self._update_header_indicators()
+        self._apply_filter_and_sort()
+
+    def _update_header_indicators(self):
+        """컬럼 헤더 텍스트의 정렬 화살표(▲/▼/↕) 인디케이터 업데이트"""
+        headers = {
+            "type": "구분",
+            "code": "코드",
+            "name": "원료명",
+            "ingredients": "대표 전성분 (배합비 순)"
+        }
+        for col_name, text in headers.items():
+            if self.current_sort_col == col_name or (self.current_sort_col in ("single_first", "complex_first") and col_name == "type"):
+                arrow = " ▼" if self.sort_reverse or self.current_sort_col == "complex_first" else " ▲"
+                self.material_tree.heading(col_name, text=f"{text}{arrow}")
+            else:
+                self.material_tree.heading(col_name, text=f"{text} ↕")
+
+    def _apply_filter_and_sort(self):
+        """인메모리에서 단일/복합 필터링 및 다기준 고속 정렬을 실행하고 Treeview를 즉각 갱신합니다 (0.001초)."""
+        # 1. 유형 필터 적용
+        items = list(self.raw_search_results)
+        if self.current_type_filter == "단일 원료":
+            items = [item for item in items if not item["is_blend"]]
+        elif self.current_type_filter == "복합 원료":
+            items = [item for item in items if item["is_blend"]]
+
+        # 2. 정렬 키 함수 정의
+        if self.current_sort_col == "code":
+            items.sort(key=lambda x: self._natural_sort_key(x["code"]), reverse=self.sort_reverse)
+        elif self.current_sort_col in ("type", "single_first"):
+            # 단일(0) -> 복합(1) -> 코드순
+            items.sort(key=lambda x: (1 if x["is_blend"] else 0, self._natural_sort_key(x["code"])), reverse=self.sort_reverse)
+        elif self.current_sort_col == "complex_first":
+            # 복합(0) -> 단일(1) -> 성분개수 많은순 -> 코드순
+            items.sort(key=lambda x: (0 if x["is_blend"] else 1, -x["ing_count"], self._natural_sort_key(x["code"])))
+        elif self.current_sort_col == "name":
+            items.sort(key=lambda x: (x["name"].lower(), self._natural_sort_key(x["code"])), reverse=self.sort_reverse)
+        elif self.current_sort_col == "ingredients":
+            items.sort(key=lambda x: (x["ing_str"].lower(), self._natural_sort_key(x["code"])), reverse=self.sort_reverse)
+        elif self.current_sort_col == "ing_count":
+            items.sort(key=lambda x: (x["ing_count"], self._natural_sort_key(x["code"])), reverse=self.sort_reverse)
+        else:
+            items.sort(key=lambda x: self._natural_sort_key(x["code"]))
+
+        self.filtered_materials = items
+
+        # 3. Treeview 렌더링
+        for item_id in self.material_tree.get_children():
+            self.material_tree.delete(item_id)
+
+        theme = ctk.get_appearance_mode().lower()
+        odd_bg = "#F9FAFB" if theme == 'light' else "#282A2E"
+        even_bg = "#FFFFFF" if theme == 'light' else "#202124"
+        tree_fg = "#1F2937" if theme == 'light' else "#E8EAED"
+        
+        self.material_tree.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+        self.material_tree.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+        self.material_tree.tag_configure("blend_tag", foreground="#0284C7" if theme == 'light' else "#38BDF8")
+
+        for idx, item in enumerate(items):
+            tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
+            self.material_tree.insert(
+                "",
+                "end",
+                iid=item["id"],
+                tags=(tag,),
+                values=(item["type_text"], item["code"], item["name"], item["ing_str"])
+            )
+
+        # 카운트 갱신
+        filter_str = f" ({self.current_type_filter})" if self.current_type_filter != "전체" else ""
+        self.count_label.configure(text=f"검색 결과: 총 {len(items)}건{filter_str}")
+
+        # 첫 번째 행 자동 선택 및 상세정보 표시
+        if items:
+            first_id = items[0]["id"]
+            self.material_tree.selection_set(first_id)
+            self.material_tree.focus(first_id)
+            self.on_material_select()
+        else:
+            self.ingredient_details_textbox.configure(state="normal")
+            self.ingredient_details_textbox.delete("1.0", "end")
+            self.ingredient_details_textbox.insert("1.0", "일치하는 원료가 없습니다.")
+            self.ingredient_details_textbox.configure(state="disabled")
 
     def on_material_select(self, event=None):
-        """트리뷰에서 원료 선택 시 전성분 목록을 표시합니다."""
+        """트리뷰에서 원료 선택 시 전성분 상세 목록을 텍스트박스에 표시합니다."""
         selected_item = self.material_tree.selection()
-        # 텍스트박스 초기화
         self.ingredient_details_textbox.configure(state="normal")
         self.ingredient_details_textbox.delete("1.0", "end")
 
@@ -382,52 +630,43 @@ class AddMaterialDialog(ctk.CTkToplevel):
             self.ingredient_details_textbox.configure(state="disabled")
             return
 
-        material_id = selected_item[0]
-
-        session = db_manager.get_session()
         try:
-            from database.models import Ingredient
-            # 전성분 목록 가져오기
-            ingredients = session.query(Ingredient).filter_by(material_id=material_id).order_by(Ingredient.id).all()
-            
-            if ingredients:
-                # 영문명과 한글명을 함께 표시
-                ingredient_texts = [f"{ing.name_en} ({ing.name_ko})" for ing in ingredients]
-                details_text = ", ".join(ingredient_texts)
+            material_id = int(selected_item[0])
+            # 캐시된 목록에서 즉시 탐색 (DB 쿼리 없이 0ms 응답)
+            matched = next((item for item in self.filtered_materials if item["id"] == material_id), None)
+            if matched:
+                self.ingredient_details_textbox.insert("1.0", matched["full_ing_str"])
             else:
-                details_text = self.texts['no_ingredients_registered']
-            self.ingredient_details_textbox.insert("1.0", details_text)
+                self.ingredient_details_textbox.insert("1.0", self.texts.get('no_ingredients_registered', '등록된 전성분이 없습니다.'))
+        except Exception as e:
+            self.ingredient_details_textbox.insert("1.0", f"전성분 조회 오류: {e}")
         finally:
-            session.close()
             self.ingredient_details_textbox.configure(state="disabled")
 
     def on_double_click_add(self, event):
         """Treeview에서 항목을 더블클릭하여 바로 추가합니다."""
-        # 더블클릭된 위젯(Treeview)을 식별합니다.
         tree = event.widget
-        
-        # 더블클릭된 행을 식별합니다.
         item_id = tree.identify_row(event.y)
         if not item_id:
             return
 
-        # 해당 행을 선택하고 포커스를 줍니다.
         tree.selection_set(item_id)
         tree.focus(item_id)
-        self.on_add() # 기존 추가 로직을 호출합니다.
+        self.on_add()
 
     def on_add(self):
-        """'추가' 버튼 클릭 시 콜백 함수를 호출합니다."""
+        """'추가' 버튼 클릭 시 콜백 함수를 호출하여 처방/견적서에 원료를 추가합니다."""
         selected_item = self.material_tree.selection()
         if not selected_item:
-            messagebox.showwarning(self.texts['selection_error'], self.texts['select_material_to_add'], parent=self)
+            messagebox.showwarning(
+                self.texts.get('selection_error', '선택 오류'),
+                self.texts.get('select_material_to_add', '목록에서 추가할 원료를 선택하세요.'),
+                parent=self
+            )
             return
 
-        material_id = selected_item[0]
+        material_id = int(selected_item[0])
         self.on_add_callback(material_id)
-
-        # 추가 후 입력 필드 초기화
-        self.material_tree.selection_remove(selected_item)
 
 def try_convert_to_float(value):
     """값을 float으로 변환 시도, 실패 시 원래 값 반환"""
