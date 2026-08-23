@@ -406,6 +406,7 @@ class UpdateManager:
         ps_script_path = os.path.join(temp_dir, f"cosrqd_native_updater_{int(time.time())}.ps1")
         
         ps_code = f'''# CosRQD Native Standalone Updater
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 param(
     [string]$DownloadUrl = "{download_url}",
     [string]$LatestVer = "{latest_ver}",
@@ -565,7 +566,7 @@ $form.Add_Shown({{
 [System.Windows.Forms.Application]::Run($form)
 '''
 
-        with open(ps_script_path, "w", encoding="utf-8") as pf:
+        with open(ps_script_path, "w", encoding="utf-8-sig") as pf:
             pf.write(ps_code)
 
         # 3. OS 레벨 환경변수 정화
