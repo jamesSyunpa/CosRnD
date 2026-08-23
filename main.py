@@ -46,6 +46,36 @@ if any(arg.lower() in ['--uninstall', '/uninstall', '-uninstall', 'uninstall'] f
     sys.exit(0)
 
 
+def get_clean_subproc_env(extra_env=None):
+    """
+    서브프로세스 실행 시 PyInstaller 내부 임시 디렉토리 환경변수(_MEIPASS, _MEIPASS2 등)를
+    완전히 제거하여, 새로 실행되는 자식 프로세스가 부모 프로세스의 임시 폴더에 종속되지 않고
+    자신만의 고유한 새 임시 환경을 올바르게 생성하도록 보장합니다.
+    """
+    env = os.environ.copy()
+    # 임시 디렉토리 및 파이썬 경로 오염을 유발하는 환경변수 목록 제거
+    keys_to_remove = [
+        '_MEIPASS',
+        '_MEIPASS2',
+        'PYTHONPATH',
+        'PYTHONHOME',
+        'PYINSTALLER_STRICT_UNLOAD_MODE',
+        'PYINSTALLER_SUPPRESS_TEMP_ERRORS'
+    ]
+    for key in keys_to_remove:
+        if key in env:
+            del env[key]
+
+    if extra_env:
+        for k, v in extra_env.items():
+            if v is not None:
+                env[k] = str(v)
+            elif k in env:
+                del env[k]
+
+    return env
+
+
 # 로그인/회원가입 시 표시할 법적고지 및 일반사항 전문
 LEGAL_NOTICE_FULL_TEXT = '''
 [법적 고지 및 저작권 이용 약관]
@@ -1666,6 +1696,21 @@ class App(ctk.CTk):
         )
         self.top_user_badge.pack(side="right", padx=(0, 12), pady=4)
 
+        # [스마트 동기화 알림 배지 버튼] (새 데이터 감지 시 표시되는 조용한 배지)
+        self.sync_notice_btn = ctk.CTkButton(
+            self.top_menubar_frame,
+            text="🔄 새 데이터 감지 | 동기화",
+            height=24,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#0284C7",
+            hover_color="#0369A1",
+            text_color="#FFFFFF",
+            corner_radius=12,
+            command=self.on_sync_badge_clicked
+        )
+        self.pending_shared_db_file = None
+        self._sync_badge_hide_timer = None
+
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -2681,7 +2726,7 @@ class App(ctk.CTk):
             save_state: 작업 상태를 저장하고 복원할지 여부 (기본값: False)
         """
         try:
-            print(f"[Restart] 프로그램 재시작 준비 중... 환경변수: {env_vars}")
+            print(f"[재시작] 프로그램 재시작 준비 중... 전달 인자: {env_vars}")
             
             # 1. 필요시 현재 상태 저장
             if save_state:
@@ -2689,38 +2734,50 @@ class App(ctk.CTk):
             
             # 2. DB 연결 해제
             db_manager.dispose_engine()
-            print("[Restart] DB 연결 해제 완료")
+            print("[재시작] DB 연결 해제 완료")
             
-            # 3. 현재 사용자 정보 저장 (자동 로그인용)
+            # 3. 사용자 및 상태 전달용 환경 변수 사전 구성
+            pass_env = dict(env_vars)
             if self.current_user:
-                os.environ['APP_RESTARTING'] = 'True'
-                os.environ['RESTART_USER_ID'] = str(self.current_user.id)
+                pass_env['APP_RESTARTING'] = 'True'
+                pass_env['RESTART_USER_ID'] = str(self.current_user.id)
                 if save_state:
-                    os.environ['RESTORE_STATE'] = 'True'
+                    pass_env['RESTORE_STATE'] = 'True'
             
-            # 4. 전달받은 환경변수 설정
-            for key, value in env_vars.items():
-                os.environ[key] = str(value)
+            # 4. PyInstaller 임시 디렉토리 충돌을 방지하기 위한 정돈된 환경 변수 생성
+            clean_env = get_clean_subproc_env(pass_env)
             
             # 5. 새 프로세스 시작
             import subprocess
             import sys
             
             if getattr(sys, 'frozen', False):
-                # PyInstaller로 빌드된 경우
+                # 단일 실행 파일(EXE) 배포 환경
                 exe_path = sys.executable
-                print(f"[Restart] 실행 파일 경로: {exe_path}")
-                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path))
+                current_dir = os.path.dirname(exe_path)
+                cmd = [exe_path]
+                print(f"[재시작] 실행 파일 재시작 경로: {exe_path}")
             else:
-                # 개발 환경 (Python 스크립트)
-                print(f"[Restart] Python 스크립트 재시작: {sys.argv}")
-                subprocess.Popen([sys.executable] + sys.argv, cwd=os.path.dirname(os.path.abspath(__file__)))
+                # 개발 스크립트 실행 환경
+                exe_path = sys.executable
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                cmd = [sys.executable] + sys.argv
+                print(f"[재시작] 개발 스크립트 재시작: {cmd}")
             
-            # 6. 현재 프로세스 종료
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+            subprocess.Popen(
+                cmd,
+                cwd=current_dir,
+                env=clean_env,
+                creationflags=flags,
+                close_fds=True if os.name != 'nt' else False
+            )
+            
+            # 6. 현재 프로세스 안전 종료
             self.after(100, self.destroy)
             
         except Exception as e:
-            print(f"[Restart] 재시작 중 오류: {e}")
+            print(f"[재시작] 재시작 중 오류: {e}")
             messagebox.showerror("재시작 오류", f"프로그램을 재시작할 수 없습니다:\n{e}", parent=self)
 
     def save_working_state(self):
@@ -2855,13 +2912,12 @@ class App(ctk.CTk):
                             ctypes.windll.kernel32.TerminateProcess(ctypes.windll.kernel32.GetCurrentProcess(), 0)
                         except Exception:
                             pass
-                    # os._exit 실패/무시 대비해서 0.5초 후 강제 종료 시도
                     t = threading.Timer(0.5, _force_kill)
-                    t.daemon = True  # 종료 방해하지 않도록 데몬 스레드로 실행
+                    t.daemon = True
                     t.start()
             except Exception:
                 pass
-            
+
             # 즉시/지연 이중 종료 보장
             try:
                 # 1) 짧게 지연된 강제 종료 (데몬 타이머)
@@ -2875,7 +2931,7 @@ class App(ctk.CTk):
                 # 2) 정상 종료 시도
                 sys.exit(0)
             except Exception:
-                # 3) 최후의 수단: 즉시 종료 (남아있는 비-데몬 스레드가 있어도 종료)
+                # 3) 최후의 수단: 즉시 종료
                 os._exit(0)
 
     def get_config_value(self, section, option, fallback=None):
@@ -2921,11 +2977,8 @@ class App(ctk.CTk):
             doc_frame.save_journal_settings(config)
 
     def center_on_mouse_screen(self):
-        """
-        마우스 커서가 위치한 모니터의 중앙에 창을 배치하고, 해당 모니터 기준 비율로 크기를 조절합니다.
-        """
+        """마우스 커서가 위치한 모니터의 중앙에 창을 배치하고, 해당 모니터 기준 비율로 크기를 조절합니다."""
         try:
-            # Windows에서는 마우스가 있는 모니터의 작업 영역을 기준으로 크기를 산정
             if sys.platform.startswith('win'):
                 import ctypes
 
@@ -2960,13 +3013,10 @@ class App(ctk.CTk):
                 width = int(mon_w * 0.70)
                 height = int(mon_h * 0.75)
 
-                # 마우스가 위치한 모니터 정중앙 배치
                 center_window_on_mouse_display(self, width=width, height=height)
-                # 최소 크기도 해당 모니터 기준으로 설정
                 self.minsize(int(mon_w * 0.5), int(mon_h * 0.6))
                 return
 
-            # 기타 OS: 단일 스크린 기준 폴백
             self.update_idletasks()
             sw = self.winfo_screenwidth()
             sh = self.winfo_screenheight()
@@ -2975,7 +3025,6 @@ class App(ctk.CTk):
             center_window_on_mouse_display(self, width=width, height=height)
             self.minsize(int(sw * 0.5), int(sh * 0.6))
         except Exception:
-            # 최후 폴백: 기존 중앙 배치 로직
             self.update_idletasks()
             sw = self.winfo_screenwidth()
             sh = self.winfo_screenheight()
@@ -3014,13 +3063,11 @@ class App(ctk.CTk):
                 import json
                 import urllib.request
                 
-                # 1. config.ini에서 업데이트 서버 URL 획득
                 config = configparser.ConfigParser(interpolation=None)
                 config.read(CONFIG_FILE_PATH, encoding='utf-8')
                 
                 update_server_url = config.get('Update', 'update_server_url', fallback=None)
                 
-                # 설정이 없으면, shared_db_path가 설정되어 있을 때 그 폴더의 'updates/latest.json'을 폴백으로 자동 시도
                 if not update_server_url:
                     shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
                     if shared_db_path and os.path.exists(shared_db_path):
@@ -3029,11 +3076,9 @@ class App(ctk.CTk):
                             update_server_url = fallback_path
                 
                 if not update_server_url:
-                    print("[UPDATE-CHECK] 업데이트 서버 경로가 정의되지 않았습니다.")
                     return
                 
-                # 2. 현재 버전 정보 획득
-                current_version = "v1.0.3"  # 현재 버전 상수
+                current_version = "v1.0.3"
                 try:
                     version_path = os.path.join(application_path, 'VERSION')
                     if os.path.exists(version_path):
@@ -3043,15 +3088,11 @@ class App(ctk.CTk):
                     pass
                 
                 latest_info = None
-                
-                # 3. 최신 업데이트 파일 로드
-                # URL 인지 로컬 파일 경로인지 체크
                 if update_server_url.startswith("http://") or update_server_url.startswith("https://"):
                     req = urllib.request.Request(update_server_url, headers={'User-Agent': 'Mozilla/5.0'})
                     with urllib.request.urlopen(req, timeout=10) as response:
                         latest_info = json.loads(response.read().decode('utf-8'))
                 else:
-                    # 로컬 네트워크 경로 또는 파일 경로
                     if os.path.exists(update_server_url):
                         with open(update_server_url, 'r', encoding='utf-8') as f:
                             latest_info = json.load(f)
@@ -3062,9 +3103,7 @@ class App(ctk.CTk):
                 latest_version = latest_info.get("version")
                 changelog = latest_info.get("changelog", "변경 사항 없음")
                 
-                # 4. 버전 비교
                 if latest_version and latest_version != current_version:
-                    print(f"[UPDATE-CHECK] New version available: {latest_version} (Current: {current_version})")
                     self.after(50, lambda: self.prompt_user_for_update(latest_version, changelog))
             except Exception as e:
                 print(f"[UPDATE-CHECK] Failed to check for updates: {e}")
@@ -3076,12 +3115,10 @@ class App(ctk.CTk):
 
     def prompt_user_for_update(self, latest_version, changelog):
         """사용자에게 업데이트 진행 여부를 묻는 알림창을 표시합니다."""
-        # 공지사항 텍스트박스 업데이트
         home_frame = self.frames.get(FRAME_HOME)
         if home_frame and hasattr(home_frame, 'notice_textbox'):
             try:
                 home_frame.notice_textbox.configure(state="normal")
-                # 기존 공지사항 텍스트 앞에 업데이트 공지 추가
                 notice_text = f"📢 [신규 업데이트 알림] 새로운 버전({latest_version})이 출시되었습니다!\n"
                 notice_text += f"변경 사항:\n{changelog}\n"
                 notice_text += f"--------------------------------------------------\n"
@@ -3090,7 +3127,6 @@ class App(ctk.CTk):
             except Exception:
                 pass
         
-        # 팝업 알림 표시
         msg = f"새로운 업데이트({latest_version})가 준비되었습니다.\n\n[변경 사항]\n{changelog}\n\n지금 프로그램을 종료하고 자동 업데이트를 진행하시겠습니까?"
         if messagebox.askyesno("업데이트 알림", msg, parent=self):
             self.execute_auto_update()
@@ -3102,13 +3138,7 @@ class App(ctk.CTk):
             import os
             import sys
             
-            # 개발 환경(python)과 빌드 환경(.exe) 모두에서 런처 탐색
-            launcher_exec = None
-            
-            # main.exe가 %LOCALAPPDATA%/CosRnD/bin/main.exe에 설치되는 런처 사양 기준
-            # 상위 폴더(install_path)에 launcher.exe가 있음
             parent_dir = os.path.dirname(application_path)
-            
             paths_to_try = [
                 os.path.join(parent_dir, 'launcher.exe'),
                 os.path.join(application_path, 'launcher.exe'),
@@ -3116,21 +3146,20 @@ class App(ctk.CTk):
                 os.path.join(parent_dir, 'launcher.py'),
             ]
             
+            launcher_exec = None
             for path in paths_to_try:
                 if os.path.exists(path):
                     launcher_exec = path
                     break
             
             if launcher_exec:
-                print(f"[UPDATE] Running launcher: {launcher_exec}")
+                clean_env = get_clean_subproc_env()
+                flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
                 if launcher_exec.endswith('.py'):
-                    # python으로 런처 구동
-                    subprocess.Popen([sys.executable, launcher_exec])
+                    subprocess.Popen([sys.executable, launcher_exec], env=clean_env, creationflags=flags)
                 else:
-                    # exe 직접 구동
-                    subprocess.Popen([launcher_exec])
+                    subprocess.Popen([launcher_exec], env=clean_env, creationflags=flags)
                 
-                # 즉시 프로그램 종료
                 self.on_closing()
             else:
                 messagebox.showerror("업데이트 오류", "업데이트 설치 프로그램(launcher.exe)을 찾을 수 없습니다.\n수동 업데이트를 진행해주세요.", parent=self)
@@ -3139,20 +3168,16 @@ class App(ctk.CTk):
 
     def start_db_sync_check(self):
         """공유 DB의 변경 사항을 주기적으로 확인하는 타이머를 시작합니다."""
-        # 초기 DB 상태를 조용히 설정 (알림 없이)
         self.initialize_db_sync_baseline()
-        # 첫 체크는 1분 후부터 시작 (초기 설정 시간 여유)
         self.db_sync_timer = self.after(60000, self.start_periodic_sync_check)
-        
+
     def initialize_db_sync_baseline(self):
         """DB 동기화 기준선을 조용히 설정합니다."""
         try:
-            # interpolation=None으로 설정하여 경로 내 '%' 등으로 인한 파싱 오류 방지
             config = configparser.ConfigParser(interpolation=None)
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
             shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
-            # 공유 DB 파일 경로 해석 (폴더/파일 입력 모두 지원)
             def resolve_shared_file(path):
                 if not path:
                     return None
@@ -3163,17 +3188,15 @@ class App(ctk.CTk):
 
             shared_db_file = resolve_shared_file(shared_db_path)
 
-            # 기준선: 실제 DB 파일을 기준으로 설정 (폴더 아님)
             if shared_db_file and os.path.exists(shared_db_file):
                 shared_db_stat = os.stat(shared_db_file)
                 self.last_shared_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
                 print(f"[DB동기화] 기준선 설정 완료: 파일={shared_db_file}, 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
 
-                # 변경 로그 기준선도 설정 (있을 경우)
                 self.last_change_log_id = 0
                 try:
                     import sqlite3
-                    conn = sqlite3.connect(shared_db_file)
+                    conn = sqlite3.connect(shared_db_file, timeout=2.0)
                     cur = conn.cursor()
                     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
                     if cur.fetchone():
@@ -3188,20 +3211,93 @@ class App(ctk.CTk):
                 print("[DB동기화] 공유 DB 경로가 설정되지 않음 또는 파일 없음")
         except Exception as e:
             print(f"[DB동기화] 기준선 설정 중 오류: {e}")
-            
+
+    def show_sync_badge(self, summary_text: str, shared_db_file: str):
+        """상단 메뉴바에 연구원을 방해하지 않는 조용한 동기화 알림 배지를 표시합니다."""
+        try:
+            if not hasattr(self, 'sync_notice_btn') or not self.sync_notice_btn:
+                return
+
+            self.pending_shared_db_file = shared_db_file
+
+            if hasattr(self, '_sync_badge_hide_timer') and self._sync_badge_hide_timer:
+                try:
+                    self.after_cancel(self._sync_badge_hide_timer)
+                except Exception:
+                    pass
+                self._sync_badge_hide_timer = None
+
+            display_text = f"🔄 새 데이터 감지 ({summary_text}) | 동기화"
+            self.sync_notice_btn.configure(
+                text=display_text,
+                fg_color="#D97706",
+                hover_color="#B45309",
+                state="normal"
+            )
+            # 상단 메뉴바의 사용자 배지 바로 왼쪽에 부드럽게 마운트
+            self.sync_notice_btn.pack(side="right", padx=(0, 10), pady=4)
+            print(f"[DB동기화] 상단 알림 배지 활성화: {display_text}")
+        except Exception as e:
+            print(f"[DB동기화] 알림 배지 표시 실패: {e}")
+
+    def hide_sync_badge(self):
+        """상단 메뉴바의 동기화 알림 배지를 숨깁니다."""
+        try:
+            if hasattr(self, 'sync_notice_btn') and self.sync_notice_btn:
+                self.sync_notice_btn.pack_forget()
+            self.pending_shared_db_file = None
+            self._sync_badge_hide_timer = None
+        except Exception as e:
+            print(f"[DB동기화] 알림 배지 숨김 실패: {e}")
+
+    def on_sync_badge_clicked(self):
+        """연구원이 상단 동기화 배지를 클릭했을 때 실시간으로 안전하게 최신 데이터를 반영합니다."""
+        if not self.pending_shared_db_file:
+            self.hide_sync_badge()
+            return
+
+        target_db = self.pending_shared_db_file
+        try:
+            self.sync_notice_btn.configure(text="⏳ 동기화 진행 중...", state="disabled", fg_color="#4B5563")
+            self.update_idletasks()
+
+            # 조용한 동기화 수행
+            success = self.sync_with_shared_db_safe(target_db, show_success_popup=False)
+
+            if success:
+                self.sync_notice_btn.configure(text="✅ 최신 데이터 반영 완료", fg_color="#059669")
+                # 3초 후 배지 자동 숨김
+                self._sync_badge_hide_timer = self.after(3000, self.hide_sync_badge)
+            else:
+                self.sync_notice_btn.configure(text="⚠️ 동기화 실패 (재시도)", fg_color="#DC2626", state="normal")
+        except Exception as e:
+            print(f"[DB동기화] 배지 클릭 동기화 처리 실패: {e}")
+            self.hide_sync_badge()
+
     def start_periodic_sync_check(self):
-        """주기적인 DB 동기화 검사를 시작합니다."""
+        """주기적인 DB 동기화 검사를 시작합니다 (기본 60초 주기)."""
         self.check_shared_db()
-        self.db_sync_timer = self.after(30000, self.start_periodic_sync_check)
+        
+        interval_ms = 60000
+        try:
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(CONFIG_FILE_PATH, encoding='utf-8')
+            sec = config.getint('Sync', 'check_interval_sec', fallback=60)
+            if sec >= 15:
+                interval_ms = sec * 1000
+        except Exception:
+            interval_ms = 60000
+
+        self.db_sync_timer = self.after(interval_ms, self.start_periodic_sync_check)
 
     def stop_db_sync_check(self):
         """DB 동기화 검사 타이머를 중지합니다."""
         if self.db_sync_timer:
             self.after_cancel(self.db_sync_timer)
             self.db_sync_timer = None
-            
+
     def update_db_sync_baseline(self):
-        """DB 동기화 기준선을 현재 상태로 업데이트합니다 (자체 변경사항 반영용)."""
+        """DB 동기화 기준선을 현재 상태로 업데이트합니다 (자체 변경사항 반영으로 내 PC 알림 방지)."""
         try:
             config = configparser.ConfigParser(interpolation=None)
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
@@ -3220,222 +3316,140 @@ class App(ctk.CTk):
             if shared_db_file and os.path.exists(shared_db_file):
                 shared_db_stat = os.stat(shared_db_file)
                 self.last_shared_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
-                print(f"[DB동기화] 기준선 업데이트: 파일={shared_db_file}, 크기={self.last_shared_db_info[0]}, 수정시간={self.last_shared_db_info[1]}")
+
+                # change_log 최신 ID로 기준선 갱신
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(shared_db_file, timeout=2.0)
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
+                    if cur.fetchone():
+                        cur.execute("SELECT IFNULL(MAX(id), 0) FROM change_log")
+                        row = cur.fetchone()
+                        self.last_change_log_id = int(row[0] or 0)
+                        print(f"[DB동기화] 기준선 갱신 완료: ID={self.last_change_log_id}")
+                    conn.close()
+                except Exception as e:
+                    print(f"[DB동기화] 기준선 ID 갱신 실패(무시): {e}")
+
+                # 배지가 떠 있었다면 조용히 숨김
+                self.hide_sync_badge()
             else:
                 print("[DB동기화] 공유 DB 경로 없음 - 기준선 업데이트 스킵")
         except Exception as e:
             print(f"[DB동기화] 기준선 업데이트 중 오류: {e}")
 
     def check_shared_db(self):
-        """공유 DB 파일의 상태를 확인하고, '특정 체크'로 의미 있는 변경 시에만 업데이트를 제안합니다."""
+        """공유 DB 파일의 change_log를 확인하고 타 연구원의 변경사항이 있을 때만 상단 배지에 조용히 알립니다."""
         try:
             config = configparser.ConfigParser(interpolation=None)
             config.read(CONFIG_FILE_PATH, encoding='utf-8')
-            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
-            if not shared_db_path:
-                if self.current_user.is_admin and not self.db_path_warning_shown:
-                    messagebox.showinfo(
-                        "DB 동기화 설정 안내",
-                        "공유 데이터베이스 동기화 기능이 활성화되었지만, 경로가 설정되지 않았습니다.\n\n[설정] 메뉴에서 공유 DB 파일의 경로를 지정해주세요.",
-                        parent=self
-                    )
-                    self.db_path_warning_shown = True
+            # 동기화 알림 모드 확인 (disabled이면 검사 생략)
+            sync_mode = config.get('Sync', 'mode', fallback='badge')
+            if sync_mode == 'disabled':
                 return
 
-            # 실제 DB 파일 경로로 변환
+            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+            if not shared_db_path:
+                return
+
             def resolve_shared_file(path):
                 if not path:
                     return None
-                # 인라인 주석(#) 제거 및 공백 정리
                 if '#' in path:
                     path = path.split('#')[0]
                 path = path.strip().strip('"').strip("'")
-                
                 if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
                     return path
                 return os.path.join(path, 'cosmetic.db')
 
             shared_db_file = resolve_shared_file(shared_db_path)
-
             if not shared_db_file or not os.path.exists(shared_db_file):
-                # 공유 DB 파일이 존재하지 않는 경우 자동으로 폴더를 생성하고 로컬 DB 복사
-                try:
-                    shared_db_dir = os.path.dirname(shared_db_file)
-                    if not os.path.exists(shared_db_dir):
-                        os.makedirs(shared_db_dir, exist_ok=True)
-                        print(f"[DB동기화] 공유 DB 디렉토리가 없어 자동 생성했습니다: {shared_db_dir}")
-                    
-                    local_db = db_manager.get_local_db_path()
-                    if os.path.exists(local_db):
-                        import shutil
-                        shutil.copy2(local_db, shared_db_file)
-                        print(f"[DB동기화] 로컬 DB({local_db})를 공유 DB 경로({shared_db_file})에 복사하여 자동 생성했습니다.")
-                    else:
-                        # 로컬 DB가 아직 준비되지 않은 경우 setup 시도
-                        db_manager.setup_database(application_path, CONFIG_FILE_PATH, self.on_initial_setup)
-                        if os.path.exists(local_db):
-                            import shutil
-                            shutil.copy2(local_db, shared_db_file)
-                except Exception as db_create_err:
-                    print(f"[DB동기화] 공유 DB 파일 자동 생성 실패: {db_create_err}")
-                    if self.current_user.is_admin and not self.db_path_warning_shown:
-                         messagebox.showwarning(
-                            "DB 동기화 경로 오류",
-                            f"설정된 공유 DB 파일을 찾을 수 없으며 자동 생성을 실패했습니다:\n{shared_db_file or shared_db_path}\n\n[설정] 메뉴에서 경로를 다시 확인해주세요.",
-                            parent=self
-                        )
-                         self.db_path_warning_shown = True
-                    return
-            
-            shared_db_stat = os.stat(shared_db_file)
-            # 파일 크기와 수정 시간을 더 정확하게 체크
-            current_db_info = (shared_db_stat.st_size, int(shared_db_stat.st_mtime))
-
-            # 초기 설정 시에는 현재 정보만 저장하고 알림 표시하지 않음
-            if self.last_shared_db_info == (0, 0):
-                self.last_shared_db_info = current_db_info
-                print(f"[DB동기화] 초기 DB 상태 설정: 크기={current_db_info[0]}, 수정시간={current_db_info[1]}")
                 return
 
-            # 실제 변경사항이 있는지 더 엄격하게 체크
-            if self.last_shared_db_info != current_db_info:
-                # 파일 크기가 다르거나, 수정 시간이 15초 이상 차이날 때만 변경으로 간주 (더 보수적)
-                size_changed = self.last_shared_db_info[0] != current_db_info[0]
-                time_diff = abs(self.last_shared_db_info[1] - current_db_info[1])
-                
-                # 최소 변경 임계값 더 증가 (15초 이상, 크기는 2KB 이상 변경)
-                significant_size_change = size_changed and abs(self.last_shared_db_info[0] - current_db_info[0]) > 2048
-                significant_time_change = time_diff > 15
-                
-                if significant_size_change or significant_time_change:
-                    # 특정 체크: change_log의 최근 변경 테이블을 수집하여 '사용자에게 관련 있는 변경'인지 판별
-                    specific_change_detected = True  # 기본값 (change_log 없으면 보수적으로 True)
-                    try:
-                        import sqlite3
-                        conn = sqlite3.connect(shared_db_file)
-                        cur = conn.cursor()
-                        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
-                        if cur.fetchone():
-                            last_id = getattr(self, 'last_change_log_id', 0)
-                            cur.execute("SELECT id, table_name, operation, entity_name FROM change_log WHERE id > ? ORDER BY id", (last_id,))
-                            rows = cur.fetchall()
+            # change_log 기반 신규 변경 수집
+            import sqlite3
+            last_id = getattr(self, 'last_change_log_id', 0)
 
-                            # 변경된 테이블 집합
-                            changed_tables = {r[1] for r in rows}
+            conn = sqlite3.connect(shared_db_file, timeout=2.0)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='change_log'")
+            if not cur.fetchone():
+                conn.close()
+                return
 
-                            # 변경 요약(성분/거래처 이름 표시)
-                            changed_names = {
-                                'ingredients': [],
-                                'clients': []
-                            }
-                            for _id, tbl, op, ename in rows:
-                                if tbl in changed_names and ename:
-                                    changed_names[tbl].append(str(ename))
+            cur.execute("SELECT id, table_name, operation, entity_name FROM change_log WHERE id > ? ORDER BY id", (last_id,))
+            rows = cur.fetchall()
+            conn.close()
 
-                            def summarize_names(names, limit=5):
-                                uniq = []
-                                seen = set()
-                                for n in names:
-                                    if n not in seen:
-                                        uniq.append(n)
-                                        seen.add(n)
-                                if not uniq:
-                                    return None
-                                if len(uniq) > limit:
-                                    return ", ".join(uniq[:limit]) + f" 외 {len(uniq)-limit}건"
-                                return ", ".join(uniq)
+            if not rows:
+                # 신규 변경 없음 -> 알림 불필요
+                return
 
-                            ing_summary = summarize_names(changed_names['ingredients'])
-                            cli_summary = summarize_names(changed_names['clients'])
-                            change_human = []
-                            if ing_summary:
-                                change_human.append(f"성분: {ing_summary}")
-                            if cli_summary:
-                                change_human.append(f"거래처: {cli_summary}")
-                            changes_summary_text = "\n".join(change_human) if change_human else ""
+            # 변경된 테이블 및 항목 집계
+            table_counts = {}
+            sample_names = {}
+            for r_id, tbl, op, ename in rows:
+                table_counts[tbl] = table_counts.get(tbl, 0) + 1
+                if ename and tbl not in sample_names:
+                    sample_names[tbl] = str(ename)
 
-                            # 사용자 권한/사용처에 따른 관심 테이블 구성
-                            interested = set()
-                            try:
-                                if hasattr(self.current_user, 'has_research_access') and self.current_user.has_research_access():
-                                    interested.update({"formulations", "formulation_items"})
-                                if hasattr(self.current_user, 'can_view_material_data') and self.current_user.can_view_material_data():
-                                    interested.update({"materials", "ingredients"})
-                                if hasattr(self.current_user, 'can_view_client_data') and self.current_user.can_view_client_data():
-                                    interested.update({"clients"})
-                                # 사용자 관리 변경은 관리자에게만 의미가 있으므로 관리자에게만 알림
-                                if getattr(self.current_user, 'is_admin', False):
-                                    interested.update({"users"})
-                            except Exception:
-                                pass
+            # 사용자 권한/사용처에 따른 관심 테이블 매핑
+            interested = set()
+            try:
+                if hasattr(self.current_user, 'has_research_access') and self.current_user.has_research_access():
+                    interested.update({"formulations", "formulation_items"})
+                if hasattr(self.current_user, 'can_view_material_data') and self.current_user.can_view_material_data():
+                    interested.update({"materials", "ingredients"})
+                if hasattr(self.current_user, 'can_view_client_data') and self.current_user.can_view_client_data():
+                    interested.update({"clients"})
+                if getattr(self.current_user, 'is_admin', False):
+                    interested.update({"users"})
+            except Exception:
+                interested = {"formulations", "materials", "ingredients", "clients"}
 
-                            specific_change_detected = bool(changed_tables & interested)
+            relevant_tables = set(table_counts.keys()) & interested
+            if not relevant_tables:
+                # 관심 없는 테이블 변경이면 기준선만 넘기고 알림 생략
+                self.last_change_log_id = rows[-1][0]
+                return
 
-                            # 기준선 ID 업데이트 (항상 수행)
-                            if rows:
-                                self.last_change_log_id = rows[-1][0]
-                        conn.close()
-                    except Exception as e:
-                        print(f"[DB동기화] 특정 변경 확인 실패(무시): {e}")
+            # 사람이 읽기 쉬운 요약 문자열 생성
+            summary_parts = []
+            if 'formulations' in table_counts or 'formulation_items' in table_counts:
+                cnt = table_counts.get('formulations', 0) + table_counts.get('formulation_items', 0)
+                name = sample_names.get('formulations', '')
+                summary_parts.append(f"처방({name})" if name else f"처방 {cnt}건")
+            if 'materials' in table_counts or 'ingredients' in table_counts:
+                cnt = table_counts.get('materials', 0) + table_counts.get('ingredients', 0)
+                name = sample_names.get('materials', '') or sample_names.get('ingredients', '')
+                summary_parts.append(f"원료({name})" if name else f"원료 {cnt}건")
+            if 'clients' in table_counts:
+                cnt = table_counts['clients']
+                name = sample_names.get('clients', '')
+                summary_parts.append(f"거래처({name})" if name else f"거래처 {cnt}건")
+            if 'users' in table_counts:
+                summary_parts.append(f"사용자 {table_counts['users']}건")
 
-                    if not specific_change_detected:
-                        # 관련 없는 변경이면 조용히 기준선만 갱신 (사용자에게 메시지/재시동 미제안)
-                        print("[DB동기화] 관련 없는 변경 감지 -> 알림 없이 기준선만 갱신")
-                        self.last_shared_db_info = current_db_info
-                        return
+            summary_text = ", ".join(summary_parts) if summary_parts else f"데이터 {len(rows)}건"
 
-                    print(f"[DB동기화] 실제 변경 감지! 크기변경: {significant_size_change} ({self.last_shared_db_info[0]} -> {current_db_info[0]}), 시간차: {time_diff}초")
-                    
-                    # 현재 사용자가 관리자인 경우, 자신의 변경일 가능성이 있으므로 더 신중하게 처리
-                    if self.current_user.is_admin:
-                        # 관리자의 경우 더 큰 변경이거나 오래된 변경일 때만 알림 (더 보수적)
-                        if time_diff > 60 or abs(self.last_shared_db_info[0] - current_db_info[0]) > 20480:  # 1분 이상 또는 20KB 이상
-                            self.last_shared_db_info = current_db_info
-                            details_text = (
-                                f"공유 데이터베이스에 외부 변경사항이 감지되었습니다.\n"
-                                f"(크기 변경: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)"
-                            )
-                            if changes_summary_text:
-                                details_text += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
-                            details_text += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
-                                              "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
-                            if messagebox.askyesno("데이터베이스 업데이트", details_text, parent=self):
-                                self.sync_with_shared_db_safe(shared_db_file)
-                        else:
-                            # 관리자의 경우 작은 변경은 자신의 변경으로 간주하고 조용히 업데이트
-                            print(f"[DB동기화] 관리자 변경으로 추정되어 조용히 업데이트 (시간차: {time_diff}초)")
-                            self.last_shared_db_info = current_db_info
-                    else:
-                        # 일반 사용자의 경우 모든 변경에 대해 알림
-                        self.last_shared_db_info = current_db_info
-                        user_details = "관리자에 의해 데이터가 변경되었습니다."
-                        if changes_summary_text:
-                            user_details += f"\n\n변경된 항목 요약:\n{changes_summary_text}"
-                        user_details += ("\n\n최신 데이터로 동기화하시겠습니까?\n\n"
-                                         "※ 주의: 저장하지 않은 변경사항이 있다면 먼저 저장하세요.")
-                        if messagebox.askyesno("데이터베이스 업데이트", user_details, parent=self):
-                            self.sync_with_shared_db_safe(shared_db_file)
-                else:
-                    # 미미한 변경사항은 무시하고 정보만 업데이트
-                    print(f"[DB동기화] 미미한 변경 무시 (크기차: {abs(self.last_shared_db_info[0] - current_db_info[0])}바이트, 시간차: {time_diff}초)")
-                    self.last_shared_db_info = current_db_info
+            # 기준선 ID를 최신으로 올려 중복 감지 방지
+            self.last_change_log_id = rows[-1][0]
+
+            # 상단 배지 알림 띄우기 (강제 모달 팝업 없이 조용하게 표시)
+            self.show_sync_badge(summary_text, shared_db_file)
 
         except (FileNotFoundError, OSError):
             pass
         except Exception as e:
-            print(f"[경고] 공유 DB 확인 중 오류 발생: {e}")
-            # 오류 발생시 동기화 타이머를 일시 중지 (오류 누적 방지)
-            self.stop_db_sync_check()
-            print("[DB동기화] 오류로 인해 동기화 타이머를 일시 중지합니다.")
+            print(f"[DB동기화] 공유 DB 확인 중 오류(무시): {e}")
 
-    def sync_with_shared_db_safe(self, shared_db_path):
-        """안전한 공유 DB 동기화 - 실시간으로 데이터를 다시 불러옴"""
-        progress_popup = None
+    def sync_with_shared_db_safe(self, shared_db_path, show_success_popup=False):
+        """안전한 공유 DB 동기화 - 실시간으로 데이터를 다시 불러오고 모든 프레임을 새로고침합니다."""
         try:
             print(f"[DB동기화] 실시간 동기화 시작: {shared_db_path}")
-            
-            # 1. 공유 DB 파일 경로 확인
+
             def resolve_shared_file(path):
                 if not path:
                     return None
@@ -3443,85 +3457,29 @@ class App(ctk.CTk):
                 if path.lower().endswith('.db') or os.path.basename(path).lower() == 'cosmetic.db':
                     return path
                 return os.path.join(path, 'cosmetic.db')
-            
-            shared_db_file = resolve_shared_file(shared_db_path)
-            
-            if not shared_db_file or not os.path.exists(shared_db_file):
-                messagebox.showerror("동기화 오류", 
-                                   f"공유 DB 파일을 찾을 수 없습니다:\n{shared_db_file}", 
-                                   parent=self)
-                return
-            
-            # 2. 로컬 DB 파일 경로
-            local_db_path = db_manager.get_local_db_path()
-            
-            print(f"[DB동기화] 로컬 DB: {local_db_path}")
-            print(f"[DB동기화] 공유 DB: {shared_db_file}")
 
-            # 프로그래스 팝업 생성
+            shared_db_file = resolve_shared_file(shared_db_path)
+
+            if not shared_db_file or not os.path.exists(shared_db_file):
+                print(f"[DB동기화] 공유 DB 파일을 찾을 수 없습니다: {shared_db_file}")
+                return False
+
+            local_db_path = db_manager.get_local_db_path()
+
+            # 1. DB 연결 완전히 해제
             try:
-                progress_popup = ctk.CTkToplevel(self)
-                progress_popup.title("데이터 동기화 중...")
-                progress_popup.geometry("400x150")
-                progress_popup.transient(self)
-                progress_popup.grab_set()
-                
-                # 중앙 배치
-                try:
-                    self.update_idletasks()
-                    x = self.winfo_rootx() + (self.winfo_width() // 2) - 200
-                    y = self.winfo_rooty() + (self.winfo_height() // 2) - 75
-                    progress_popup.geometry(f"+{x}+{y}")
-                except:
-                    pass
-                
-                label_title = ctk.CTkLabel(progress_popup, text="공유 데이터베이스 동기화 중입니다...\n잠시만 기다려 주세요.", font=("맑은 고딕", 14, "bold"))
-                label_title.pack(pady=(20, 5))
-                
-                progress_label = ctk.CTkLabel(progress_popup, text="기존 DB 연결 해제 중...", font=("맑은 고딕", 12))
-                progress_label.pack(pady=(0, 5))
-                
-                progress_bar = ctk.CTkProgressBar(progress_popup, width=300)
-                progress_bar.pack(pady=5)
-                progress_bar.set(0.1)
-                progress_popup.update()
-            except Exception as pe:
-                print(f"[DB동기화] 프로그래스 팝업 생성 실패: {pe}")
-            
-            # 3. DB 연결 완전히 해제
-            try:
-                print("[DB동기화] 기존 DB 연결 해제 중...")
                 db_manager.dispose_engine()
-                
-                # 가비지 컬렉션으로 모든 참조 해제
                 import gc
                 gc.collect()
-                
-                print("[DB동기화] DB 연결 해제 완료")
             except Exception as e:
                 print(f"[DB동기화] DB 연결 해제 중 오류: {e}")
-            
-            if progress_popup:
-                progress_label.configure(text="대기 및 파일 잠금 해제 중...")
-                progress_bar.set(0.3)
-                progress_popup.update()
 
-            # 4. 파일 잠금 해제 대기 (더 길게)
-            import time
-            time.sleep(2.0)
-            
-            if progress_popup:
-                progress_label.configure(text="공유 데이터베이스 복사 중...")
-                progress_bar.set(0.5)
-                progress_popup.update()
-
-            # 5. 파일 복사 (재시도 로직 포함)
+            # 2. 파일 복사 (재시도 로직 포함)
             import shutil
-            max_retries = 5
-            retry_delay = 1.0
+            import time
+            max_retries = 3
             copy_success = False
-            last_error = None
-            
+
             for attempt in range(max_retries):
                 try:
                     # 백업 생성
@@ -3529,108 +3487,47 @@ class App(ctk.CTk):
                     if os.path.exists(local_db_path):
                         try:
                             shutil.copy2(local_db_path, backup_path)
-                            print(f"[DB동기화] 백업 생성: {backup_path}")
-                        except Exception as backup_err:
-                            print(f"[DB동기화] 백업 생성 실패 (무시): {backup_err}")
-                    
+                        except Exception:
+                            pass
+
                     # 공유 DB를 로컬로 복사
                     shutil.copy2(shared_db_file, local_db_path)
-                    print(f"[DB동기화] DB 파일 복사 완료")
                     copy_success = True
                     break
-                    
-                except PermissionError as pe:
-                    last_error = pe
-                    print(f"[DB동기화] 파일 복사 시도 {attempt + 1}/{max_retries} 실패 (권한 오류): {pe}")
-                    if attempt < max_retries - 1:
-                        print(f"[DB동기화] {retry_delay}초 후 재시도...")
-                        time.sleep(retry_delay)
-                        retry_delay *= 1.5  # 점진적으로 대기 시간 증가
-                        
-                        # 추가 가비지 컬렉션
-                        gc.collect()
-                        
                 except Exception as copy_error:
-                    last_error = copy_error
-                    print(f"[DB동기화] 파일 복사 실패: {copy_error}")
-                    break
-            
-            if not copy_success:
-                if progress_popup:
-                    try: progress_popup.destroy()
-                    except: pass
-                messagebox.showerror("동기화 오류", 
-                                   f"DB 파일 복사 중 오류가 발생했습니다:\n\n{last_error}\n\n"
-                                   f"파일이 다른 프로그램에 의해 사용 중일 수 있습니다.\n"
-                                   f"잠시 후 다시 시도해주세요.", 
-                                   parent=self)
-                # DB 재연결 (원래 파일로)
-                try:
-                    db_manager.setup_database(application_path, CONFIG_FILE_PATH, None)
-                except:
-                    pass
-                return
-            
-            if progress_popup:
-                progress_label.configure(text="데이터베이스 연결 재설정 중...")
-                progress_bar.set(0.7)
-                progress_popup.update()
+                    print(f"[DB동기화] 파일 복사 시도 {attempt + 1}/{max_retries} 실패: {copy_error}")
+                    time.sleep(0.5)
 
-            # 6. DB 재연결
+            # 3. DB 재연결
             try:
-                print("[DB동기화] DB 재연결 중...")
                 db_manager.setup_database(application_path, CONFIG_FILE_PATH, None)
-                print("[DB동기화] DB 재연결 완료")
             except Exception as reconnect_error:
-                if progress_popup:
-                    try: progress_popup.destroy()
-                    except: pass
                 print(f"[DB동기화] DB 재연결 실패: {reconnect_error}")
-                messagebox.showerror("동기화 오류", 
-                                   f"DB 재연결 중 오류가 발생했습니다:\n\n{reconnect_error}", 
-                                   parent=self)
-                return
-            
-            if progress_popup:
-                progress_label.configure(text="모든 화면 데이터 최신화 적용 중...")
-                progress_bar.set(0.9)
-                progress_popup.update()
+                return False
 
-            # 7. 모든 프레임의 데이터 새로고침
+            # 4. 모든 화면 데이터 새로고침
             try:
-                print("[DB동기화] 모든 프레임 데이터 새로고침 중...")
                 self.refresh_data_in_all_frames()
-                print("[DB동기화] 데이터 새로고침 완료")
+                print("[DB동기화] 모든 프레임 데이터 새로고침 완료")
             except Exception as refresh_error:
                 print(f"[DB동기화] 데이터 새로고침 중 오류: {refresh_error}")
-            
-            # 8. 동기화 기준선 업데이트
-            self.update_db_sync_baseline()
-            
-            if progress_popup:
-                try: progress_popup.destroy()
-                except: pass
 
-            # 9. 성공 메시지
-            messagebox.showinfo("동기화 완료", 
-                              "데이터베이스가 성공적으로 동기화되었습니다.\n"
-                              "최신 데이터로 업데이트되었습니다.", 
-                              parent=self)
+            # 5. 동기화 기준선 업데이트
+            self.update_db_sync_baseline()
+
+            if show_success_popup:
+                messagebox.showinfo("동기화 완료", "데이터베이스가 성공적으로 동기화되었습니다.\n최신 데이터로 업데이트되었습니다.", parent=self)
+
             print("[DB동기화] 실시간 동기화 완료")
-                
+            return True
+
         except Exception as e:
-            if progress_popup:
-                try: progress_popup.destroy()
-                except: pass
             print(f"[DB동기화] 실시간 동기화 중 오류: {e}")
-            messagebox.showerror("동기화 오류", 
-                               f"데이터베이스 동기화 중 오류가 발생했습니다:\n\n{e}", 
-                               parent=self)
-    
+            return False
     def sync_with_shared_db(self, shared_db_path):
         """기존 동기화 메서드 (레거시 호환용)"""
-        print("[DB동기화] 기존 동기화 메서드 호출 - 안전한 동기화로 전환")
-        self.sync_with_shared_db_safe(shared_db_path)
+        print("[DB동기화] 기존 동기화 메서드 호출 - 안전한 실시간 동기화로 전환")
+        self.sync_with_shared_db_safe(shared_db_path, show_success_popup=True)
 
     def restart_program(self):
         """프로그램을 재시작합니다."""
@@ -3728,48 +3625,35 @@ class App(ctk.CTk):
                 print(f"{datetime.now()}: 실행 경로: {executable_path}")
                 print(f"{datetime.now()}: 작업 디렉토리: {current_dir}")
                 
-                # 환경 변수 설정 (모듈 경로 보장 및 사용자 정보 전달)
-                env = os.environ.copy()
-                if getattr(sys, 'frozen', False):
-                    # PyInstaller 환경에서 모듈 경로 설정
-                    env['PYTHONPATH'] = os.pathsep.join([
-                        os.path.join(current_dir, 'modules'),
-                        os.path.join(current_dir, 'database'),
-                        os.path.join(current_dir, 'utils'),
-                        env.get('PYTHONPATH', '')
-                    ])
-                    
-                    # 임시 폴더 오류 방지를 위한 추가 설정
-                    env['PYINSTALLER_SUPPRESS_TEMP_ERRORS'] = '1'
-                    
-                    # 이전 _MEIPASS 환경 변수 제거 (새 프로세스가 새 임시 폴더 생성하도록)
-                    if '_MEIPASS' in env:
-                        del env['_MEIPASS']
-                        print(f"{datetime.now()}: 이전 _MEIPASS 환경 변수 제거")
-                
-                # 재시작 시 사용자 정보 전달
+                # 사용자 정보 및 재시작 상태 전달용 환경 변수 구성
+                pass_env = {}
                 if hasattr(self, 'current_user') and self.current_user:
-                    env['APP_RESTARTING'] = 'True'
-                    env['RESTART_USER_ID'] = str(self.current_user.id)
-                    env['RESTART_USER_IS_ADMIN'] = str(self.current_user.is_admin)
-                    print(f"[RESTART] 사용자 정보 전달: {self.current_user.id} (관리자: {self.current_user.is_admin})")
+                    pass_env['APP_RESTARTING'] = 'True'
+                    pass_env['RESTART_USER_ID'] = str(self.current_user.id)
+                    pass_env['RESTART_USER_IS_ADMIN'] = str(self.current_user.is_admin)
+                    print(f"[재시작] 사용자 정보 전달: {self.current_user.id} (관리자: {self.current_user.is_admin})")
+
+                # PyInstaller 임시 디렉토리(_MEIPASS, _MEIPASS2) 완전 정돈
+                clean_env = get_clean_subproc_env(pass_env)
                 
                 # 새 프로세스 시작 (작업 디렉토리 및 환경 변수 명시적 설정)
-                # 개발 환경(non-frozen)에서는 스크립트 경로를 명시적으로 전달해야 함
                 if not getattr(sys, 'frozen', False):
+                    # 개발 환경(Python 스크립트)
                     script_path = os.path.abspath(__file__)
                     cmd = [executable_path, script_path] + sys.argv[1:]
                 else:
-                    # 패키징된 실행 파일은 자체적으로 진입점을 포함하므로 추가 스크립트 경로 불필요
+                    # 패키징된 단일 실행 파일(EXE)
                     cmd = [executable_path] + sys.argv[1:]
 
+                flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
                 subprocess.Popen(
                     cmd,
-                    cwd=current_dir,  # 작업 디렉토리 명시적 설정
-                    env=env,  # 환경 변수 설정
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+                    cwd=current_dir,
+                    env=clean_env,
+                    creationflags=flags,
+                    close_fds=True if os.name != 'nt' else False
                 )
-                print(f"{datetime.now()}: 새 프로세스 시작 성공 (환경 변수 포함)")
+                print(f"{datetime.now()}: 새 프로세스 시작 성공 (정돈된 환경 변수 적용)")
             except Exception as process_error:
                 error_msg = f"새 프로세스 시작 실패: {process_error}"
                 print(f"{datetime.now()}: {error_msg}")

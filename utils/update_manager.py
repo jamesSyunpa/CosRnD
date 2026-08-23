@@ -28,6 +28,34 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.cafe_manager import CafeNoticeManager
 
+def get_clean_subproc_env(extra_env=None):
+    """
+    서브프로세스 실행 시 PyInstaller 내부 임시 디렉토리 환경변수(_MEIPASS, _MEIPASS2 등)를
+    완전히 제거하여, 새로 실행되는 자식 프로세스가 부모 프로세스의 임시 폴더에 종속되지 않고
+    자신만의 고유한 새 임시 환경을 올바르게 생성하도록 보장합니다.
+    """
+    env = os.environ.copy()
+    keys_to_remove = [
+        '_MEIPASS',
+        '_MEIPASS2',
+        'PYTHONPATH',
+        'PYTHONHOME',
+        'PYINSTALLER_STRICT_UNLOAD_MODE',
+        'PYINSTALLER_SUPPRESS_TEMP_ERRORS'
+    ]
+    for key in keys_to_remove:
+        if key in env:
+            del env[key]
+
+    if extra_env:
+        for k, v in extra_env.items():
+            if v is not None:
+                env[k] = str(v)
+            elif k in env:
+                del env[k]
+
+    return env
+
 class UpdateManager:
     CAFE_ID = 31737320
     GITHUB_REPO = "jamesSyunpa/CosRnD"  # GitHub 공식 배포 리포지토리 (소유자: jamesSyunpa)
@@ -261,13 +289,16 @@ class UpdateManager:
             launcher_script = os.path.join(PROJECT_ROOT, "launcher.py")
             launcher_exe = os.path.join(PROJECT_ROOT, "launcher.exe")
             
+            clean_env = get_clean_subproc_env()
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+            
             launched = False
             try:
                 if os.path.exists(launcher_exe):
-                    subprocess.Popen([launcher_exe, "--update", latest_ver])
+                    subprocess.Popen([launcher_exe, "--update", latest_ver], env=clean_env, creationflags=flags)
                     launched = True
                 elif os.path.exists(launcher_script):
-                    subprocess.Popen([sys.executable, launcher_script, "--update", latest_ver])
+                    subprocess.Popen([sys.executable, launcher_script, "--update", latest_ver], env=clean_env, creationflags=flags)
                     launched = True
             except Exception as e:
                 print(f"[UpdateManager] 런처 실행 오류: {e}")
@@ -395,8 +426,14 @@ class DownloadProgressDialog(ctk.CTkToplevel):
 
         # 프로그램 자동 재실행
         try:
-            main_script = os.path.join(PROJECT_ROOT, "main.py")
-            subprocess.Popen([sys.executable, main_script])
+            clean_env = get_clean_subproc_env()
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
+            if getattr(sys, 'frozen', False):
+                exe_path = sys.executable
+                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path), env=clean_env, creationflags=flags)
+            else:
+                main_script = os.path.join(PROJECT_ROOT, "main.py")
+                subprocess.Popen([sys.executable, main_script], cwd=PROJECT_ROOT, env=clean_env, creationflags=flags)
         except Exception as e:
             print(f"[Update] 재실행 실패: {e}")
 

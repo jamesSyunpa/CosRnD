@@ -174,6 +174,52 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self._save_config('Appearance', 'language', lang_code)
         self.app.recreate_main_ui()
 
+    def change_sync_mode_event(self, selected_mode: str):
+        """동기화 알림 모드(배지 알림/끄기) 변경 시 config.ini에 저장합니다."""
+        mode_code = "badge" if "배지" in selected_mode else "disabled"
+        self._save_config('Sync', 'mode', mode_code)
+        print(f"[Settings] 동기화 알림 모드 변경 저장됨: {mode_code}")
+
+    def change_sync_interval_event(self, selected_interval: str):
+        """동기화 확인 주기 변경 시 config.ini에 초 단위로 저장합니다."""
+        if "1분" in selected_interval:
+            sec = 60
+        elif "3분" in selected_interval:
+            sec = 180
+        elif "5분" in selected_interval:
+            sec = 300
+        elif "10분" in selected_interval:
+            sec = 600
+        else:
+            sec = 60
+        self._save_config('Sync', 'check_interval_sec', str(sec))
+        print(f"[Settings] 동기화 확인 주기 변경 저장됨: {sec}초")
+
+    def sync_db_now_event(self):
+        """연구원이 [지금 즉시 최신 데이터 불러오기] 클릭 시 즉시 실시간 동기화를 수행합니다."""
+        try:
+            self.sync_now_btn.configure(state="disabled", text="⏳ 동기화 중...")
+            self.update_idletasks()
+
+            config = configparser.ConfigParser(interpolation=None)
+            config.read(self.config_path, encoding='utf-8')
+            shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
+
+            if not shared_db_path:
+                messagebox.showwarning("동기화 안내", "공유 DB 경로가 설정되어 있지 않습니다.", parent=self)
+                self.sync_now_btn.configure(state="normal", text="⚡ 지금 즉시 최신 데이터 불러오기")
+                return
+
+            if hasattr(self.app, 'sync_with_shared_db_safe'):
+                success = self.app.sync_with_shared_db_safe(shared_db_path, show_success_popup=True)
+            else:
+                success = False
+
+            self.sync_now_btn.configure(state="normal", text="⚡ 지금 즉시 최신 데이터 불러오기")
+        except Exception as e:
+            self.sync_now_btn.configure(state="normal", text="⚡ 지금 즉시 최신 데이터 불러오기")
+            messagebox.showerror("동기화 오류", f"실시간 동기화 중 오류가 발생했습니다: {e}", parent=self)
+
     def change_update_mode_event(self, selected_mode: str):
         """업데이트 모드(자동/수동) 변경 시 config.ini에 저장합니다."""
         mode_code = "auto" if "자동" in selected_mode else "manual"
@@ -256,9 +302,44 @@ class SettingsManagementFrame(ctk.CTkFrame):
         )
         save_button.grid(row=3, column=1, columnspan=2, pady=(5, 12), padx=10, sticky="e")
 
+        # --- 공유 데이터베이스 동기화 설정 ---
+        sync_cfg_frame = ctk.CTkFrame(scrollable_frame)
+        sync_cfg_frame.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="ew")
+        sync_cfg_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(sync_cfg_frame, text="🔄 공유 DB 실시간 동기화", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 6), sticky="w")
+
+        ctk.CTkLabel(sync_cfg_frame, text="알림 방식", font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, padx=10, pady=6, sticky="w")
+        self.sync_mode_segmented = ctk.CTkSegmentedButton(
+            sync_cfg_frame,
+            values=["조용한 배지 알림 (권장)", "알림 끄기 (수동)"],
+            command=self.change_sync_mode_event,
+            height=28
+        )
+        self.sync_mode_segmented.grid(row=1, column=1, padx=10, pady=6, sticky="w")
+
+        ctk.CTkLabel(sync_cfg_frame, text="확인 주기", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, padx=10, pady=6, sticky="w")
+        self.sync_interval_menu = ctk.CTkOptionMenu(
+            sync_cfg_frame,
+            values=["1분마다 (권장)", "3분마다", "5분마다", "10분마다"],
+            command=self.change_sync_interval_event,
+            width=160
+        )
+        self.sync_interval_menu.grid(row=2, column=1, padx=10, pady=6, sticky="w")
+
+        self.sync_now_btn = ctk.CTkButton(
+            sync_cfg_frame,
+            text="⚡ 지금 즉시 최신 데이터 불러오기",
+            fg_color="#059669",
+            hover_color="#047857",
+            font=ctk.CTkFont(weight="bold"),
+            command=self.sync_db_now_event
+        )
+        self.sync_now_btn.grid(row=2, column=2, padx=10, pady=6, sticky="e")
+
         # --- 소프트웨어 업데이트 설정 ---
         update_cfg_frame = ctk.CTkFrame(scrollable_frame)
-        update_cfg_frame.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="ew")
+        update_cfg_frame.grid(row=3, column=0, padx=20, pady=(0, 20), sticky="ew")
         update_cfg_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(update_cfg_frame, text="업데이트 방식", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
@@ -490,6 +571,25 @@ class SettingsManagementFrame(ctk.CTkFrame):
         if hasattr(self, 'backup_path_entry'):
             self.backup_path_entry.delete(0, 'end')
             self.backup_path_entry.insert(0, backup_path)
+
+        # 공유 DB 동기화 설정 불러오기
+        try:
+            sync_mode = config.get('Sync', 'mode', fallback='badge')
+            if hasattr(self, 'sync_mode_segmented'):
+                self.sync_mode_segmented.set("조용한 배지 알림 (권장)" if sync_mode != 'disabled' else "알림 끄기 (수동)")
+            
+            sync_interval_sec = config.getint('Sync', 'check_interval_sec', fallback=60)
+            if hasattr(self, 'sync_interval_menu'):
+                if sync_interval_sec <= 60:
+                    self.sync_interval_menu.set("1분마다 (권장)")
+                elif sync_interval_sec <= 180:
+                    self.sync_interval_menu.set("3분마다")
+                elif sync_interval_sec <= 300:
+                    self.sync_interval_menu.set("5분마다")
+                else:
+                    self.sync_interval_menu.set("10분마다")
+        except Exception as sync_err:
+            print(f"[Settings] 동기화 설정 로딩 실패: {sync_err}")
 
         # 업데이트 모드 불러오기
         try:
