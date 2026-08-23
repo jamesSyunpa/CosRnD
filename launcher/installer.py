@@ -5,11 +5,19 @@ Handles first-time installation of the application.
 """
 
 import os
+import sys
 import shutil
 import logging
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 import psutil
+
+if sys.platform.startswith('win'):
+    import winreg
+    import ctypes
+    from ctypes import wintypes
 
 
 logger = logging.getLogger(__name__)
