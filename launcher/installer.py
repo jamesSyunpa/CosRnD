@@ -180,6 +180,16 @@ class Installer:
                     zip_ref.extract(member, bin_dir)
                     logger.info(f"Extracted: {member}")
             
+            # 언인스톨러 전용 바이너리 (Uninstall.exe) 복사 배치
+            try:
+                current_exe = Path(sys.executable)
+                if current_exe.exists() and current_exe.suffix.lower() == '.exe':
+                    dest_uninstaller = bin_dir / "Uninstall.exe"
+                    shutil.copy2(current_exe, dest_uninstaller)
+                    logger.info(f"Copied uninstaller binary to {dest_uninstaller}")
+            except Exception as copy_uninst_err:
+                logger.warning(f"Failed to copy uninstaller executable: {copy_uninst_err}")
+            
             if progress_callback:
                 progress_callback(total_items, total_items, "완료")
             
@@ -549,8 +559,10 @@ $Shortcut.Save()
             ]
             
             install_dir = target_exe.parent.parent
-            uninst_candidates = list(target_exe.parent.glob("Setup_*.exe"))
-            uninst_exe = uninst_candidates[0] if uninst_candidates else target_exe
+            uninst_exe = target_exe.parent / "Uninstall.exe"
+            if not uninst_exe.exists():
+                uninst_candidates = list(target_exe.parent.glob("Setup_*.exe"))
+                uninst_exe = uninst_candidates[0] if uninst_candidates else target_exe
             uninstall_string = f'"{uninst_exe}" --uninstall'
             
             app_version_str = "65.0.3"

@@ -152,7 +152,7 @@ def read_version() -> str:
     except Exception:
         pass
     
-    return "v1.0.0"
+    return "v65.0.3"
 
 
 def main():

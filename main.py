@@ -27,6 +27,24 @@ def unblock_self():
 # 프로그램 구동 즉시 차단 해제 실행
 unblock_self()
 
+# 만약 --uninstall 인자가 전달된 경우 메인 앱 대신 언인스톨러 즉시 실행
+if any(arg.lower() in ['--uninstall', '/uninstall', '-uninstall', 'uninstall'] for arg in sys.argv[1:]):
+    try:
+        from launcher.config_manager import ConfigManager
+        from launcher.launcher_gui import run_uninstaller_gui
+        cfg = ConfigManager()
+        run_uninstaller_gui(cfg, "65.0.3")
+    except Exception as uninst_err:
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("제거 오류", f"프로그램 제거 중 오류가 발생했습니다: {uninst_err}")
+        except Exception:
+            pass
+    sys.exit(0)
+
 
 # 로그인/회원가입 시 표시할 법적고지 및 일반사항 전문
 LEGAL_NOTICE_FULL_TEXT = '''
