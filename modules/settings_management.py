@@ -222,25 +222,39 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self.language_menu.grid(row=1, column=1, padx=10, pady=10, sticky="w")
 
         # --- 경로 설정 ---
+        # --- 경로 설정 ---
         path_frame = ctk.CTkFrame(scrollable_frame)
         path_frame.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="ew")
         path_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(path_frame, text="공유 DB 경로").grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        ctk.CTkLabel(path_frame, text="공유 DB 경로", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
         self.db_path_entry = ctk.CTkEntry(path_frame)
         self.db_path_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
-        db_browse_button = ctk.CTkButton(path_frame, text="찾아보기", command=self.browse_db_path)
+        db_browse_button = ctk.CTkButton(path_frame, text="찾아보기", width=90, command=self.browse_db_path)
         db_browse_button.grid(row=0, column=2, padx=10, pady=10)
 
-        ctk.CTkLabel(path_frame, text="엑셀 저장 경로").grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        ctk.CTkLabel(path_frame, text="엑셀 저장 경로", font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, padx=10, pady=10, sticky="w")
         self.excel_path_entry = ctk.CTkEntry(path_frame)
         self.excel_path_entry.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
-        excel_browse_button = ctk.CTkButton(path_frame, text="찾아보기", command=self.browse_excel_path)
+        excel_browse_button = ctk.CTkButton(path_frame, text="찾아보기", width=90, command=self.browse_excel_path)
         excel_browse_button.grid(row=1, column=2, padx=10, pady=10)
 
+        ctk.CTkLabel(path_frame, text="백업 저장 경로", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, padx=10, pady=10, sticky="w")
+        self.backup_path_entry = ctk.CTkEntry(path_frame)
+        self.backup_path_entry.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
+        backup_browse_button = ctk.CTkButton(path_frame, text="찾아보기", width=90, command=self.browse_backup_path)
+        backup_browse_button.grid(row=2, column=2, padx=10, pady=10)
+
         # 경로 저장 버튼
-        save_button = ctk.CTkButton(path_frame, text="경로 저장 및 재시작", command=self.save_paths)
-        save_button.grid(row=2, column=1, columnspan=2, pady=(0, 10), padx=10, sticky="e")
+        save_button = ctk.CTkButton(
+            path_frame, 
+            text="💾 경로 설정 저장 및 재시작", 
+            fg_color="#0284C7",
+            hover_color="#0369A1",
+            font=ctk.CTkFont(weight="bold"),
+            command=self.save_paths
+        )
+        save_button.grid(row=3, column=1, columnspan=2, pady=(5, 12), padx=10, sticky="e")
 
         # --- 소프트웨어 업데이트 설정 ---
         update_cfg_frame = ctk.CTkFrame(scrollable_frame)
@@ -280,9 +294,8 @@ class SettingsManagementFrame(ctk.CTkFrame):
         )
         self.check_update_btn.pack(side="left")
 
-        # --- DB 백업/복원 기능 ---
-        if self.current_user.is_admin:
-            self.setup_db_backup_restore_section(scrollable_frame)
+        # --- DB 백업 / 복원 & 데이터 관리 섹션 ---
+        self.setup_db_backup_restore_section(scrollable_frame)
 
         # --- 관리자 전용 기능 ---
         if self.current_user.is_admin:
@@ -291,22 +304,75 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self.load_settings()
 
     def setup_db_backup_restore_section(self, parent_frame):
-        """DB 경로 검증 기능 섹션을 설정합니다."""
-        validation_frame = ctk.CTkFrame(parent_frame)
-        validation_frame.grid(row=3, column=0, padx=20, pady=(20, 10), sticky="ew")
-        validation_frame.grid_columnconfigure(0, weight=1)
+        """데이터 백업, 전체 불러오기(복원), 검증 섹션을 설정합니다."""
+        backup_section = ctk.CTkFrame(parent_frame)
+        backup_section.grid(row=3, column=0, padx=20, pady=(0, 20), sticky="ew")
+        backup_section.grid_columnconfigure((0, 1, 2), weight=1)
         
-        ctk.CTkLabel(validation_frame, text="데이터베이스 검증", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, pady=(10, 5))
+        header_box = ctk.CTkFrame(backup_section, fg_color="transparent")
+        header_box.grid(row=0, column=0, columnspan=3, padx=15, pady=(12, 6), sticky="ew")
         
-        # 경로 검증 버튼
-        validate_button = ctk.CTkButton(
-            validation_frame, 
-            text="🔍 DB 경로 및 파일 검증", 
-            command=self.validate_current_db_path,
-            fg_color="#1565C0",
-            hover_color="#1976D2"
+        ctk.CTkLabel(
+            header_box, 
+            text="🛡️ 데이터베이스 백업 및 복원 (전체 불러오기)", 
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(side="left")
+        
+        ctk.CTkLabel(
+            backup_section,
+            text="현재 모든 연구 데이터(처방, 원료, 거래처, 사용자 등)를 안전하게 백업하거나 백업 파일에서 복원합니다.",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "gray70")
+        ).grid(row=1, column=0, columnspan=3, padx=15, pady=(0, 10), sticky="w")
+        
+        # 1. 지금 백업하기 버튼
+        backup_now_btn = ctk.CTkButton(
+            backup_section,
+            text="💾 지금 데이터 백업하기",
+            height=34,
+            font=ctk.CTkFont(weight="bold"),
+            fg_color="#059669",
+            hover_color="#047857",
+            command=self.backup_current_db_now
         )
-        validate_button.grid(row=1, column=0, padx=5, pady=10, sticky="ew")
+        backup_now_btn.grid(row=2, column=0, padx=(15, 6), pady=(0, 12), sticky="ew")
+
+        # 2. 백업 파일에서 데이터 모두 불러오기 (복원) 버튼
+        restore_btn = ctk.CTkButton(
+            backup_section,
+            text="📥 백업 데이터 모두 불러오기",
+            height=34,
+            font=ctk.CTkFont(weight="bold"),
+            fg_color="#D97706",
+            hover_color="#B45309",
+            command=self.restore_db_from_backup
+        )
+        restore_btn.grid(row=2, column=1, padx=6, pady=(0, 12), sticky="ew")
+
+        # 3. 백업 폴더 열기 & DB 검증 버튼 박스
+        sub_btn_box = ctk.CTkFrame(backup_section, fg_color="transparent")
+        sub_btn_box.grid(row=2, column=2, padx=(6, 15), pady=(0, 12), sticky="ew")
+        sub_btn_box.grid_columnconfigure((0, 1), weight=1)
+
+        open_folder_btn = ctk.CTkButton(
+            sub_btn_box,
+            text="📂 백업 폴더 열기",
+            height=34,
+            fg_color="gray50",
+            hover_color="gray40",
+            command=self.open_backup_folder
+        )
+        open_folder_btn.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+
+        validate_button = ctk.CTkButton(
+            sub_btn_box,
+            text="🔍 DB 검증",
+            height=34,
+            fg_color="#1565C0",
+            hover_color="#1976D2",
+            command=self.validate_current_db_path
+        )
+        validate_button.grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
     def setup_admin_only_features(self, parent_frame):
         # --- 엑셀 폼 내보내기 ---
@@ -400,14 +466,30 @@ class SettingsManagementFrame(ctk.CTkFrame):
         language = config.get('Appearance', 'language', fallback='korean').capitalize()
         self.language_menu.set(language)
 
-        db_path = config.get('Paths', 'shared_db_path', fallback="미설정")
-        excel_path = config.get('Paths', 'excel_dir', fallback="미설정")
+        appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+        default_db = os.path.join(appdata_root, 'CosRQD', 'Data').replace('\\', '/')
+        default_excel = os.path.join(os.path.expanduser('~'), 'Documents', 'CosRQD', 'ExcelData').replace('\\', '/')
+        default_backup = os.path.join(appdata_root, 'CosRQD', 'backup').replace('\\', '/')
+
+        db_path = config.get('Paths', 'shared_db_path', fallback=default_db)
+        excel_path = config.get('Paths', 'excel_dir', fallback=default_excel)
+        backup_path = config.get('Paths', 'backup_dir', fallback=default_backup)
         
+        # 만약 기존 설정이 CosRnD로 되어 있으면 표시 시 CosRQD로 기본 정돈
+        if 'CosRnD' in db_path and not os.path.exists(db_path):
+            db_path = db_path.replace('CosRnD', 'CosRQD')
+        if 'CosRnD' in excel_path and not os.path.exists(excel_path):
+            excel_path = excel_path.replace('CosRnD', 'CosRQD')
+
         self.db_path_entry.delete(0, 'end')
         self.db_path_entry.insert(0, db_path)
         
         self.excel_path_entry.delete(0, 'end')
         self.excel_path_entry.insert(0, excel_path)
+
+        if hasattr(self, 'backup_path_entry'):
+            self.backup_path_entry.delete(0, 'end')
+            self.backup_path_entry.insert(0, backup_path)
 
         # 업데이트 모드 불러오기
         try:
@@ -430,6 +512,156 @@ class SettingsManagementFrame(ctk.CTkFrame):
         if path:
             self.excel_path_entry.delete(0, 'end')
             self.excel_path_entry.insert(0, path)
+
+    def browse_backup_path(self):
+        path = filedialog.askdirectory(title="백업 저장 폴더 선택")
+        if path:
+            self.backup_path_entry.delete(0, 'end')
+            self.backup_path_entry.insert(0, path)
+
+    def open_backup_folder(self):
+        """백업 폴더를 탐색기에서 엽니다."""
+        backup_dir = self.backup_path_entry.get().strip() if hasattr(self, 'backup_path_entry') else ""
+        if not backup_dir or backup_dir == "미설정":
+            appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+            backup_dir = os.path.join(appdata_root, 'CosRQD', 'backup')
+        
+        os.makedirs(backup_dir, exist_ok=True)
+        try:
+            if sys.platform.startswith('win'):
+                os.startfile(os.path.normpath(backup_dir))
+            else:
+                subprocess.Popen(['open', backup_dir])
+        except Exception as e:
+            messagebox.showerror("오류", f"백업 폴더를 여는 중 오류 발생: {e}", parent=self)
+
+    def backup_current_db_now(self):
+        """현재 활성화된 DB 파일을 백업 폴더에 타임스탬프와 함께 즉시 백업합니다."""
+        try:
+            cur_db = getattr(db_manager, 'db_path', None)
+            if not cur_db or not os.path.exists(cur_db):
+                cur_db = db_manager.get_local_db_path()
+                
+            if not cur_db or not os.path.exists(cur_db):
+                messagebox.showerror("백업 실패", "현재 활성화된 데이터베이스 파일을 찾을 수 없습니다.", parent=self)
+                return
+
+            backup_dir = self.backup_path_entry.get().strip() if hasattr(self, 'backup_path_entry') else ""
+            if not backup_dir or backup_dir == "미설정":
+                appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+                backup_dir = os.path.join(appdata_root, 'CosRQD', 'backup')
+            
+            os.makedirs(backup_dir, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_filename = f"cosmetic_backup_{timestamp}.db"
+            backup_filepath = os.path.join(backup_dir, backup_filename)
+
+            # SQLite WAL 체크포인트 커밋 후 안전 복사
+            try:
+                if db_manager.engine:
+                    with db_manager.engine.connect() as conn:
+                        conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+            except Exception:
+                pass
+
+            shutil.copy2(cur_db, backup_filepath)
+            
+            # config.ini에 backup_dir 갱신
+            self._save_config('Paths', 'backup_dir', backup_dir)
+
+            res = messagebox.askyesno(
+                "데이터 백업 성공",
+                f"데이터베이스 백업이 안전하게 완료되었습니다!\n\n"
+                f"📁 백업 파일명: {backup_filename}\n"
+                f"📂 저장 위치: {backup_dir}\n\n"
+                f"지금 백업 폴더를 확인하시겠습니까?",
+                parent=self
+            )
+            if res:
+                self.open_backup_folder()
+        except Exception as e:
+            messagebox.showerror("백업 오류", f"데이터 백업 도중 오류가 발생했습니다:\n{e}", parent=self)
+
+    def restore_db_from_backup(self):
+        """백업 DB 파일을 선택하여 현재 데이터베이스로 전체 복원(모두 불러오기)합니다."""
+        try:
+            backup_dir = self.backup_path_entry.get().strip() if hasattr(self, 'backup_path_entry') else ""
+            if not backup_dir or not os.path.exists(backup_dir):
+                appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+                backup_dir = os.path.join(appdata_root, 'CosRQD', 'backup')
+                os.makedirs(backup_dir, exist_ok=True)
+
+            selected_file = filedialog.askopenfilename(
+                title="불러올 백업 데이터베이스 파일(.db) 선택",
+                initialdir=backup_dir,
+                filetypes=[("SQLite DB 파일", "*.db;*.sqlite;*.bak"), ("모든 파일", "*.*")],
+                parent=self
+            )
+
+            if not selected_file or not os.path.exists(selected_file):
+                return
+
+            # 복원 확인 경고창
+            confirm = messagebox.askyesno(
+                "데이터 복원 (전체 불러오기) 확인",
+                f"선택한 백업 파일에서 모든 연구 데이터를 복원하시겠습니까?\n\n"
+                f"선택된 파일: {os.path.basename(selected_file)}\n\n"
+                f"⚠️ 주의: 현재 데이터는 복원 직전 세이프티 백업 파일로 자동 보존된 후 교체됩니다.\n"
+                f"복원 완료 후 프로그램이 자동으로 재시작됩니다.",
+                parent=self
+            )
+            if not confirm:
+                return
+
+            cur_db = getattr(db_manager, 'db_path', None)
+            if not cur_db:
+                cur_db = db_manager.get_local_db_path()
+
+            # 1. 복원 전 현재 DB 세이프티 백업
+            if os.path.exists(cur_db):
+                safety_backup = f"{cur_db}.safety_backup_{int(datetime.now().timestamp())}.bak"
+                try:
+                    shutil.copy2(cur_db, safety_backup)
+                    print(f"[복원] 복원 전 안전 백업 완료: {safety_backup}")
+                except Exception as b_err:
+                    print(f"[복원] 안전 백업 실패(계속 진행): {b_err}")
+
+            # 2. DB 연결 해제 및 WAL/SHM 정리
+            try:
+                db_manager.cleanup_db_files()
+                if db_manager.engine:
+                    db_manager.engine.dispose()
+            except Exception:
+                pass
+
+            # 3. 백업 파일로 교체 복사
+            os.makedirs(os.path.dirname(cur_db), exist_ok=True)
+            shutil.copy2(selected_file, cur_db)
+
+            # 4. WAL, SHM 파일 삭제
+            for ext in ['-wal', '-shm']:
+                wal_f = cur_db + ext
+                if os.path.exists(wal_f):
+                    try:
+                        os.remove(wal_f)
+                    except Exception:
+                        pass
+
+            # 5. DB 재초기화
+            db_manager.db_path = cur_db
+            db_manager.init_db()
+
+            messagebox.showinfo(
+                "복원 완료",
+                "데이터베이스가 성공적으로 모두 복원되었습니다!\n\n"
+                "새로운 데이터를 반영하기 위해 프로그램을 재시작합니다.",
+                parent=self
+            )
+            if hasattr(self.app, 'restart_program'):
+                self.app.restart_program()
+        except Exception as e:
+            messagebox.showerror("복원 실패", f"데이터 복원(불러오기) 도중 오류가 발생했습니다:\n{e}", parent=self)
 
     def save_paths(self):
         print("[DEBUG] save_paths 호출됨")
@@ -515,11 +747,18 @@ class SettingsManagementFrame(ctk.CTkFrame):
             except Exception:
                 db_dir = os.path.dirname(new_db_path)
             
-            print(f"[DEBUG] 설정 저장 중: DB 경로={db_dir}, Excel 경로={new_excel_path}")
+            new_backup_path = self.backup_path_entry.get().strip() if hasattr(self, 'backup_path_entry') else ""
+            if not new_backup_path or new_backup_path == "미설정":
+                appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+                new_backup_path = os.path.join(appdata_root, 'CosRQD', 'backup')
+
+            print(f"[DEBUG] 설정 저장 중: DB 경로={db_dir}, Excel 경로={new_excel_path}, Backup 경로={new_backup_path}")
             
             # 설정 저장
             self._save_config('Paths', 'shared_db_path', db_dir)
+            self._save_config('Paths', 'database_dir', db_dir)
             self._save_config('Paths', 'excel_dir', new_excel_path)
+            self._save_config('Paths', 'backup_dir', new_backup_path)
             
             # DB 경로 변경 시 항상 재시작 권장 (안정성 보장)
             print(f"[DEBUG] DB 경로 변경 - 재시작 진행")

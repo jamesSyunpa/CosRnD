@@ -215,26 +215,33 @@ def create_fallback_icon(meipass_path: str | None) -> str | None:
             pass
         return None
 
-def get_persistent_config_path(app_dir_name: str = 'CosRnD') -> str:
+def get_persistent_config_path(app_dir_name: str = 'CosRQD') -> str:
     r"""사용자 AppData 폴더 내 config.ini 경로를 제공합니다.
     
-    - 기존 사용자가 있는 경우 기존 local config.ini 또는 AppData\RnD_플랫폼의 설정을 복사/이동하여 적용해 줍니다.
+    - 기존 사용자가 있는 경우 기존 local config.ini 또는 AppData\CosRnD / AppData\RnD_플랫폼의 설정을 복사/이동하여 적용해 줍니다.
     """
 
     try:
-        # 1. 새 AppData 경로 설정 (%APPDATA%\CosRnD\config.ini)
-        appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), app_dir_name)
+        # 1. 새 AppData 경로 설정 (%APPDATA%\CosRQD\config.ini)
+        appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+        appdata_dir = os.path.join(appdata_root, app_dir_name)
         os.makedirs(appdata_dir, exist_ok=True)
         target_config = os.path.join(appdata_dir, 'config.ini')
         
         # 2. 마이그레이션 로직: 기존 설정이 있고 새 경로에 없을 때 복사
-        # 후보 1: exe 옆의 config.ini (현재 local)
         local_config = os.path.join(application_path, 'config.ini')
-        # 후보 2: 이전 버전 AppData (\RnD_플랫폼\config.ini)
-        old_appdata_config = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'RnD_플랫폼', 'config.ini')
+        old_cosrnd_config = os.path.join(appdata_root, 'CosRnD', 'config.ini')
+        old_appdata_config = os.path.join(appdata_root, 'RnD_플랫폼', 'config.ini')
 
         if not os.path.exists(target_config):
-            if os.path.exists(local_config):
+            if os.path.exists(old_cosrnd_config):
+                try:
+                    import shutil
+                    shutil.copy2(old_cosrnd_config, target_config)
+                    print(f"[CONFIG] 기존 CosRnD config.ini를 CosRQD로 복사했습니다: {target_config}")
+                except Exception as copy_err:
+                    print(f"[CONFIG] 기존 CosRnD 복사 실패: {copy_err}")
+            elif os.path.exists(local_config):
                 try:
                     import shutil
                     shutil.copy2(local_config, target_config)
@@ -249,18 +256,19 @@ def get_persistent_config_path(app_dir_name: str = 'CosRnD') -> str:
                 except Exception as copy_err:
                     print(f"[CONFIG] 이전 AppData 복사 실패: {copy_err}")
 
-        # 3. 만약 여전히 존재하지 않으면 기본값으로 생성
+        # 3. 만약 여전히 존재하지 않거나 새 생성이 필요한 경우
         if not os.path.exists(target_config):
             try:
-                appdata_root = os.path.join(os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')), 'CosRnD')
-                default_db_dir = os.path.join(appdata_root, 'Data').replace('\\', '/')
-                doc_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'CosRnD')
+                default_db_dir = os.path.join(appdata_dir, 'Data').replace('\\', '/')
+                default_backup_dir = os.path.join(appdata_dir, 'backup').replace('\\', '/')
+                doc_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'CosRQD')
                 default_excel_dir = os.path.join(doc_dir, 'ExcelData').replace('\\', '/')
                 
                 default_content = f"""[Paths]
 excel_dir = {default_excel_dir}
 shared_db_path = {default_db_dir}
 database_dir = {default_db_dir}
+backup_dir = {default_backup_dir}
 
 [Database]
 initialized = False

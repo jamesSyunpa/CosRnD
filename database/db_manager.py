@@ -186,8 +186,9 @@ class DBManager:
             self.config_path = None
 
     def get_db_relative_path(self) -> str:
-        # 기본 fallback 경로는 AppData/CosRnD/Data 로 지정 (OneDrive 동기화 잠금 회피)
-        default_dir = os.path.join(os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')), 'CosRnD', 'Data')
+        # 기본 fallback 경로는 AppData/CosRQD/Data 로 지정 (OneDrive 동기화 잠금 회피)
+        appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+        default_dir = os.path.join(appdata_root, 'CosRQD', 'Data')
         
         print("설정 파일 경로:", self.config_path)
         if not self.config_path or not os.path.exists(self.config_path):
@@ -218,16 +219,22 @@ class DBManager:
         db_dir = self.get_db_relative_path()
         target_path = os.path.join(db_dir, "cosmetic.db")
         
-        # 이전 Documents 경로에서 AppData 경로로 자동 데이터베이스 이전(마이그레이션) 수행
+        # 이전 CosRnD 경로 또는 Documents 경로에서 AppData/CosRQD 경로로 자동 데이터베이스 이전(마이그레이션) 수행
         try:
-            old_db_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'CosRnD', 'Data')
-            old_db_path = os.path.join(old_db_dir, "cosmetic.db")
-            if os.path.exists(old_db_path) and not os.path.exists(target_path):
-                os.makedirs(db_dir, exist_ok=True)
-                shutil.copy2(old_db_path, target_path)
-                print(f"[마이그레이션] 기존 Documents DB({old_db_path})를 AppData 경로({target_path})로 복사 완료")
+            appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+            old_candidates = [
+                os.path.join(appdata_root, 'CosRnD', 'Data', 'cosmetic.db'),
+                os.path.join(os.path.expanduser('~'), 'Documents', 'CosRnD', 'Data', 'cosmetic.db'),
+                os.path.join(os.path.expanduser('~'), 'Documents', 'CosRQD', 'Data', 'cosmetic.db'),
+            ]
+            for old_path in old_candidates:
+                if os.path.exists(old_path) and not os.path.exists(target_path):
+                    os.makedirs(db_dir, exist_ok=True)
+                    shutil.copy2(old_path, target_path)
+                    print(f"[마이그레이션] 기존 DB({old_path})를 신규 CosRQD 경로({target_path})로 복사 완료")
+                    break
         except Exception as mig_err:
-            print(f"[경고] 기존 Documents DB 마이그레이션 실패: {mig_err}")
+            print(f"[경고] 기존 DB 마이그레이션 실패: {mig_err}")
             
         return target_path
 
