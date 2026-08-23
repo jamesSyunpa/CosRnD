@@ -4,8 +4,12 @@ Launcher GUI for CosRnD Application
 PyQt6-based GUI for installation wizard and update management.
 """
 
+import os
 import sys
+import shutil
 import logging
+import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 from PyQt6.QtWidgets import (
