@@ -763,6 +763,54 @@ class UninstallOptionsPage(QWidget):
         return self.radio_keep.isChecked()
 
 
+class UninstallCompletionPage(QWidget):
+    """Uninstallation completion page"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        
+        self.title_label = QLabel("제거 완료!")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        self.title_label.setFont(title_font)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.message_label = QLabel(
+            "CosRQD 프로그램이 컴퓨터에서 성공적으로 제거되었습니다.\n\n"
+            "'완료' 버튼을 클릭하여 프로그램을 종료하세요."
+        )
+        self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.message_label.setWordWrap(True)
+        
+        layout.addStretch()
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.message_label)
+        layout.addStretch()
+        
+        self.setLayout(layout)
+    
+    def set_success(self, success: bool, message: str):
+        """Set completion status"""
+        if success:
+            self.title_label.setText("제거 완료!")
+            self.message_label.setText(
+                f"{message}\n\n"
+                "'완료' 버튼을 클릭하여 프로그램을 종료하세요."
+            )
+        else:
+            self.title_label.setText("제거 실패")
+            self.message_label.setText(
+                f"제거 도중 오류가 발생했습니다:\n{message}\n\n"
+                "수동으로 폴더를 정리하거나 지원팀에 문의하세요."
+            )
+
+
 class UninstallationWizard(QMainWindow):
     """Dedicated wizard for application uninstallation (Reverse Install Wizard)"""
     
@@ -811,7 +859,7 @@ class UninstallationWizard(QMainWindow):
         except Exception:
             pass
             
-        self.completion_page = CompletionPage()
+        self.completion_page = UninstallCompletionPage()
         
         self.pages.addWidget(self.options_page)      # Index 0
         self.pages.addWidget(self.progress_page)     # Index 1
@@ -855,9 +903,10 @@ class UninstallationWizard(QMainWindow):
     def uninstall_finished(self, success: bool, message: str):
         self.completion_page.set_success(success, message)
         self.pages.setCurrentIndex(2)
-        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setVisible(False)  # 완료 화면에서는 취소 버튼 숨김
         self.action_btn.setText("완료")
-        self.action_btn.setStyleSheet("")
+        self.action_btn.setStyleSheet("background-color: #2E7D32; color: white; font-weight: bold;")
+        self.action_btn.setEnabled(True)
         self.action_btn.setEnabled(True)
 
 

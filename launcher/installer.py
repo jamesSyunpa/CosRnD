@@ -500,32 +500,20 @@ $Shortcut.Save()
             working_dir = target_exe.parent
             user_profile = Path(os.environ.get("USERPROFILE", ""))
             
-            # 1. 활성 바탕화면 경로 단 1곳만 선택 (OneDrive 연동 바탕화면 최우선, 없으면 일반 Desktop)
+            # 1. 윈도우 표준 사용자 바탕화면 경로 (CSIDL_DESKTOP)
             target_desktop = None
-            onedrive_candidates = [
-                user_profile / "OneDrive" / "바탕 화면",
-                user_profile / "OneDrive" / "Desktop",
-                user_profile / "OneDrive - Personal" / "바탕 화면",
-                user_profile / "OneDrive - Personal" / "Desktop",
-            ]
-            for cand in onedrive_candidates:
-                if cand.exists():
-                    target_desktop = cand
-                    break
+            if sys.platform.startswith('win'):
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+                    # CSIDL_DESKTOP = 0x0000
+                    ctypes.windll.shell32.SHGetFolderPathW(None, 0x0000, None, 0, buf)
+                    if buf.value and Path(buf.value).exists():
+                        target_desktop = Path(buf.value)
+                except Exception:
+                    pass
             
-            if not target_desktop:
-                # Windows Shell API(CSIDL_DESKTOP=0x0000)로 실제 유효한 바탕화면 확인
-                if sys.platform.startswith('win'):
-                    try:
-                        import ctypes
-                        from ctypes import wintypes
-                        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
-                        ctypes.windll.shell32.SHGetFolderPathW(None, 0x0000, None, 0, buf)
-                        if buf.value and Path(buf.value).exists():
-                            target_desktop = Path(buf.value)
-                    except Exception:
-                        pass
-                        
             if not target_desktop or not target_desktop.exists():
                 target_desktop = user_profile / "Desktop"
                 
