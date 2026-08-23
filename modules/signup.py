@@ -2,12 +2,15 @@
 import customtkinter as ctk
 import tkinter
 import os
+import sys
 import re
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 import bcrypt
 from database.db_manager import db_manager
 from database.models import User
 from utils import center_window_on_mouse_display
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class SignupWindow(ctk.CTkToplevel):
     def __init__(self, master=None, is_initial_setup=False, on_success=None):
@@ -56,11 +59,17 @@ class SignupWindow(ctk.CTkToplevel):
         db_conn_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray20"), corner_radius=8)
         db_conn_frame.pack(fill="x", padx=20, pady=(0, 10))
         
-        cur_db = getattr(db_manager, 'db_path', '기본 DB')
-        cur_db_display = os.path.basename(os.path.dirname(cur_db)) if cur_db else "기본"
+        cur_db = getattr(db_manager, 'db_path', None)
+        if cur_db:
+            cur_db_filename = os.path.basename(cur_db)
+            cur_db_display = os.path.basename(os.path.dirname(cur_db))
+        else:
+            cur_db_filename = "cosmetic.db"
+            cur_db_display = "기본 DB"
+            
         self.db_status_label = ctk.CTkLabel(
             db_conn_frame, 
-            text=f"📁 연동 DB: {os.path.basename(cur_db)} ({cur_db_display})",
+            text=f"📁 연동 DB: {cur_db_filename} ({cur_db_display})",
             font=ctk.CTkFont(size=11),
             text_color=("gray30", "gray80")
         )
@@ -118,7 +127,6 @@ class SignupWindow(ctk.CTkToplevel):
         
         # 관리자 존재 여부 확인
         if not self.is_initial_setup:
-            from database.db_manager import db_manager
             self.has_admin = db_manager.has_admin_users()
         else:
             self.has_admin = False
@@ -277,8 +285,9 @@ class SignupWindow(ctk.CTkToplevel):
 
                 # 라벨 텍스트 갱신
                 cur_db = getattr(db_manager, 'db_path', folder)
-                cur_db_display = os.path.basename(os.path.dirname(cur_db)) if cur_db else "지정폴더"
-                self.db_status_label.configure(text=f"📁 연동 DB: {os.path.basename(cur_db)} ({cur_db_display})")
+                cur_db_filename = os.path.basename(cur_db) if cur_db else "cosmetic.db"
+                cur_db_display = os.path.basename(os.path.dirname(cur_db)) if cur_db and os.path.dirname(cur_db) else "지정폴더"
+                self.db_status_label.configure(text=f"📁 연동 DB: {cur_db_filename} ({cur_db_display})")
                 
                 # 마스터(LoginWindow)의 메시지 라벨도 업데이트
                 if hasattr(self.master, 'show_message'):

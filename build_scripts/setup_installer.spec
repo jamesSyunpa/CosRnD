@@ -35,7 +35,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Setup_CosRQD_v65.0.2',
+    name='Setup_CosRQD_v65.0.3',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

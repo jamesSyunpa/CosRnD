@@ -1729,7 +1729,7 @@ class App(ctk.CTk):
             from utils.update_manager import UpdateManager
             current_app_ver = UpdateManager.get_current_version()
         except:
-            current_app_ver = "v65.0.2"
+            current_app_ver = "v65.0.3"
             
         self.title(f"R&D Management System ({current_app_ver})" if self.language == "english" else f"화장품 연구소 관리 시스템 ({current_app_ver})")
 
@@ -3842,7 +3842,7 @@ if __name__ == "__main__":
     # 윈도우 작업표시줄 아이콘 정합성을 위한 AppUserModelID 설정
     try:
         import ctypes
-        myappid = 'Luckfortma.CosRQD.MainApp.v65.0.2'
+        myappid = 'Luckfortma.CosRQD.MainApp.v65.0.3'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception as appid_err:
         print(f"[STARTUP] AppUserModelID 설정 실패: {appid_err}")

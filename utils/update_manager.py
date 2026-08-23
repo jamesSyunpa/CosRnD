@@ -56,7 +56,7 @@ class UpdateManager:
                         return ver
         except Exception as e:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
-        return "v65.0.2"
+        return "v65.0.3"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:

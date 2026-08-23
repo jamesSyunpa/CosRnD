@@ -553,7 +553,7 @@ $Shortcut.Save()
             uninst_exe = uninst_candidates[0] if uninst_candidates else target_exe
             uninstall_string = f'"{uninst_exe}" --uninstall'
             
-            app_version_str = "65.0.2"
+            app_version_str = "65.0.3"
             try:
                 ver_file = target_exe.parent / "VERSION"
                 if not ver_file.exists():
