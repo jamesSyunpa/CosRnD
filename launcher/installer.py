@@ -50,9 +50,9 @@ class Installer:
         Get default installation path.
         
         Returns:
-            Default installation directory (C:\CosRnD)
+            Default installation directory (C:\CosRQD)
         """
-        return Path("C:\\CosRnD")
+        return Path("C:\\CosRQD")
 
     
     @staticmethod
@@ -594,29 +594,61 @@ $Shortcut.Save()
     
     def uninstall(self, install_path: Path, keep_user_data: bool = True) -> bool:
         """
-        Uninstall the application (files, shortcuts across all directories, and Windows registry).
+        Uninstall the application (files across all candidate install directories, shortcuts, and Windows registry).
         """
         try:
             logger.info(f"Uninstalling from: {install_path}")
             
-            # 1. 실행 중인 프로세스 종료 시도
+            # 1. 실행 중인 프로세스 강제 종료 시도
             try:
                 import subprocess
-                subprocess.run(["taskkill", "/F", "/IM", "CosRQD.exe", "/T"], capture_output=True)
-                subprocess.run(["taskkill", "/F", "/IM", "main.exe", "/T"], capture_output=True)
+                for proc_name in ["CosRQD.exe", "CosRnD.exe", "main.exe", "화장품연구관리.exe", "Setup_CosRQD_v65.0.2.exe", "Setup_CosRQD_v65.0.1.exe"]:
+                    subprocess.run(["taskkill", "/F", "/IM", proc_name, "/T"], capture_output=True)
             except Exception:
                 pass
             
-            # 2. 설치 폴더 정리
-            if install_path.exists():
-                if keep_user_data:
-                    bin_dir = install_path / "bin"
+            # 2. 모든 설치 후보 디렉터리 탐색 및 bin 바이너리 폴더 전수 정리
+            candidate_dirs = [install_path]
+            for extra_path in [
+                Path("C:/CosRQD"),
+                Path("C:/CosRnD"),
+                Path(os.environ.get("LOCALAPPDATA", "")) / "CosRQD",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "CosRnD",
+                Path(os.environ.get("PROGRAMFILES", "")) / "CosRQD",
+                Path(os.environ.get("PROGRAMFILES(X86)", "")) / "CosRQD"
+            ]:
+                if extra_path not in candidate_dirs:
+                    candidate_dirs.append(extra_path)
+
+            for target_dir in candidate_dirs:
+                if target_dir.exists():
+                    bin_dir = target_dir / "bin"
                     if bin_dir.exists():
-                        shutil.rmtree(bin_dir, ignore_errors=True)
-                        logger.info("Removed application binaries")
-                else:
-                    shutil.rmtree(install_path, ignore_errors=True)
-                    logger.info("Removed entire installation directory")
+                        # 파일 읽기전용 속성 해제 및 강제 삭제
+                        try:
+                            for root, dirs, files in os.walk(str(bin_dir), topdown=False):
+                                for name in files:
+                                    f_path = os.path.join(root, name)
+                                    try:
+                                        os.chmod(f_path, 0o777)
+                                        os.remove(f_path)
+                                    except Exception:
+                                        pass
+                                for name in dirs:
+                                    d_path = os.path.join(root, name)
+                                    try:
+                                        os.rmdir(d_path)
+                                    except Exception:
+                                        pass
+                            shutil.rmtree(bin_dir, ignore_errors=True)
+                            logger.info(f"Removed application binaries from {bin_dir}")
+                        except Exception as rm_err:
+                            logger.warning(f"Failed to remove {bin_dir}: {rm_err}")
+                    
+                    # keep_user_data가 False이거나, 사용자 데이터 폴더가 없는 경우 폴더 자체 삭제
+                    if not keep_user_data:
+                        shutil.rmtree(target_dir, ignore_errors=True)
+                        logger.info(f"Removed entire installation directory {target_dir}")
             
             # 3. 모든 바탕화면 및 시작메뉴에서 바로가기 완벽 삭제
             try:
