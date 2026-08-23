@@ -672,55 +672,203 @@ class LauncherMainWindow(QMainWindow):
             QMessageBox.critical(self, "업데이트 실패", message)
 
 
+class UninstallWorker(QThread):
+    """Worker thread for background uninstallation"""
+    progress = pyqtSignal(int, int, str)
+    finished = pyqtSignal(bool, str)
+    
+    def __init__(self, installer: Installer, install_path: Path, keep_user_data: bool):
+        super().__init__()
+        self.installer = installer
+        self.install_path = install_path
+        self.keep_user_data = keep_user_data
+    
+    def run(self):
+        try:
+            self.progress.emit(10, 100, "실행 중인 프로세스 정리 중...")
+            import time
+            time.sleep(0.3)
+            
+            self.progress.emit(30, 100, "프로그램 바이너리 및 설치 폴더 삭제 중...")
+            success = self.installer.uninstall(self.install_path, keep_user_data=self.keep_user_data)
+            time.sleep(0.3)
+            
+            self.progress.emit(80, 100, "바탕화면 바로가기 및 레지스트리 정리 중...")
+            time.sleep(0.3)
+            
+            self.progress.emit(100, 100, "제거 작업 완료")
+            if success:
+                self.finished.emit(True, "CosRQD 프로그램이 컴퓨터에서 성공적으로 제거되었습니다.")
+            else:
+                self.finished.emit(False, "일부 파일을 제거하는 도중 오류가 발생했습니다.")
+        except Exception as e:
+            self.finished.emit(False, f"제거 중 오류 발생: {e}")
+
+
+class UninstallOptionsPage(QWidget):
+    """Uninstallation option selection page"""
+    
+    def __init__(self, install_path: Path, version: str, parent=None):
+        super().__init__(parent)
+        self.install_path = install_path
+        self.version = version
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        
+        # Title
+        title = QLabel("CosRQD 제거 마법사")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        
+        # Description
+        desc = QLabel(
+            f"컴퓨터에서 CosRQD_v{self.version} (화장품연구개발 플랫폼)을(를) 제거합니다.\n"
+            f"설치 위치: {self.install_path}\n\n"
+            "제거 방식을 선택해 주세요:"
+        )
+        desc.setWordWrap(True)
+        
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup, QGroupBox
+        
+        self.group_box = QGroupBox("제거 옵션 선택")
+        box_layout = QVBoxLayout()
+        box_layout.setSpacing(12)
+        
+        self.radio_keep = QRadioButton("기본 제거 (권장)\n  • 프로그램 실행 파일, 바로가기, 레지스트리만 제거합니다.\n  • 사용자가 작성한 연구 데이터 및 백업 파일은 안전하게 보존됩니다.")
+        self.radio_keep.setChecked(True)
+        
+        self.radio_full = QRadioButton("완전 제거 (모든 파일 및 폴더 영구 삭제)\n  • 프로그램 실행 파일, 바로가기, 레지스트리뿐만 아니라\n  • 백업(backup), 로그(logs), 설치 폴더 전체를 컴퓨터에서 흔적 없이 100% 삭제합니다.")
+        
+        box_layout.addWidget(self.radio_keep)
+        box_layout.addWidget(self.radio_full)
+        self.group_box.setLayout(box_layout)
+        
+        layout.addWidget(title)
+        layout.addWidget(desc)
+        layout.addWidget(self.group_box)
+        layout.addStretch()
+        
+        self.setLayout(layout)
+    
+    def should_keep_user_data(self) -> bool:
+        return self.radio_keep.isChecked()
+
+
+class UninstallationWizard(QMainWindow):
+    """Dedicated wizard for application uninstallation (Reverse Install Wizard)"""
+    
+    def __init__(self, config_manager: ConfigManager, version: str, parent=None):
+        super().__init__(parent)
+        self.config_manager = config_manager
+        self.version = version
+        self.installer = Installer()
+        
+        # 설치 경로 탐색
+        self.install_path = None
+        if config_manager.exists():
+            self.install_path = config_manager.get_install_path()
+        if not self.install_path or not self.install_path.exists():
+            for cand in [Path("C:/CosRQD"), Path("C:/CosRnD"), Path(os.environ.get("LOCALAPPDATA", "")) / "CosRQD"]:
+                if cand.exists():
+                    self.install_path = cand
+                    break
+        if not self.install_path:
+            self.install_path = Path("C:/CosRQD")
+            
+        self.init_ui()
+    
+    def init_ui(self):
+        self.setWindowTitle("CosRQD 제거 마법사")
+        self.setMinimumSize(580, 420)
+        self.resize(580, 420)
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Pages
+        self.pages = QStackedWidget()
+        
+        self.options_page = UninstallOptionsPage(self.install_path, self.version)
+        self.progress_page = InstallationProgressPage()
+        # 프로그레스 페이지 타이틀 커스텀
+        try:
+            for child in self.progress_page.findChildren(QLabel):
+                if "설치 중" in child.text():
+                    child.setText("CosRQD 제거 중")
+                    break
+        except Exception:
+            pass
+            
+        self.completion_page = CompletionPage()
+        
+        self.pages.addWidget(self.options_page)      # Index 0
+        self.pages.addWidget(self.progress_page)     # Index 1
+        self.pages.addWidget(self.completion_page)   # Index 2
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.cancel_btn = QPushButton("취소")
+        self.cancel_btn.clicked.connect(self.close)
+        
+        self.action_btn = QPushButton("제거 시작 >")
+        self.action_btn.setStyleSheet("background-color: #D32F2F; color: white; font-weight: bold;")
+        self.action_btn.clicked.connect(self.handle_action)
+        
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.action_btn)
+        
+        layout.addWidget(self.pages)
+        layout.addLayout(button_layout)
+        
+        central_widget.setLayout(layout)
+    
+    def handle_action(self):
+        current = self.pages.currentIndex()
+        if current == 0:  # 제거 시작
+            keep_data = self.options_page.should_keep_user_data()
+            self.pages.setCurrentIndex(1)
+            self.cancel_btn.setEnabled(False)
+            self.action_btn.setEnabled(False)
+            
+            # Start worker
+            self.worker = UninstallWorker(self.installer, self.install_path, keep_data)
+            self.worker.progress.connect(self.progress_page.update_progress)
+            self.worker.finished.connect(self.uninstall_finished)
+            self.worker.start()
+        elif current == 2:  # 완료 후 종료
+            self.close()
+    
+    def uninstall_finished(self, success: bool, message: str):
+        self.completion_page.set_success(success, message)
+        self.pages.setCurrentIndex(2)
+        self.cancel_btn.setEnabled(False)
+        self.action_btn.setText("완료")
+        self.action_btn.setStyleSheet("")
+        self.action_btn.setEnabled(True)
+
+
 def run_uninstaller_gui(config_manager: ConfigManager, version: str):
     """
-    Run dedicated uninstaller confirmation and removal dialog.
+    Run dedicated reverse uninstallation wizard.
     """
-    import os
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)
     app.setApplicationName("CosRQD 제거")
     
-    install_path = None
-    if config_manager.exists():
-        install_path = config_manager.get_install_path()
-    if not install_path:
-        default_local = Path(os.environ.get("LOCALAPPDATA", "")) / "CosRQD"
-        if default_local.exists():
-            install_path = default_local
-            
-    if not install_path or not install_path.exists():
-        QMessageBox.information(
-            None,
-            "제거 완료",
-            "설치된 CosRQD 프로그램을 찾을 수 없거나 이미 제거되었습니다."
-        )
-        return
-        
-    reply = QMessageBox.question(
-        None,
-        "CosRQD 프로그램 제거",
-        f"CosRQD_v{version} (화장품연구개발 플랫폼) 및 관련 실행 파일을\n컴퓨터에서 완전히 제거하시겠습니까?\n\n(참고: 사용자가 작성한 연구 데이터 및 백업 파일은 안전하게 보존됩니다.)",
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.No
-    )
-    
-    if reply == QMessageBox.StandardButton.Yes:
-        installer = Installer()
-        success = installer.uninstall(install_path, keep_user_data=True)
-        if success:
-            QMessageBox.information(
-                None,
-                "제거 완료",
-                "CosRQD 프로그램이 컴퓨터에서 성공적으로 제거되었습니다."
-            )
-        else:
-            QMessageBox.warning(
-                None,
-                "제거 오류",
-                "일부 파일을 제거하는 도중 오류가 발생했습니다.\n실행 중인 프로그램을 종료한 후 다시 시도해 주세요."
-            )
+    wizard = UninstallationWizard(config_manager, version)
+    wizard.show()
+    sys.exit(app.exec())
 
 
 def run_launcher_gui(config_manager: ConfigManager, version: str):
