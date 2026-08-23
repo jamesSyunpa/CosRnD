@@ -248,18 +248,39 @@ class UpdateManager:
                         if not tag.startswith('v') and re.match(r'^\d+', tag):
                             tag = 'v' + tag
                         
-                        # 첨부파일 다운로드 링크 찾기
+                        # 첨부파일 다운로드 링크 찾기 (1순위: _Update.zip, 2순위: .zip, 3순위: Setup_.exe)
                         download_url = None
                         file_name = None
                         file_size = 0
                         assets = data.get("assets", [])
+                        
+                        # 1순위: 자동 업데이트용 패키지 (_Update.zip)
                         for ast in assets:
                             aname = ast.get("name", "")
-                            if aname.endswith((".zip", ".exe")):
+                            if "update" in aname.lower() and aname.endswith(".zip"):
                                 download_url = ast.get("browser_download_url")
                                 file_name = aname
                                 file_size = ast.get("size", 0)
-                                if "patch" in aname.lower() or "setup" in aname.lower():
+                                break
+                        
+                        # 2순위: 일반 ZIP 파일 (분할파일 .001 등 제외)
+                        if not download_url:
+                            for ast in assets:
+                                aname = ast.get("name", "")
+                                if aname.endswith(".zip") and not re.search(r'\.\d{3}$', aname):
+                                    download_url = ast.get("browser_download_url")
+                                    file_name = aname
+                                    file_size = ast.get("size", 0)
+                                    break
+                                    
+                        # 3순위: 단독 실행 인스톨러 (Setup.exe)
+                        if not download_url:
+                            for ast in assets:
+                                aname = ast.get("name", "")
+                                if aname.endswith(".exe"):
+                                    download_url = ast.get("browser_download_url")
+                                    file_name = aname
+                                    file_size = ast.get("size", 0)
                                     break
 
                         rel_info = {
@@ -270,6 +291,7 @@ class UpdateManager:
                             "download_url": download_url,
                             "file_name": file_name,
                             "file_size": file_size,
+                            "tag": tag,
                             "source": "github"
                         }
                         return (True, tag, rel_info)
@@ -498,61 +520,91 @@ class DownloadProgressDialog(ctk.CTkToplevel):
         except:
             pass
 
-    def _apply_update(self, zip_path):
+    def _apply_update(self, downloaded_file):
         # 1. DB 백업
         bk_path = UpdateManager.backup_database_before_update()
         
-        # 2. 압축 해제 및 덮어쓰기
-        self.status_lbl.configure(text="데이터 백업 완료 및 새 버전 교체 중...")
+        self.status_lbl.configure(text="데이터 백업 완료 및 새 버전 교체 준비 중...")
+        
+        # 2. 바탕화면 및 시작메뉴 바로가기 최신화 (사전 갱신)
         try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                zf.extractall(PROJECT_ROOT)
-            
-            # VERSION 파일 갱신
-            with open(os.path.join(PROJECT_ROOT, "VERSION"), "w", encoding="utf-8") as f:
-                f.write(self.latest_ver)
-
-            # 3. 바탕화면 및 시작메뉴 바로가기 최신화 (구버전 정리 및 최신 버전명 반영)
             update_desktop_shortcuts(self.latest_ver)
-        except Exception as ex:
-            print(f"[Update] 압축 해제 및 바로가기 갱신 오류: {ex}")
+        except Exception:
+            pass
 
+        # 3. 파일 형태에 따른 안전 교체 스크립트 생성 및 실행
+        is_zip = downloaded_file.lower().endswith(".zip")
+        temp_extract_dir = os.path.join(PROJECT_ROOT, "temp", "update_extracted")
+        
+        if is_zip:
+            try:
+                if os.path.exists(temp_extract_dir):
+                    shutil.rmtree(temp_extract_dir, ignore_errors=True)
+                os.makedirs(temp_extract_dir, exist_ok=True)
+                with zipfile.ZipFile(downloaded_file, 'r') as zf:
+                    zf.extractall(temp_extract_dir)
+            except Exception as ex:
+                print(f"[Update] 압축 해제 오류: {ex}")
+
+        # 사용자 완료 알림
         messagebox.showinfo(
-            "업데이트 완료",
-            f"✨ 최신 버전({self.latest_ver})으로 성공적으로 업데이트되었습니다!\n\n"
-            f"• 기존 연구 데이터가 완벽하게 보존되었습니다.\n"
+            "업데이트 준비 완료",
+            f"✨ 최신 버전({self.latest_ver}) 다운로드가 완료되었습니다!\n\n"
+            f"• 기존 연구 데이터가 완벽하게 안전 보존되었습니다.\n"
             f"• 바탕화면 바로가기가 최신 버전({self.latest_ver})으로 갱신되었습니다.\n"
-            f"• 확인을 누르면 프로그램이 새로 재실행됩니다.",
+            f"• 확인을 누르면 프로그램이 자동으로 교체 설치 및 재실행됩니다.",
             parent=self
         )
 
-        # 프로그램 VBS 1.2초 지연 독립 안전 재실행 (임시 폴더 충돌 완전 원천 차단)
+        # 4. 독립 배치 파일 생성 (부모 종료 대기 -> 파일 락 해제 후 덮어쓰기 -> 깨끗한 새 프로세스 실행)
         try:
-            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.join(PROJECT_ROOT, "main.py")
+            bat_file = os.path.join(tempfile.gettempdir(), f"cosrqd_patch_{int(time.time())}.bat")
+            exe_target = sys.executable if getattr(sys, 'frozen', False) else os.path.join(PROJECT_ROOT, "main.py")
+            app_dir = PROJECT_ROOT
+            
+            if is_zip:
+                bat_content = f'''@echo off
+chcp 65001 > NUL
+timeout /t 2 /nobreak > NUL
+xcopy /s /e /y /q "{temp_extract_dir}\\*" "{app_dir}\\"
+set _MEIPASS=
+set _MEIPASS2=
+set PYTHONPATH=
+set PYTHONHOME=
+set PYINSTALLER_STRICT_UNLOAD_MODE=
+start "" "{exe_target}"
+rd /s /q "{temp_extract_dir}" > NUL 2>&1
+del "{downloaded_file}" > NUL 2>&1
+(goto) 2>nul & del "%~f0"
+'''
+            else:
+                # Setup.exe 단독 실행파일인 경우
+                bat_content = f'''@echo off
+timeout /t 1 /nobreak > NUL
+set _MEIPASS=
+set _MEIPASS2=
+set PYTHONPATH=
+set PYTHONHOME=
+start "" "{downloaded_file}"
+(goto) 2>nul & del "%~f0"
+'''
+
+            with open(bat_file, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+            # OS 레벨 환경변수 정화
             if sys.platform.startswith('win'):
                 import ctypes
                 for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME']:
                     ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
-                    if k in os.environ:
-                        del os.environ[k]
-                
-                vbs_file = os.path.join(tempfile.gettempdir(), "cosrqd_safe_update_restart.vbs")
-                escaped_exe = str(exe_path).replace('"', '""')
-                if getattr(sys, 'frozen', False):
-                    run_target = f'""{escaped_exe}""'
-                else:
-                    py_exe = sys.executable.replace('"', '""')
-                    run_target = f'""{py_exe}"" ""{escaped_exe}""'
-                
-                with open(vbs_file, "w", encoding="utf-8") as f:
-                    f.write(f'WScript.Sleep 1200\nCreateObject("WScript.Shell").Run "{run_target}", 1, False\n')
-                
-                subprocess.Popen(["wscript.exe", vbs_file], close_fds=True)
-            else:
-                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path), env=get_clean_subproc_env())
-        except Exception as e:
-            print(f"[Update] 재실행 실패: {e}")
 
+            # 배치 파일 무창 백그라운드 실행
+            flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(f'cmd.exe /c "{bat_file}"', shell=True, creationflags=flags)
+        except Exception as e:
+            print(f"[Update] 패치 배치 실행 실패: {e}")
+
+        # 5. 현재 부모 프로세스 즉시 안전 종료
         try:
             self.master.winfo_toplevel().destroy()
         except:
