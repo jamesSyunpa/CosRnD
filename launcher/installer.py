@@ -344,20 +344,86 @@ class Installer:
             "update_server": update_server
         }
         
+    def _get_all_shortcut_dirs(self) -> list:
+        """Windows API, 레지스트리, 환경변수를 모두 조회하여 모든 바탕화면 및 시작메뉴 경로 목록을 반환"""
+        dirs = set()
+        
+        # 1. Windows Shell API (SHGetFolderPathW)
+        if sys.platform.startswith('win'):
+            try:
+                import ctypes
+                from ctypes import wintypes
+                for csidl in [0x0000, 0x0002, 0x0019, 0x0017]:  # Desktop, Programs, Common Desktop, Common Programs
+                    buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+                    ctypes.windll.shell32.SHGetFolderPathW(None, csidl, None, 0, buf)
+                    if buf.value:
+                        dirs.add(Path(buf.value))
+            except Exception:
+                pass
+
+            # 2. 레지스트리 User Shell Folders
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                    for val_name in ["Desktop", "Programs", "Common Desktop", "Common Programs"]:
+                        try:
+                            val, _ = winreg.QueryValueEx(k, val_name)
+                            expanded = os.path.expandvars(val)
+                            if expanded:
+                                dirs.add(Path(expanded))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # 3. 환경변수 기반 기본 및 OneDrive 경로
+        user_prof = os.environ.get("USERPROFILE", "")
+        if user_prof:
+            dirs.add(Path(user_prof) / "Desktop")
+            dirs.add(Path(user_prof) / "OneDrive" / "Desktop")
+            dirs.add(Path(user_prof) / "OneDrive" / "바탕 화면")
+            dirs.add(Path(user_prof) / "OneDrive - 개인" / "Desktop")
+            dirs.add(Path(user_prof) / "OneDrive - 개인" / "바탕 화면")
+            
+        app_data = os.environ.get("APPDATA", "")
+        if app_data:
+            dirs.add(Path(app_data) / "Microsoft" / "Windows" / "Start Menu" / "Programs")
+            
+        public_dir = os.environ.get("PUBLIC", "")
+        if public_dir:
+            dirs.add(Path(public_dir) / "Desktop")
+            
+        prog_data = os.environ.get("PROGRAMDATA", "")
+        if prog_data:
+            dirs.add(Path(prog_data) / "Microsoft" / "Windows" / "Start Menu" / "Programs")
+
+        return [d for d in dirs if d.exists()]
+
     def create_shortcuts(self, target_exe: Path, shortcut_name: str, icon_path: Path):
-        """윈도우 바탕화면 및 시작메뉴에 PowerShell을 이용해 단축 아이콘 생성 및 제어판 앱 등록"""
+        """윈도우 바탕화면 및 시작메뉴에 단축 아이콘 생성 및 제어판 앱 등록"""
         try:
             import subprocess
-            # 바탕화면 경로 가져오기
-            desktop_dir = Path(os.environ["USERPROFILE"]) / "Desktop"
-            # 시작메뉴 경로 가져오기
-            start_menu_dir = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+            shortcut_dirs = self._get_all_shortcut_dirs()
             
-            for base_dir in [desktop_dir, start_menu_dir]:
+            # 사용자 바탕화면 및 시작메뉴에 생성
+            target_dirs = []
+            desktop_dir = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
+            start_menu_dir = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+            
+            # 기본 경로 추가
+            for d in [desktop_dir, start_menu_dir]:
+                if d.exists():
+                    target_dirs.append(d)
+                    
+            # API로 탐지된 디렉터리 추가
+            for d in shortcut_dirs:
+                if d not in target_dirs:
+                    target_dirs.append(d)
+            
+            for base_dir in target_dirs:
                 shortcut_path = base_dir / f"{shortcut_name}.lnk"
                 working_dir = target_exe.parent
                 
-                # PowerShell 스크립트를 작성하여 바로가기 생성
                 ps_script = f"""
                 $WshShell = New-Object -ComObject WScript.Shell
                 $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
@@ -367,13 +433,15 @@ class Installer:
                 $Shortcut.Save()
                 """
                 
-                # PowerShell 실행
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", ps_script],
-                    capture_output=True,
-                    check=True
-                )
-                logger.info(f"Shortcut created successfully at {shortcut_path}")
+                try:
+                    subprocess.run(
+                        ["powershell", "-NoProfile", "-Command", ps_script],
+                        capture_output=True,
+                        check=True
+                    )
+                    logger.info(f"Shortcut created successfully at {shortcut_path}")
+                except Exception as sub_err:
+                    logger.warning(f"Failed to create shortcut at {shortcut_path}: {sub_err}")
             
             # 윈도우 제어판 '앱 및 기능'(프로그램 추가/제거)에 등록
             self.register_in_windows_uninstall(target_exe, shortcut_name, icon_path)
@@ -389,25 +457,22 @@ class Installer:
             import winreg
             import ctypes
             
-            # 관리자 권한 실행 여부 확인
             is_admin = False
             try:
                 is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
             except Exception:
                 pass
             
-            # 관리자 권한이면 HKLM(모든 사용자), 권한이 없으면 HKCU(현재 사용자)에 등록
             hkeys = [winreg.HKEY_CURRENT_USER]
             if is_admin:
                 hkeys.append(winreg.HKEY_LOCAL_MACHINE)
             
-            # 64비트 및 32비트 레지스트리 경로 모두 등록 시도 (Wow6432Node 대응)
             reg_paths = [
                 r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CosRQD",
                 r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\CosRQD"
             ]
             
-            install_dir = target_exe.parent.parent # C:\CosRQD
+            install_dir = target_exe.parent.parent
             uninst_candidates = list(target_exe.parent.glob("Setup_*.exe"))
             uninst_exe = uninst_candidates[0] if uninst_candidates else target_exe
             uninstall_string = f'"{uninst_exe}" --uninstall'
@@ -426,14 +491,13 @@ class Installer:
                 for reg_path in reg_paths:
                     for access_flag in [winreg.KEY_WRITE, winreg.KEY_WRITE | winreg.KEY_WOW64_64KEY, winreg.KEY_WRITE | winreg.KEY_WOW64_32KEY]:
                         try:
-                            # 레지스트리 키 생성 및 열기
                             key = winreg.CreateKeyEx(hkey, reg_path, 0, access_flag)
                             
                             winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
                             winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
                             winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
                             winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, app_version_str)
-                            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "럭포마 (Luckfortma)")
+                            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "Luckfortma")
                             winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
                             winreg.SetValueEx(key, "URLInfoAbout", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
                             winreg.SetValueEx(key, "HelpLink", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
@@ -454,7 +518,7 @@ class Installer:
     
     def uninstall(self, install_path: Path, keep_user_data: bool = True) -> bool:
         """
-        Uninstall the application (files, shortcuts, and Windows registry).
+        Uninstall the application (files, shortcuts across all directories, and Windows registry).
         """
         try:
             logger.info(f"Uninstalling from: {install_path}")
@@ -470,28 +534,40 @@ class Installer:
             # 2. 설치 폴더 정리
             if install_path.exists():
                 if keep_user_data:
-                    # 바이너리 폴더만 제거
                     bin_dir = install_path / "bin"
                     if bin_dir.exists():
                         shutil.rmtree(bin_dir, ignore_errors=True)
                         logger.info("Removed application binaries")
                 else:
-                    # 전체 설치 디렉터리 제거
                     shutil.rmtree(install_path, ignore_errors=True)
                     logger.info("Removed entire installation directory")
             
-            # 3. 바탕화면 및 시작메뉴 바로가기 제거
+            # 3. 모든 바탕화면 및 시작메뉴에서 바로가기 완벽 삭제
             try:
-                desktop_dir = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
-                start_menu_dir = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
-                for base_dir in [desktop_dir, start_menu_dir]:
-                    if base_dir.exists():
-                        for lnk in list(base_dir.glob("CosRQD*.lnk")) + list(base_dir.glob("CosRnD*.lnk")) + list(base_dir.glob("*화장품연구관리*.lnk")):
-                            try:
-                                lnk.unlink()
-                                logger.info(f"Removed shortcut: {lnk}")
-                            except Exception:
-                                pass
+                all_dirs = self._get_all_shortcut_dirs()
+                target_patterns = ["*CosRQD*.lnk", "*CosRnD*.lnk", "*화장품연구관리*.lnk", "*화장품연구*.lnk", "*화장품*.lnk", "*Luckfortma*.lnk"]
+                
+                deleted_count = 0
+                for d in all_dirs:
+                    if d.exists():
+                        for pat in target_patterns:
+                            for lnk in d.glob(pat):
+                                try:
+                                    lnk.unlink()
+                                    deleted_count += 1
+                                    logger.info(f"Removed shortcut: {lnk}")
+                                except Exception as del_err:
+                                    logger.warning(f"Failed to delete {lnk}: {del_err}")
+                logger.info(f"Total shortcuts deleted: {deleted_count}")
+                
+                # 윈도우 쉘 아이콘 캐시 새로고침
+                if sys.platform.startswith('win'):
+                    try:
+                        import ctypes
+                        # SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_IDLIST = 0x0000
+                        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.warning(f"Failed to remove shortcuts: {e}")
             

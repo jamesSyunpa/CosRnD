@@ -15,7 +15,7 @@ VSVersionInfo(
       [
       StringTable(
         '041204b0',
-        [StringStruct('CompanyName', 'Luckfortma (럭포마)'),
+        [StringStruct('CompanyName', 'Luckfortma'),
         StringStruct('FileDescription', 'CosRQD Cosmetic R&D Platform Setup Installer'),
         StringStruct('FileVersion', '65.0.1.0'),
         StringStruct('InternalName', 'Setup_CosRQD'),
