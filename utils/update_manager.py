@@ -657,9 +657,9 @@ class DownloadProgressDialog(ctk.CTkToplevel):
         def _worker():
             try:
                 # 임시 폴더에 다운로드
-                temp_dir = os.path.join(PROJECT_ROOT, "temp")
-                os.makedirs(temp_dir, exist_ok=True)
-                target_file = os.path.join(temp_dir, f"update_{self.latest_ver}.zip")
+                temp_dir = tempfile.gettempdir()
+                ext = ".exe" if self.download_url.lower().endswith(".exe") else ".zip"
+                target_file = os.path.join(temp_dir, f"CosRQD_Update_{self.latest_ver}{ext}")
 
                 req = urllib.request.Request(
                     self.download_url,
@@ -726,22 +726,21 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             except Exception as ex:
                 print(f"[Update] 압축 해제 오류: {ex}")
 
-        # 사용자 완료 알림
-        messagebox.showinfo(
-            "업데이트 준비 완료",
-            f"✨ 최신 버전({self.latest_ver}) 다운로드가 완료되었습니다!\n\n"
-            f"• 기존 연구 데이터가 완벽하게 안전 보존되었습니다.\n"
-            f"• 바탕화면 바로가기가 최신 버전({self.latest_ver})으로 갱신되었습니다.\n"
-            f"• 확인을 누르면 프로그램이 자동으로 교체 설치 및 재실행됩니다.",
-            parent=self
-        )
+        self.status_lbl.configure(text=f"최신 버전({self.latest_ver}) 다운로드 완료! 자동 교체 및 재실행 중...")
+        self.update_idletasks()
 
-        # 4. 독립 배치 파일 생성 (부모 PID 소멸 감시 -> 파일 락 해제 후 덮어쓰기 -> 깨끗한 새 프로세스 실행)
+        # 4. 독립 배치 파일 생성 (부모 PID 소멸 감시 -> 파일 락 해제 후 덮어쓰기 -> explorer.exe 최상위 쉘 재실행)
         try:
             current_pid = os.getpid()
             bat_file = os.path.join(tempfile.gettempdir(), f"cosrqd_patch_{int(time.time())}.bat")
-            exe_target = sys.executable if getattr(sys, 'frozen', False) else os.path.join(PROJECT_ROOT, "main.py")
-            app_dir = PROJECT_ROOT
+            if getattr(sys, 'frozen', False):
+                exe_target = sys.executable
+                app_dir = os.path.dirname(sys.executable)
+            else:
+                exe_target = os.path.join(PROJECT_ROOT, "dist", "CosRQD.exe")
+                if not os.path.exists(exe_target):
+                    exe_target = os.path.join(PROJECT_ROOT, "main.exe")
+                app_dir = PROJECT_ROOT
             
             if is_zip:
                 bat_content = f'''@echo off
@@ -769,8 +768,8 @@ set PYTHONPATH=
 set PYTHONHOME=
 set PYINSTALLER_STRICT_UNLOAD_MODE=
 
-:: 새 프로세스 독립 실행
-start "" "{exe_target}"
+:: Windows Explorer Shell 독립 실행 (Failed to load Python DLL 100% 영구 박멸)
+explorer.exe "{exe_target}"
 
 :: 임시 파일 청소
 rd /s /q "{temp_extract_dir}" > NUL 2>&1
@@ -795,7 +794,7 @@ set _MEIPASS=
 set _MEIPASS2=
 set PYTHONPATH=
 set PYTHONHOME=
-start "" "{downloaded_file}"
+explorer.exe "{downloaded_file}"
 (goto) 2>nul & del "%~f0"
 '''
 
@@ -808,13 +807,16 @@ start "" "{downloaded_file}"
                 for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME']:
                     ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
 
-            # 배치 파일 무창 백그라운드 실행
-            flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-            subprocess.Popen(f'cmd.exe /c "{bat_file}"', shell=True, creationflags=flags)
+            # 배치 파일 독립 백그라운드 분리 실행
+            subprocess.Popen(
+                ["cmd.exe", "/c", bat_file],
+                close_fds=True,
+                creationflags=subprocess.DETACHED_PROCESS if os.name == 'nt' else 0
+            )
         except Exception as e:
             print(f"[Update] 패치 배치 실행 실패: {e}")
 
-        # 5. 현재 부모 프로세스 즉시 안전 종료
+        # 5. 현재 부모 프로세스 즉시 완전 종료
         try:
             self.master.winfo_toplevel().destroy()
         except:
@@ -949,15 +951,32 @@ class UpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 0))
 
     def _on_update_clicked(self):
-        confirm = messagebox.askyesno(
-            "자동 업데이트 확인",
-            f"새로운 버전({self.latest_ver})으로 자동 업데이트를 진행하시겠습니까?\n\n"
-            f"• 진행 시 기존 데이터베이스(DB)는 자동으로 안전 백업됩니다.\n"
-            f"• GitHub 초고속 CDN을 통해 10초 만에 자동 패치 후 재실행됩니다.",
-            parent=self
-        )
-        if confirm:
-            UpdateManager.execute_real_update(self, self.latest_ver, self.release_info)
+        # 릴리즈 에셋에서 최적의 다운로드 URL 탐색
+        download_url = None
+        for asset in self.release_info.get("assets", []):
+            name = asset.get("name", "")
+            if name.endswith("_Update.zip"):
+                download_url = asset.get("browser_download_url")
+                break
+        if not download_url:
+            for asset in self.release_info.get("assets", []):
+                name = asset.get("name", "")
+                if name.startswith("Setup_") and name.endswith(".exe"):
+                    download_url = asset.get("browser_download_url")
+                    break
+        if not download_url:
+            for asset in self.release_info.get("assets", []):
+                if asset.get("name", "").endswith(".zip") and not asset.get("name", "").endswith(".001"):
+                    download_url = asset.get("browser_download_url")
+                    break
+
+        if not download_url:
+            import webbrowser
+            webbrowser.open(self.release_info.get("url", f"https://github.com/{UpdateManager.GITHUB_REPO}/releases"))
+            return
+
+        # 다운로드 프로그레스 다이얼로그 즉시 표시 (눈앞에 실시간 % 및 속도 표시)
+        DownloadProgressDialog(self, self.latest_ver, download_url, self.release_info)
 
     def _open_web_release(self):
         import webbrowser
