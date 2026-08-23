@@ -424,24 +424,29 @@ class Installer:
             
             for hkey in hkeys:
                 for reg_path in reg_paths:
-                    try:
-                        # 레지스트리 키 생성 및 열기
-                        key = winreg.CreateKeyEx(hkey, reg_path, 0, winreg.KEY_WRITE)
-                        
-                        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
-                        winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
-                        winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
-                        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, app_version_str)
-                        winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "TaesungChem")
-                        winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
-                        winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)
-                        winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
-                        
-                        winreg.CloseKey(key)
-                        logger.info(f"Registered app in Windows Registry: {'HKLM' if hkey == winreg.HKEY_LOCAL_MACHINE else 'HKCU'} -> {reg_path}")
-                    except PermissionError:
-                        # 관리자 권한이 없어서 HKLM 쓰기에 실패한 경우는 무시하고 계속 진행
-                        continue
+                    for access_flag in [winreg.KEY_WRITE, winreg.KEY_WRITE | winreg.KEY_WOW64_64KEY, winreg.KEY_WRITE | winreg.KEY_WOW64_32KEY]:
+                        try:
+                            # 레지스트리 키 생성 및 열기
+                            key = winreg.CreateKeyEx(hkey, reg_path, 0, access_flag)
+                            
+                            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
+                            winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
+                            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
+                            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, app_version_str)
+                            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "태성켐 (TaesungChem)")
+                            winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
+                            winreg.SetValueEx(key, "URLInfoAbout", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
+                            winreg.SetValueEx(key, "HelpLink", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
+                            winreg.SetValueEx(key, "EstimatedSize", 0, winreg.REG_DWORD, 150000)
+                            winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)
+                            winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
+                            
+                            winreg.CloseKey(key)
+                            logger.info(f"Registered app in Windows Registry: {'HKLM' if hkey == winreg.HKEY_LOCAL_MACHINE else 'HKCU'} -> {reg_path}")
+                        except PermissionError:
+                            continue
+                        except Exception as e:
+                            pass
                     except Exception as e:
                         logger.warning(f"Failed to write registry key {reg_path} on {hkey}: {e}")
                         
