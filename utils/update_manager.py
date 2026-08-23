@@ -112,8 +112,8 @@ def update_desktop_shortcuts(new_ver: str):
                         except Exception:
                             pass
 
-        # 4. 최신 버전 바로가기 생성 (PowerShell COM)
-        new_shortcut_name = f"CosRQD_{new_ver}" if new_ver else "CosRQD"
+        # 4. 최신 단일 표준 바로가기 생성 (버전 번호 없이 영구 고정 CosRQD.lnk)
+        new_shortcut_name = "CosRQD"
         tgt_str = str(target_exe).replace("'", "''")
         cwd_str = str(target_exe.parent).replace("'", "''")
         ico_str = str(icon_path).replace("'", "''") if icon_path.exists() else ""

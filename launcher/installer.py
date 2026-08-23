@@ -348,8 +348,8 @@ class Installer:
                 if src_icon.exists():
                     shutil.copy2(src_icon, icon_path)
             
-            app_ver_name = f"CosRQD_{version}" if version else "CosRQD (화장품연구관리)"
-            self.create_shortcuts(target_exe, app_ver_name, icon_path)
+            app_name = "CosRQD"
+            self.create_shortcuts(target_exe, app_name, icon_path)
         except Exception as shortcut_err:
             logger.error(f"Failed to create shortcuts during installation: {shortcut_err}")
 
