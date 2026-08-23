@@ -202,13 +202,43 @@ class HomeFrame(ctk.CTkFrame):
         for widget in self.cards_frame.winfo_children():
             widget.destroy()
 
+        FALLBACK_TITLE_MAP = {
+            "production_form": ("🏭", "생산 처방"),
+            "production_formulation": ("🏭", "생산 처방"),
+            "ingredient_list": ("🧪", "전성분 분석"),
+            "ingredient_lookup": ("🔍", "원료/성분 조회"),
+            "quotation": ("💰", "견적 작성"),
+            "formulation_list": ("📋", "처방 목록"),
+            "formulation_mgt": ("℞", "처방 관리"),
+            "document_sub": ("📄", "연구 서류"),
+            "property_spec": ("📝", "실험일지 (물성 규격)"),
+            "report": ("📊", "기능성 보고서"),
+            "package": ("📦", "문서 관리 (패키지)"),
+            "coa": ("📄", "COA (성적서)"),
+            "msds": ("📑", "MSDS (물질안전보건)"),
+            "ingredient_report": ("📋", "원료목록보고"),
+            "mat_inspection": ("🔍", "원료 입고검사"),
+            "prod_standard": ("📜", "제품표준서"),
+            "mfg_record": ("🏭", "제조관리기록서 (BMR)"),
+            "stability_test": ("⏳", "안정성 시험"),
+            "compatibility_test": ("🧴", "용기 상용성 시험"),
+            "ingredient_mgt": ("🧪", "성분 관리"),
+            "client_mgt": ("🏢", "거래처 관리"),
+            "user_mgt": ("👥", "사용자 관리"),
+            "settings_sub": ("⚙️", "시스템 설정"),
+        }
+
         def resolve_config(act):
+            clean_act = act.replace(" ", "").replace("\n", "").lower()
             if act in self.action_config:
                 return act, self.action_config[act]
             for k, v in self.action_config.items():
                 if k.endswith('/' + act) or k == act:
                     return k, v
-            return act, {"icon": "📌", "title": act}
+            for k_sub, (ico, tit) in FALLBACK_TITLE_MAP.items():
+                if k_sub in clean_act or clean_act.endswith(k_sub):
+                    return act, {"icon": ico, "title": tit}
+            return act, {"icon": "📋", "title": act.split('/')[-1]}
 
         valid_items = []
         for act in self.recent_actions:

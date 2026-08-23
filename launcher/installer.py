@@ -495,31 +495,56 @@ $Shortcut.Save()
         return False
 
     def create_shortcuts(self, target_exe: Path, shortcut_name: str, icon_path: Path):
-        """윈도우 바탕화면 및 시작메뉴에 단축 아이콘 생성 및 제어판 앱 등록"""
+        """윈도우 바탕화면 및 시작메뉴에 단축 아이콘 정확히 1개씩 생성 및 제어판 앱 등록"""
         try:
             working_dir = target_exe.parent
+            user_profile = Path(os.environ.get("USERPROFILE", ""))
             
-            # 사용자 바탕화면 & 시작메뉴 경로 수집
-            target_dirs = []
-            desktop_dir = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
+            # 1. 활성 바탕화면 경로 단 1곳만 선택 (OneDrive 연동 바탕화면 최우선, 없으면 일반 Desktop)
+            target_desktop = None
+            onedrive_candidates = [
+                user_profile / "OneDrive" / "바탕 화면",
+                user_profile / "OneDrive" / "Desktop",
+                user_profile / "OneDrive - Personal" / "바탕 화면",
+                user_profile / "OneDrive - Personal" / "Desktop",
+            ]
+            for cand in onedrive_candidates:
+                if cand.exists():
+                    target_desktop = cand
+                    break
+            
+            if not target_desktop:
+                # Windows Shell API(CSIDL_DESKTOP=0x0000)로 실제 유효한 바탕화면 확인
+                if sys.platform.startswith('win'):
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+                        ctypes.windll.shell32.SHGetFolderPathW(None, 0x0000, None, 0, buf)
+                        if buf.value and Path(buf.value).exists():
+                            target_desktop = Path(buf.value)
+                    except Exception:
+                        pass
+                        
+            if not target_desktop or not target_desktop.exists():
+                target_desktop = user_profile / "Desktop"
+                
+            # 2. 시작메뉴 경로 1곳
             start_menu_dir = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
-            
-            for d in [desktop_dir, start_menu_dir]:
-                if d.exists() and d not in target_dirs:
-                    target_dirs.append(d)
-                    
-            for d in self._get_all_shortcut_dirs():
-                # 쓰기 가능한 사용자 폴더 위주로 추가 (Public/ProgramData 제외)
-                if d.exists() and "Users" in str(d) and d not in target_dirs:
-                    target_dirs.append(d)
-            
+
+            target_dirs = []
+            if target_desktop and target_desktop.exists():
+                target_dirs.append(target_desktop)
+            if start_menu_dir and start_menu_dir.exists() and start_menu_dir not in target_dirs:
+                target_dirs.append(start_menu_dir)
+
             success_count = 0
             for base_dir in target_dirs:
                 shortcut_path = base_dir / f"{shortcut_name}.lnk"
                 if self._create_single_shortcut(target_exe, shortcut_path, working_dir, icon_path):
                     success_count += 1
             
-            logger.info(f"Successfully created {success_count} shortcuts across system")
+            logger.info(f"Successfully created {success_count} unique shortcuts (Desktop: {target_desktop}, StartMenu: {start_menu_dir})")
             
             # 윈도우 쉘 아이콘 캐시 새로고침
             if sys.platform.startswith('win'):

@@ -1682,10 +1682,18 @@ class App(ctk.CTk):
         self.ACTION_CONFIG = {
             # 연구소 (Document / Research)
             "document/lookup": {"icon": "🔍", "title": "원료/성분 조회"},
+            "document/ingredient_lookup": {"icon": "🔍", "title": "원료/성분 조회"},
             "document/list": {"icon": "📋", "title": "처방 목록"},
+            "document/formulation_list": {"icon": "📋", "title": "처방 목록"},
             "document/quote": {"icon": "💰", "title": "견적 작성"},
+            "document/quotation": {"icon": "💰", "title": "견적 작성"},
             "document/ingredient": {"icon": "🧪", "title": "전성분 분석"},
+            "document/ingredient_list": {"icon": "🧪", "title": "전성분 분석"},
+            "ingredient_list": {"icon": "🧪", "title": "전성분 분석"},
             "document/production": {"icon": "🏭", "title": "생산 처방"},
+            "document/production_formulation": {"icon": "🏭", "title": "생산 처방"},
+            "production_formulation": {"icon": "🏭", "title": "생산 처방"},
+            "production_form": {"icon": "🏭", "title": "생산 처방"},
             "document/property_spec": {"icon": "📝", "title": "실험일지 (물성 규격)"},
             "document/report": {"icon": "📊", "title": "기능성 보고서"},
             "document/formulation_mgt": {"icon": "℞", "title": self.texts.get('formulation_mgt', '처방 관리')},
@@ -1707,6 +1715,7 @@ class App(ctk.CTk):
             "data/user_mgt": {"icon": "👥", "title": self.texts.get('user_mgt', '사용자 관리')},
             "settings/settings_sub": {"icon": "⚙️", "title": self.texts.get('settings_sub', '시스템 설정')},
             "package": {"icon": "📦", "title": "문서 관리 (패키지)"},
+            "document/package": {"icon": "📦", "title": "문서 관리 (패키지)"},
         }
 
         # Build reverse lookup from displayed title -> action key for resolving
