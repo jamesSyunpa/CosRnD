@@ -292,6 +292,7 @@ class UpdateManager:
                             "download_url": download_url,
                             "file_name": file_name,
                             "file_size": file_size,
+                            "assets": assets,
                             "tag": tag,
                             "source": "github"
                         }
@@ -320,6 +321,8 @@ class UpdateManager:
             if gh_tuple > latest_tuple_found:
                 latest_tuple_found = gh_tuple
                 latest_ver_found = gh_tag
+                best_release = gh_info
+            elif gh_tuple == latest_tuple_found:
                 best_release = gh_info
 
         # 2순위: 네이버 카페 게시글 스캔 (메뉴 13: 공지 및 업데이트 단독)
@@ -951,13 +954,16 @@ class UpdateDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(5, 0))
 
     def _on_update_clicked(self):
-        # 릴리즈 에셋에서 최적의 다운로드 URL 탐색
-        download_url = None
-        for asset in self.release_info.get("assets", []):
-            name = asset.get("name", "")
-            if name.endswith("_Update.zip"):
-                download_url = asset.get("browser_download_url")
-                break
+        # 1. 릴리즈 정보에 이미 지정된 download_url 우선 사용
+        download_url = self.release_info.get("download_url")
+
+        # 2. download_url이 없으면 assets 목록에서 최적의 파일 탐색
+        if not download_url:
+            for asset in self.release_info.get("assets", []):
+                name = asset.get("name", "")
+                if "update" in name.lower() and name.endswith(".zip"):
+                    download_url = asset.get("browser_download_url")
+                    break
         if not download_url:
             for asset in self.release_info.get("assets", []):
                 name = asset.get("name", "")
@@ -966,7 +972,8 @@ class UpdateDialog(ctk.CTkToplevel):
                     break
         if not download_url:
             for asset in self.release_info.get("assets", []):
-                if asset.get("name", "").endswith(".zip") and not asset.get("name", "").endswith(".001"):
+                name = asset.get("name", "")
+                if name.endswith(".zip") and not re.search(r'\.\d{3}$', name):
                     download_url = asset.get("browser_download_url")
                     break
 
