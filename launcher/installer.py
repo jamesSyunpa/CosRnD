@@ -253,12 +253,11 @@ class Installer:
         try:
             # Check required files exist
             bin_dir = install_path / "bin"
-            main_exe = bin_dir / "화장품연구관리_v1.0.3.exe"
-            if not main_exe.exists():
-                main_exe = bin_dir / "main.exe"
+            exe_candidates = list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [bin_dir / "main.exe"]
+            main_exe = next((c for c in exe_candidates if c.exists()), None)
             
-            if not main_exe.exists():
-                logger.error("Application executable (화장품연구관리_v1.0.3.exe or main.exe) not found in installation")
+            if not main_exe:
+                logger.error("Application executable not found in installation bin directory")
                 return False
             
             # Check directory structure
@@ -318,9 +317,8 @@ class Installer:
         # 바탕화면 및 시작메뉴 단축아이콘 생성
         try:
             bin_dir = install_path / "bin"
-            target_exe = bin_dir / "화장품연구관리_v1.0.3.exe"
-            if not target_exe.exists():
-                target_exe = bin_dir / "main.exe"
+            exe_candidates = list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [bin_dir / "main.exe"]
+            target_exe = next((c for c in exe_candidates if c.exists()), bin_dir / "main.exe")
             
             icon_path = bin_dir / "Icon.ico"
             if not icon_path.exists():
@@ -332,7 +330,8 @@ class Installer:
                 if src_icon.exists():
                     shutil.copy2(src_icon, icon_path)
             
-            self.create_shortcuts(target_exe, "화장품연구관리_v1.0.3", icon_path)
+            app_ver_name = f"CosRnD_{version}" if version else "CosRnD (화장품연구관리)"
+            self.create_shortcuts(target_exe, app_ver_name, icon_path)
         except Exception as shortcut_err:
             logger.error(f"Failed to create shortcuts during installation: {shortcut_err}")
 
@@ -409,9 +408,19 @@ class Installer:
             ]
             
             install_dir = target_exe.parent.parent # C:\CosRnD
-            uninstall_string = f'"{target_exe.parent / "Setup_화장품연구관리_v1.0.3.exe"}" --uninstall'
-            if not (target_exe.parent / "Setup_화장품연구관리_v1.0.3.exe").exists():
-                uninstall_string = f'"{target_exe}" --uninstall'
+            uninst_candidates = list(target_exe.parent.glob("Setup_*.exe"))
+            uninst_exe = uninst_candidates[0] if uninst_candidates else target_exe
+            uninstall_string = f'"{uninst_exe}" --uninstall'
+            
+            app_version_str = "65.0.1"
+            try:
+                ver_file = target_exe.parent / "VERSION"
+                if not ver_file.exists():
+                    ver_file = install_dir / "VERSION"
+                if ver_file.exists():
+                    app_version_str = ver_file.read_text(encoding='utf-8').strip().lstrip('v')
+            except Exception:
+                pass
             
             for hkey in hkeys:
                 for reg_path in reg_paths:
@@ -422,7 +431,7 @@ class Installer:
                         winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
                         winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
                         winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
-                        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, "1.0.3")
+                        winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, app_version_str)
                         winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "TaesungChem")
                         winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
                         winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)

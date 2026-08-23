@@ -11,7 +11,7 @@ except Exception:
     Tk = None
 
 # For non-admin installer: install into %LOCALAPPDATA% and create shortcuts via PowerShell
-APP_NAME = "화장품연구관리"
+APP_NAME = "CosRnD"
 
 def is_admin():
     try:
