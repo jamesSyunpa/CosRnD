@@ -387,7 +387,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
     def setup_db_backup_restore_section(self, parent_frame):
         """데이터 백업, 전체 불러오기(복원), 검증 섹션을 설정합니다."""
         backup_section = ctk.CTkFrame(parent_frame)
-        backup_section.grid(row=3, column=0, padx=20, pady=(0, 20), sticky="ew")
+        backup_section.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="ew")
         backup_section.grid_columnconfigure((0, 1, 2), weight=1)
         
         header_box = ctk.CTkFrame(backup_section, fg_color="transparent")
@@ -410,47 +410,41 @@ class SettingsManagementFrame(ctk.CTkFrame):
         backup_now_btn = ctk.CTkButton(
             backup_section,
             text="💾 지금 데이터 백업하기",
-            height=34,
-            font=ctk.CTkFont(weight="bold"),
             fg_color="#059669",
             hover_color="#047857",
+            font=ctk.CTkFont(weight="bold"),
             command=self.backup_current_db_now
         )
-        backup_now_btn.grid(row=2, column=0, padx=(15, 6), pady=(0, 12), sticky="ew")
+        backup_now_btn.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="ew")
 
-        # 2. 백업 파일에서 데이터 모두 불러오기 (복원) 버튼
+        # 2. 백업 데이터 모두 불러오기(복원) 버튼
         restore_btn = ctk.CTkButton(
             backup_section,
             text="📥 백업 데이터 모두 불러오기",
-            height=34,
-            font=ctk.CTkFont(weight="bold"),
             fg_color="#D97706",
             hover_color="#B45309",
+            font=ctk.CTkFont(weight="bold"),
             command=self.restore_db_from_backup
         )
-        restore_btn.grid(row=2, column=1, padx=6, pady=(0, 12), sticky="ew")
+        restore_btn.grid(row=2, column=1, padx=15, pady=(0, 15), sticky="ew")
 
         # 3. 백업 폴더 열기 & DB 검증 버튼 박스
-        sub_btn_box = ctk.CTkFrame(backup_section, fg_color="transparent")
-        sub_btn_box.grid(row=2, column=2, padx=(6, 15), pady=(0, 12), sticky="ew")
-        sub_btn_box.grid_columnconfigure((0, 1), weight=1)
+        tool_box = ctk.CTkFrame(backup_section, fg_color="transparent")
+        tool_box.grid(row=2, column=2, padx=15, pady=(0, 15), sticky="ew")
+        tool_box.grid_columnconfigure((0, 1), weight=1)
 
         open_folder_btn = ctk.CTkButton(
-            sub_btn_box,
-            text="📂 백업 폴더 열기",
-            height=34,
-            fg_color="gray50",
-            hover_color="gray40",
+            tool_box,
+            text="📁 백업 폴더 열기",
+            fg_color="#4B5563",
+            hover_color="#374151",
             command=self.open_backup_folder
         )
         open_folder_btn.grid(row=0, column=0, padx=(0, 4), sticky="ew")
 
         validate_button = ctk.CTkButton(
-            sub_btn_box,
+            tool_box, 
             text="🔍 DB 검증",
-            height=34,
-            fg_color="#1565C0",
-            hover_color="#1976D2",
             command=self.validate_current_db_path
         )
         validate_button.grid(row=0, column=1, padx=(4, 0), sticky="ew")
@@ -458,7 +452,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
     def setup_admin_only_features(self, parent_frame):
         # --- 엑셀 폼 내보내기 ---
         export_frame = ctk.CTkFrame(parent_frame)
-        export_frame.grid(row=4, column=0, padx=20, pady=(20, 10), sticky="ew")
+        export_frame.grid(row=5, column=0, padx=20, pady=(20, 10), sticky="ew")
         export_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
         ctk.CTkLabel(export_frame, text="엑셀 폼 내보내기", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
         ctk.CTkButton(export_frame, text="원료 템플릿", command=self.export_material_template).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
@@ -471,7 +465,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
         
         if is_master_owner:
             recovery_frame = ctk.CTkFrame(parent_frame, fg_color="#1E293B")
-            recovery_frame.grid(row=5, column=0, padx=20, pady=(20, 10), sticky="ew")
+            recovery_frame.grid(row=6, column=0, padx=20, pady=(20, 10), sticky="ew")
             recovery_frame.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(recovery_frame, text="🛡️ 마스터 보안 데이터 복구 센터 (대표 전용)", font=ctk.CTkFont(size=14, weight="bold"), text_color="#38BDF8").grid(row=0, column=0, pady=(10, 2))
             ctk.CTkLabel(recovery_frame, text="각 PC의 AppData 심층 은닉 볼트에 암호화 보관된 삭제 데이터(처방/원료/거래처/사용자/DB)를 대표 마스터키로 완벽 복구합니다.", font=ctk.CTkFont(size=11), text_color="#94A3B8").grid(row=1, column=0, pady=(0, 8))
@@ -489,7 +483,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
 
         # --- 데이터 리셋 ---
         reset_frame = ctk.CTkFrame(parent_frame)
-        reset_frame.grid(row=6, column=0, padx=20, pady=(40, 20), sticky="ew")
+        reset_frame.grid(row=7, column=0, padx=20, pady=(40, 20), sticky="ew")
         reset_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
         ctk.CTkLabel(reset_frame, text="데이터 초기화", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
         reset_button_style = {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}

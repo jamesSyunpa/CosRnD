@@ -1721,6 +1721,21 @@ class App(ctk.CTk):
         )
         self.top_user_badge.pack(side="right", padx=(0, 12), pady=4)
 
+        # [상단 상시 업데이트 확인 버튼]
+        self.top_update_btn = ctk.CTkButton(
+            self.top_menubar_frame,
+            text="🚀 업데이트 확인",
+            height=24,
+            width=105,
+            font=ctk.CTkFont(size=11),
+            fg_color="#334155",
+            hover_color="#475569",
+            text_color="#F8FAFC",
+            corner_radius=12,
+            command=self.on_top_update_clicked
+        )
+        self.top_update_btn.pack(side="right", padx=(0, 8), pady=4)
+
         # [스마트 동기화 알림 배지 버튼] (새 데이터 감지 시 표시되는 조용한 배지)
         self.sync_notice_btn = ctk.CTkButton(
             self.top_menubar_frame,
@@ -3298,6 +3313,34 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"[DB동기화] 배지 클릭 동기화 처리 실패: {e}")
             self.hide_sync_badge()
+
+    def on_top_update_clicked(self):
+        """상단 메뉴바의 [업데이트 확인] 버튼 클릭 시 최신 버전을 비동기로 조회하고 다이얼로그를 표시합니다."""
+        try:
+            self.top_update_btn.configure(text="⏳ 확인 중...", state="disabled")
+        except Exception:
+            pass
+
+        def _worker():
+            try:
+                from utils.update_manager import UpdateManager, UpdateDialog
+                is_available, cur_ver, lat_ver, info = UpdateManager.check_for_remote_update()
+            except Exception as e:
+                from utils.update_manager import UpdateManager
+                is_available, cur_ver, lat_ver, info = False, UpdateManager.get_current_version(), UpdateManager.get_current_version(), {"summary": f"조회 중 오류 발생: {e}"}
+
+            def _show():
+                try:
+                    self.top_update_btn.configure(text="🚀 업데이트 확인", state="normal")
+                    from utils.update_manager import UpdateDialog
+                    UpdateDialog(self, cur_ver, lat_ver, info, is_new=is_available)
+                except Exception as ex:
+                    print(f"[Main] 업데이트 다이얼로그 오류: {ex}")
+
+            self.after(0, _show)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def start_periodic_sync_check(self):
         """주기적인 DB 동기화 검사를 시작합니다 (기본 60초 주기)."""
