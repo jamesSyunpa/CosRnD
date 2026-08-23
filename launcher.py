@@ -17,6 +17,61 @@ base_dir = Path(getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file_
 if str(base_dir) not in sys.path:
     sys.path.insert(0, str(base_dir))
 
+def is_admin() -> bool:
+    """Windows 관리자 권한(UAC) 보유 여부 확인"""
+    if not sys.platform.startswith('win'):
+        return True
+    try:
+        import ctypes
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+
+def ensure_admin_elevation():
+    """
+    인스톨러/런처 실행 즉시 Windows UAC(관리자 권한) 승인 창을 띄워
+    사용자가 직접 승인하고 시스템에 안전하게 설치/등록되도록 합니다.
+    """
+    if sys.platform.startswith('win') and getattr(sys, 'frozen', False):
+        if not is_admin():
+            try:
+                import ctypes
+                params = " ".join([f'"{arg}"' for arg in sys.argv[1:]])
+                ret = ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", sys.executable, params, None, 1
+                )
+                if int(ret) > 32:
+                    sys.exit(0)
+            except Exception as e:
+                print(f"[UAC] 관리자 승격 요청 실패: {e}")
+
+
+def register_defender_exclusion(target_paths=None):
+    """
+    Windows Defender의 '제어된 폴더 액세스(보호된 폴더)' 허용 앱 목록에
+    CosRQD 실행 파일들을 공식 등록합니다.
+    """
+    if not sys.platform.startswith('win'):
+        return
+    try:
+        import subprocess
+        if not target_paths:
+            target_paths = [
+                r"C:\CosRQD\bin\CosRQD.exe",
+                r"C:\CosRQD\bin\CosRnD.exe",
+                r"C:\CosRQD\bin\main.exe",
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "CosRQD", "bin", "CosRQD.exe")
+            ]
+        for p in target_paths:
+            if p:
+                ps_cmd = f"Add-MpPreference -ControlledFolderAccessAllowedApplications '{p}' -ErrorAction SilentlyContinue"
+                subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], capture_output=True)
+        print("[보안] Windows Defender 보호 폴더 액세스 허용 앱 등록 완료")
+    except Exception as e:
+        print(f"[보안] Defender 예외 등록 실패: {e}")
+
+
 def unblock_self():
     """
     최초 실행 시 인터넷에서 다운로드되어 발생하는 Windows 스마트스크린 차단(MotW)을
@@ -38,8 +93,14 @@ def unblock_self():
         except Exception as e:
             print(f"[보안] 자가 차단 해제 시도 실패 (권한 등의 원인): {e}")
 
-# 프로그램 구동 즉시 차단 해제 실행
+# 1. 인스톨러 구동 즉시 UAC 관리자 승인 창 호출
+ensure_admin_elevation()
+
+# 2. 프로그램 구동 즉시 차단 해제 실행
 unblock_self()
+
+# 3. Defender 제어된 폴더 액세스 자동 등록
+register_defender_exclusion()
 
 from launcher.config_manager import ConfigManager
 from launcher.launcher_gui import run_launcher_gui, run_uninstaller_gui
