@@ -526,16 +526,19 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             parent=self
         )
 
-        # 프로그램 자동 재실행
+        # 프로그램 안전 지연 자동 재실행 (부모 프로세스가 종료되어 임시 폴더가 삭제된 후 깨끗하게 자식 실행)
         try:
             clean_env = get_clean_subproc_env()
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
             if getattr(sys, 'frozen', False):
                 exe_path = sys.executable
-                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path), env=clean_env, creationflags=flags)
+                if os.name == 'nt':
+                    cmd_str = f'timeout /t 1 /nobreak > NUL & start "" "{exe_path}"'
+                    subprocess.Popen(f'cmd.exe /c "{cmd_str}"', cwd=os.path.dirname(exe_path), env=clean_env, shell=True)
+                else:
+                    subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path), env=clean_env)
             else:
                 main_script = os.path.join(PROJECT_ROOT, "main.py")
-                subprocess.Popen([sys.executable, main_script], cwd=PROJECT_ROOT, env=clean_env, creationflags=flags)
+                subprocess.Popen([sys.executable, main_script], cwd=PROJECT_ROOT, env=clean_env)
         except Exception as e:
             print(f"[Update] 재실행 실패: {e}")
 

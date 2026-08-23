@@ -9,7 +9,9 @@ import json
 import hashlib
 import logging
 import shutil
-import requests
+import urllib.request
+import urllib.error
+import ssl
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, Tuple
 from datetime import datetime
@@ -73,12 +75,15 @@ class Updater:
                     raise UpdateError(f"Local update server path not found: {update_server_url}")
             else:
                 # Download latest.json via HTTP
-                response = requests.get(
-                    update_server_url,
-                    timeout=self.CHECK_TIMEOUT
-                )
-                response.raise_for_status()
-                latest_info = response.json()
+                req = urllib.request.Request(update_server_url, headers={"User-Agent": "CosRnD-Launcher"})
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                with urllib.request.urlopen(req, timeout=self.CHECK_TIMEOUT, context=ctx) as resp:
+                    if resp.status == 200:
+                        latest_info = json.loads(resp.read().decode('utf-8'))
+                    else:
+                        raise UpdateError(f"HTTP error {resp.status}")
             
             # Compare versions
             current_version = self.config_manager.get_version()
@@ -144,32 +149,33 @@ class Updater:
             except Exception as e:
                 raise UpdateError(f"Failed to copy local update file: {e}")
         
-        # Original HTTP download logic
+        # HTTP download logic via urllib
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
-                response = requests.get(
-                    download_url,
-                    stream=True,
-                    timeout=self.DOWNLOAD_TIMEOUT
-                )
-                response.raise_for_status()
+                req = urllib.request.Request(download_url, headers={"User-Agent": "CosRnD-Launcher"})
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
                 
-                total_size = int(response.headers.get('content-length', 0))
-                downloaded = 0
-                
-                with open(dest_path, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
+                with urllib.request.urlopen(req, timeout=self.DOWNLOAD_TIMEOUT, context=ctx) as resp:
+                    total_size = int(resp.headers.get('content-length', 0))
+                    downloaded = 0
+                    
+                    with open(dest_path, 'wb') as f:
+                        while True:
+                            chunk = resp.read(65536)
+                            if not chunk:
+                                break
                             f.write(chunk)
                             downloaded += len(chunk)
                             
                             if progress_callback and total_size:
                                 progress_callback(downloaded, total_size)
-                
-                logger.info(f"Download completed: {dest_path}")
-                return dest_path
-                
-            except requests.RequestException as e:
+                    
+                    logger.info(f"Download completed: {dest_path}")
+                    return dest_path
+                    
+            except Exception as e:
                 logger.warning(f"Download attempt {attempt} failed: {e}")
                 if attempt == self.MAX_RETRIES:
                     raise UpdateError(f"Failed to download update after {self.MAX_RETRIES} attempts: {e}")

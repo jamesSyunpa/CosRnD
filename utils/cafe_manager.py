@@ -5,7 +5,9 @@
 - 주요 대상 메뉴: 3 (전체공지 / 필독사항), 4 (자료 다운로드 / 배포공지)
 """
 
-import requests
+import urllib.request
+import urllib.error
+import ssl
 import json
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -21,6 +23,21 @@ class CafeNoticeManager:
     }
 
     @classmethod
+    def _http_get_json(cls, url: str) -> dict:
+        """urllib 표준 라이브러리를 사용하여 안전하게 JSON 데이터를 가져옵니다."""
+        req = urllib.request.Request(url, headers=cls.HEADERS)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with urllib.request.urlopen(req, timeout=4.0, context=ctx) as response:
+                if response.status == 200:
+                    return json.loads(response.read().decode('utf-8'))
+        except Exception as e:
+            print(f"[CafeNotice] HTTP 요청 실패 ({url}): {e}")
+        return {}
+
+    @classmethod
     def get_notice_list(cls, menu_ids=[13], per_page=10):
         """
         공지사항 게시판(오직 메뉴 13: 공지 및 업데이트 단독)의 글 목록을 가져옵니다.
@@ -29,36 +46,34 @@ class CafeNoticeManager:
         for m_id in menu_ids:
             api_url = f"https://apis.naver.com/cafe-web/cafe-boardlist-api/v1/cafes/{cls.CAFE_ID}/menus/{m_id}/articles?page=1&perPage={per_page}"
             try:
-                r = requests.get(api_url, headers=cls.HEADERS, timeout=4)
-                if r.status_code == 200:
-                    data = r.json()
-                    item_list = data.get("result", {}).get("articleList", [])
-                    for entry in item_list:
-                        item = entry.get("item", {})
-                        art_id = item.get("articleId")
-                        subject = item.get("subject", "")
-                        ts = item.get("writeDateTimestamp", 0)
-                        summary = item.get("summary", "")
-                        writer = item.get("writerInfo", {}).get("nickName", "관리자")
-                        
-                        date_str = ""
-                        if ts:
-                            try:
-                                date_str = datetime.fromtimestamp(ts / 1000.0).strftime("%Y-%m-%d")
-                            except:
-                                date_str = ""
-                                
-                        if art_id and subject:
-                            articles.append({
-                                "id": art_id,
-                                "menu_id": m_id,
-                                "subject": subject,
-                                "date": date_str,
-                                "timestamp": ts,
-                                "summary": summary,
-                                "writer": writer,
-                                "url": f"https://cafe.naver.com/cosrqd/{art_id}"
-                            })
+                data = cls._http_get_json(api_url)
+                item_list = data.get("result", {}).get("articleList", [])
+                for entry in item_list:
+                    item = entry.get("item", {})
+                    art_id = item.get("articleId")
+                    subject = item.get("subject", "")
+                    ts = item.get("writeDateTimestamp", 0)
+                    summary = item.get("summary", "")
+                    writer = item.get("writerInfo", {}).get("nickName", "관리자")
+                    
+                    date_str = ""
+                    if ts:
+                        try:
+                            date_str = datetime.fromtimestamp(ts / 1000.0).strftime("%Y-%m-%d")
+                        except:
+                            date_str = ""
+                            
+                    if art_id and subject:
+                        articles.append({
+                            "id": art_id,
+                            "menu_id": m_id,
+                            "subject": subject,
+                            "date": date_str,
+                            "timestamp": ts,
+                            "summary": summary,
+                            "writer": writer,
+                            "url": f"https://cafe.naver.com/cosrqd/{art_id}"
+                        })
             except Exception as e:
                 print(f"[CafeNotice] 메뉴 {m_id} 목록 로드 실패: {e}")
                 
@@ -75,16 +90,14 @@ class CafeNoticeManager:
             return ""
         api_url = f"https://apis.naver.com/cafe-web/cafe-articleapi/v2.1/cafes/{cls.CAFE_ID}/articles/{article_id}"
         try:
-            r = requests.get(api_url, headers=cls.HEADERS, timeout=4)
-            if r.status_code == 200:
-                data = r.json()
-                article = data.get("result", {}).get("article", {})
-                content_html = article.get("contentHtml", "")
-                
-                if content_html:
-                    soup = BeautifulSoup(content_html, "html.parser")
-                    text = soup.get_text(separator="\n", strip=True)
-                    return text
+            data = cls._http_get_json(api_url)
+            article = data.get("result", {}).get("article", {})
+            content_html = article.get("contentHtml", "")
+            
+            if content_html:
+                soup = BeautifulSoup(content_html, "html.parser")
+                text = soup.get_text(separator="\n", strip=True)
+                return text
         except Exception as e:
             print(f"[CafeNotice] 글 ID {article_id} 본문 로드 실패: {e}")
             

@@ -9,6 +9,26 @@ if os.name == 'nt':
         if _k in os.environ:
             del os.environ[_k]
 
+# [핵심 안정성] PyInstaller 임시 경로 및 zipimport 캐시 완전 정화 (부모 _MEI 경로 오염 원천 차단)
+if getattr(sys, 'frozen', False):
+    cur_mei = getattr(sys, '_MEIPASS', '')
+    clean_sys_path = []
+    for p in sys.path:
+        p_str = str(p)
+        if '_MEI' in p_str:
+            if cur_mei and cur_mei in p_str:
+                clean_sys_path.append(p)
+        else:
+            clean_sys_path.append(p)
+    sys.path[:] = clean_sys_path
+    
+    try:
+        dead_keys = [k for k in sys.path_importer_cache if '_MEI' in k and (not cur_mei or cur_mei not in k)]
+        for k in dead_keys:
+            del sys.path_importer_cache[k]
+    except Exception:
+        pass
+
 # [SSL & Certifi 안정성 보장] certifi.where() 경로 유효성 검사 및 안전 복구
 try:
     import certifi
@@ -2792,26 +2812,21 @@ class App(ctk.CTk):
             import sys
             
             if getattr(sys, 'frozen', False):
-                # 단일 실행 파일(EXE) 배포 환경
+                # 단일 실행 파일(EXE) 배포 환경: 부모 종료 후 독립 지연 실행
                 exe_path = sys.executable
                 current_dir = os.path.dirname(exe_path)
-                cmd = [exe_path]
                 print(f"[재시작] 실행 파일 재시작 경로: {exe_path}")
+                if os.name == 'nt':
+                    cmd_str = f'timeout /t 1 /nobreak > NUL & start "" "{exe_path}"'
+                    subprocess.Popen(f'cmd.exe /c "{cmd_str}"', cwd=current_dir, env=clean_env, shell=True)
+                else:
+                    subprocess.Popen([exe_path], cwd=current_dir, env=clean_env)
             else:
                 # 개발 스크립트 실행 환경
-                exe_path = sys.executable
                 current_dir = os.path.dirname(os.path.abspath(__file__))
                 cmd = [sys.executable] + sys.argv
                 print(f"[재시작] 개발 스크립트 재시작: {cmd}")
-            
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-            subprocess.Popen(
-                cmd,
-                cwd=current_dir,
-                env=clean_env,
-                creationflags=flags,
-                close_fds=True if os.name != 'nt' else False
-            )
+                subprocess.Popen(cmd, cwd=current_dir, env=clean_env)
             
             # 6. 현재 프로세스 안전 종료
             self.after(100, self.destroy)
@@ -3709,19 +3724,16 @@ class App(ctk.CTk):
                     # 개발 환경(Python 스크립트)
                     script_path = os.path.abspath(__file__)
                     cmd = [executable_path, script_path] + sys.argv[1:]
+                    subprocess.Popen(cmd, cwd=current_dir, env=clean_env)
                 else:
-                    # 패키징된 단일 실행 파일(EXE)
-                    cmd = [executable_path] + sys.argv[1:]
+                    # 패키징된 단일 실행 파일(EXE): 부모 종료 후 1초 지연 독립 실행
+                    if os.name == 'nt':
+                        cmd_str = f'timeout /t 1 /nobreak > NUL & start "" "{executable_path}"'
+                        subprocess.Popen(f'cmd.exe /c "{cmd_str}"', cwd=current_dir, env=clean_env, shell=True)
+                    else:
+                        subprocess.Popen([executable_path], cwd=current_dir, env=clean_env)
 
-                flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-                subprocess.Popen(
-                    cmd,
-                    cwd=current_dir,
-                    env=clean_env,
-                    creationflags=flags,
-                    close_fds=True if os.name != 'nt' else False
-                )
-                print(f"{datetime.now()}: 새 프로세스 시작 성공 (정돈된 환경 변수 적용)")
+                print(f"{datetime.now()}: 새 프로세스 시작 성공 (정돈된 환경 변수 및 지연 독립 실행 적용)")
             except Exception as process_error:
                 error_msg = f"새 프로세스 시작 실패: {process_error}"
                 print(f"{datetime.now()}: {error_msg}")
