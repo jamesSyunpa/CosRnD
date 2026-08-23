@@ -63,15 +63,15 @@ def discover_database_paths() -> list:
     for var in onedrive_vars:
         od_path = os.environ.get(var)
         if od_path and os.path.exists(od_path):
-            candidates.append(os.path.normpath(os.path.join(od_path, 'CosRnD_data')))
-            candidates.append(os.path.normpath(os.path.join(od_path, 'Documents', 'CosRnD_data')))
-            candidates.append(os.path.normpath(os.path.join(od_path, 'CosRnD')))
+            candidates.append(os.path.normpath(os.path.join(od_path, 'CosRQD_data')))
+            candidates.append(os.path.normpath(os.path.join(od_path, 'Documents', 'CosRQD_data')))
+            candidates.append(os.path.normpath(os.path.join(od_path, 'CosRQD')))
             candidates.append(os.path.normpath(os.path.join(od_path, 'Data')))
             
     # 2. 내 문서(Documents) 경로 내 OneDrive 동기화 폴더 확인
     user_profile = os.path.expanduser('~')
-    candidates.append(os.path.normpath(os.path.join(user_profile, 'OneDrive', 'Documents', 'CosRnD_data')))
-    candidates.append(os.path.normpath(os.path.join(user_profile, 'OneDrive', 'CosRnD_data')))
+    candidates.append(os.path.normpath(os.path.join(user_profile, 'OneDrive', 'Documents', 'CosRQD_data')))
+    candidates.append(os.path.normpath(os.path.join(user_profile, 'OneDrive', 'CosRQD_data')))
     
     # 3. 네트워크 드라이브 및 로컬 드라이브 스캔 (D부터 Z까지)
     if sys.platform.startswith('win'):
@@ -81,8 +81,8 @@ def discover_database_paths() -> list:
                 drive = f"{chr(drive_letter)}:\\"
                 drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
                 if drive_type in (4, 3): # 네트워크 드라이브(4) 또는 기타 로컬 드라이브(3)
-                    candidates.append(os.path.normpath(os.path.join(drive, 'CosRnD_data')))
-                    candidates.append(os.path.normpath(os.path.join(drive, 'CosRnD', 'Data')))
+                    candidates.append(os.path.normpath(os.path.join(drive, 'CosRQD_data')))
+                    candidates.append(os.path.normpath(os.path.join(drive, 'CosRQD', 'Data')))
         except Exception as e:
             print(f"[경로 검색] 드라이브 스캔 중 에러 (무시): {e}")
 
@@ -222,8 +222,9 @@ class DBManager:
         # 이전 CosRnD 경로 또는 Documents 경로에서 AppData/CosRQD 경로로 자동 데이터베이스 이전(마이그레이션) 수행
         try:
             appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
+            old_cosrnd_folder = os.path.join(appdata_root, 'CosRnD')
             old_candidates = [
-                os.path.join(appdata_root, 'CosRnD', 'Data', 'cosmetic.db'),
+                os.path.join(old_cosrnd_folder, 'Data', 'cosmetic.db'),
                 os.path.join(os.path.expanduser('~'), 'Documents', 'CosRnD', 'Data', 'cosmetic.db'),
                 os.path.join(os.path.expanduser('~'), 'Documents', 'CosRQD', 'Data', 'cosmetic.db'),
             ]
@@ -233,6 +234,14 @@ class DBManager:
                     shutil.copy2(old_path, target_path)
                     print(f"[마이그레이션] 기존 DB({old_path})를 신규 CosRQD 경로({target_path})로 복사 완료")
                     break
+                    
+            # 구버전 AppData/CosRnD 폴더가 남아있고 신규 target_path가 안전하게 확보된 경우 구버전 잔재 폴더 완전 정리/삭제
+            if os.path.exists(old_cosrnd_folder) and os.path.exists(target_path):
+                try:
+                    shutil.rmtree(old_cosrnd_folder, ignore_errors=True)
+                    print(f"[정리] 구버전 폴더({old_cosrnd_folder})를 완벽히 삭제 정리하였습니다.")
+                except Exception as del_err:
+                    print(f"[정리 알림] 구버전 폴더 삭제 대기: {del_err}")
         except Exception as mig_err:
             print(f"[경고] 기존 DB 마이그레이션 실패: {mig_err}")
             

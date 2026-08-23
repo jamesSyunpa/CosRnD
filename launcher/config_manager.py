@@ -23,12 +23,12 @@ class ConfigManager:
         
         Args:
             config_dir: Directory where config.json is stored.
-                       If None, uses %LOCALAPPDATA%/CosRnD
+                       If None, uses %LOCALAPPDATA%/CosRQD
         """
         if config_dir is None:
-            # Default to %LOCALAPPDATA%\CosRnD
+            # Default to %LOCALAPPDATA%\CosRQD
             local_app_data = os.getenv('LOCALAPPDATA')
-            config_dir = Path(local_app_data) / "CosRnD"
+            config_dir = Path(local_app_data) / "CosRQD"
         
         self.config_dir = Path(config_dir)
         self.config_path = self.config_dir / self.CONFIG_FILENAME

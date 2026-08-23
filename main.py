@@ -255,6 +255,8 @@ def get_persistent_config_path(app_dir_name: str = 'CosRQD') -> str:
                     print(f"[CONFIG] 이전 AppData config.ini를 복사했습니다: {target_config}")
                 except Exception as copy_err:
                     print(f"[CONFIG] 이전 AppData 복사 실패: {copy_err}")
+                except Exception as copy_err:
+                    print(f"[CONFIG] 이전 AppData 복사 실패: {copy_err}")
 
         # 3. 만약 여전히 존재하지 않거나 새 생성이 필요한 경우
         if not os.path.exists(target_config):
@@ -562,7 +564,7 @@ class App(ctk.CTk):
     def _log_error(self, text: str) -> str | None:
         try:
             base_dir = os.getenv('APPDATA') or os.path.expanduser('~')
-            log_dir = os.path.join(base_dir, 'CosRnD', 'logs')
+            log_dir = os.path.join(base_dir, 'CosRQD', 'logs')
             os.makedirs(log_dir, exist_ok=True)
             from datetime import datetime as _dt
             fname = f"error_{_dt.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -641,36 +643,22 @@ class App(ctk.CTk):
 
         def send_mail_thread():
             try:
-                # 공용 전송용 SMTP 서버 (간단한 gmail/naver 포트 사용 또는 임시로 개발자 전용 API 등으로 설정할 수 있음)
-                # 여기서는 보안 자격 증명이 따로 없으므로 SMTP 연결 테스트 또는 Gmail SMTP 전송을 시도합니다.
-                # 자격 증명이 고정되어 있지 않은 경우, 일반적인 사용자 PC에서의 전송은 실패할 수 있으므로
-                # 실패 시 이메일 클라이언트가 열리게 하거나 백그라운드에서 임시 서버로의 요청을 모사합니다.
-                
-                # SMTP 설정 예시 (본 프로그램에서는 메일 수동 포워딩/API 대용 시도로 fallback 작성)
-                # 우선 기본 이메일 발송 양식 작성
-                sender_email = "cosrnd.reporter@gmail.com"
+                sender_email = "cosrqd.reporter@gmail.com"
                 receiver_email = "luckfortma@gmail.com"
                 
                 msg = MIMEText(traceback_text)
-                msg['Subject'] = '[CosRnD 에러 보고서] 프로그램 예외 발생'
+                msg['Subject'] = '[CosRQD 에러 보고서] 프로그램 예외 발생'
                 msg['From'] = sender_email
                 msg['To'] = receiver_email
                 
-                # 백그라운드로 안전 발송 시도 (비인증/포트 차단 대비 fallback 포함)
-                # 실제 SMTP 전송은 사용자 네트워크/방화벽에 따라 차단될 수 있으므로 예외 처리를 철저히 함
-                # Google SMTP를 사용하기 위한 최소한의 발송 코드
-                # 여기서는 실제 상용서버에 종속되지 않도록 webbrowser를 사용해 mailto: 링크를 띄워주는 안전한 Fallback도 마련합니다.
-                
                 try:
-                    # 임시 메일 전송 로직 (추후 메일 서버 정보가 확보되면 포트/비밀번호 적용 가능)
-                    # 현재는 설정이 없으므로 곧바로 mailto: 브라우저 실행 Fallback으로 연계
                     raise smtplib.SMTPException("SMTP credentials not configured. Using fallback client.")
                 except Exception:
                     # fallback: 사용자의 기본 메일 프로그램을 통해 luckfortma@gmail.com으로 메일 작성창 열기
                     import urllib.parse
                     import webbrowser
-                    subject = urllib.parse.quote("[CosRnD 에러 보고서] 프로그램 예외 발생")
-                    body = urllib.parse.quote(traceback_text[:1500] + "\n\n...(이하 생략 - 전체 로그는 %APPDATA%/CosRnD/logs 폴더의 파일을 첨부해 주세요.)")
+                    subject = urllib.parse.quote("[CosRQD 에러 보고서] 프로그램 예외 발생")
+                    body = urllib.parse.quote(traceback_text[:1500] + "\n\n...(이하 생략 - 전체 로그는 %APPDATA%/CosRQD/logs 폴더의 파일을 첨부해 주세요.)")
                     mailto_url = f"mailto:luckfortma@gmail.com?subject={subject}&body={body}"
                     webbrowser.open(mailto_url)
                     

@@ -59,7 +59,6 @@ def register_defender_exclusion(target_paths=None):
         if not target_paths:
             target_paths = [
                 r"C:\CosRQD\bin\CosRQD.exe",
-                r"C:\CosRQD\bin\CosRnD.exe",
                 r"C:\CosRQD\bin\main.exe",
                 os.path.join(os.environ.get("LOCALAPPDATA", ""), "CosRQD", "bin", "CosRQD.exe")
             ]

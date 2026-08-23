@@ -101,7 +101,7 @@ class WelcomePage(QWidget):
         layout.setSpacing(20)
         
         # Welcome message
-        title = QLabel("CosRnD 설치 마법사에 오신 것을 환영합니다")
+        title = QLabel("CosRQD 설치 마법사에 오신 것을 환영합니다")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -143,7 +143,7 @@ class PathSelectionPage(QWidget):
         
         # Description
         description = QLabel(
-            "CosRnD를 설치할 위치를 선택하세요.\n"
+            "CosRQD를 설치할 위치를 선택하세요.\n"
             "대부분의 사용자에게는 기본 위치를 권장합니다."
         )
         description.setWordWrap(True)
@@ -195,7 +195,7 @@ class InstallationProgressPage(QWidget):
         layout.setSpacing(15)
         
         # Title
-        title = QLabel("CosRnD 설치 중")
+        title = QLabel("CosRQD 설치 중")
         title_font = QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
@@ -244,7 +244,7 @@ class CompletionPage(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.message_label = QLabel(
-            "CosRnD가 성공적으로 설치되었습니다.\n\n"
+            "CosRQD가 성공적으로 설치되었습니다.\n\n"
             "'완료' 버튼을 클릭하여 설치 프로그램을 종료하세요."
         )
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -283,7 +283,7 @@ class InstallationWizard(QMainWindow):
         self.init_ui()
     
     def init_ui(self):
-        self.setWindowTitle("CosRnD 설치 마법사")
+        self.setWindowTitle("CosRQD 설치 마법사")
         self.setMinimumSize(600, 400)
         
         # Set Window Icon
@@ -463,7 +463,7 @@ class UpdateProgressDialog(QDialog):
         self.init_ui()
     
     def init_ui(self):
-        self.setWindowTitle("CosRnD 업데이트 중")
+        self.setWindowTitle("CosRQD 업데이트 중")
         self.setMinimumSize(400, 150)
         self.setModal(True)
         
@@ -507,7 +507,7 @@ class LauncherMainWindow(QMainWindow):
         self.init_ui()
     
     def init_ui(self):
-        self.setWindowTitle("화장품 연구소 관리 시스템 런처")
+        self.setWindowTitle("CosRQD 화장품 연구소 관리 시스템 런처")
         self.setMinimumSize(400, 300)
         
         # Set Window Icon
@@ -527,7 +527,7 @@ class LauncherMainWindow(QMainWindow):
         layout.setSpacing(20)
         
         # Title
-        title = QLabel("CosRnD 런처")
+        title = QLabel("CosRQD 런처")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
