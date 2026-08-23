@@ -486,6 +486,8 @@ $form.Add_Shown({{
         }} catch {{}}
         Start-Sleep -Milliseconds 800
     }}
+    Get-Process -Name "CosRQD", "main" -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne $PID }} | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
 
     # 2. 다운로드
     $statusLbl.Text = "GitHub 최신 버전 패키지 다운로드 중..."
@@ -520,7 +522,7 @@ $form.Add_Shown({{
                 Start-Sleep -Milliseconds 600
                 $env:_MEIPASS2 = $null
                 $env:_MEIPASS = $null
-                Start-Process $dlFile -UseShellExecute
+                Start-Process -FilePath $dlFile -UseShellExecute
             }} else {{
                 # ZIP 압축 해제 및 100% 덮어쓰기
                 $statusLbl.Text = "최신 버전 파일 교체 중..."
@@ -529,25 +531,33 @@ $form.Add_Shown({{
                 if (Test-Path $extractDir) {{ Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue }}
                 Expand-Archive -Path $dlFile -DestinationPath $extractDir -Force
                 
-                # 파일 교체
-                Copy-Item -Path "$extractDir\\*" -Destination $AppDir -Recurse -Force
+                # 파일 교체 (단일 하위 폴더 포함 여부 검사)
+                $subItems = Get-ChildItem -Path $extractDir
+                if (($subItems.Count -eq 1) -and ($subItems[0].PSIsContainer)) {{
+                    $actualSource = $subItems[0].FullName
+                }} else {{
+                    $actualSource = $extractDir
+                }}
+                Copy-Item -Path "$actualSource\\*" -Destination $AppDir -Recurse -Force
                 
                 # 바로가기 단일 고정 갱신 (CosRQD.lnk)
-                $deskPath = [Environment]::GetFolderPath("Desktop")
-                $tgtExe = Join-Path $AppDir "CosRQD.exe"
-                if (-not (Test-Path $tgtExe)) {{ $tgtExe = Join-Path $AppDir "main.exe" }}
-                $icoPath = Join-Path $AppDir "Icon.ico"
-                
-                $sh = New-Object -ComObject WScript.Shell
-                $lnk = $sh.CreateShortcut((Join-Path $deskPath "CosRQD.lnk"))
-                $lnk.TargetPath = $tgtExe
-                $lnk.WorkingDirectory = $AppDir
-                if (Test-Path $icoPath) {{ $lnk.IconLocation = $icoPath }}
-                $lnk.Save()
-                
-                # 구버전 바로가기 정리
-                Get-ChildItem -Path $deskPath -Filter "*CosRQD*.lnk" | Where-Object {{ $_.Name -ne "CosRQD.lnk" }} | Remove-Item -Force -ErrorAction SilentlyContinue
-                Get-ChildItem -Path $deskPath -Filter "*화장품*.lnk" | Remove-Item -Force -ErrorAction SilentlyContinue
+                try {{
+                    $deskPath = [Environment]::GetFolderPath("Desktop")
+                    $tgtExe = Join-Path $AppDir "CosRQD.exe"
+                    if (-not (Test-Path $tgtExe)) {{ $tgtExe = Join-Path $AppDir "main.exe" }}
+                    $icoPath = Join-Path $AppDir "Icon.ico"
+                    
+                    $sh = New-Object -ComObject WScript.Shell
+                    $lnk = $sh.CreateShortcut((Join-Path $deskPath "CosRQD.lnk"))
+                    $lnk.TargetPath = $tgtExe
+                    $lnk.WorkingDirectory = $AppDir
+                    if (Test-Path $icoPath) {{ $lnk.IconLocation = $icoPath }}
+                    $lnk.Save()
+                    
+                    # 구버전 바로가기 정리
+                    Get-ChildItem -Path $deskPath -Filter "*CosRQD*.lnk" | Where-Object {{ $_.Name -ne "CosRQD.lnk" }} | Remove-Item -Force -ErrorAction SilentlyContinue
+                    Get-ChildItem -Path $deskPath -Filter "*화장품*.lnk" | Remove-Item -Force -ErrorAction SilentlyContinue
+                }} catch {{}}
 
                 # 임시 파일 정리
                 Remove-Item $dlFile -Force -ErrorAction SilentlyContinue
@@ -571,6 +581,8 @@ $form.Add_Shown({{
                 # 최신 프로그램 Windows 쉘 독립 실행 (상속된 _MEIPASS2 완전 차단)
                 $env:_MEIPASS2 = $null
                 $env:_MEIPASS = $null
+                $env:PYTHONPATH = $null
+                $env:PYTHONHOME = $null
                 Start-Process -FilePath $runExe -WorkingDirectory $AppDir -UseShellExecute
             }}
             
@@ -1010,8 +1022,11 @@ class UpdateDialog(ctk.CTkToplevel):
             webbrowser.open(self.release_info.get("url", f"https://github.com/{UpdateManager.GITHUB_REPO}/releases"))
             return
 
-        # 다운로드 프로그레스 다이얼로그 즉시 표시 (눈앞에 실시간 % 및 속도 표시)
-        DownloadProgressDialog(self, self.latest_ver, download_url, self.release_info)
+        self.release_info["download_url"] = download_url
+        master_ref = self.master
+        self.destroy()
+        # 메인 프로그램 즉시 종료 및 독립 네이티브 업데이터 GUI 실행 (완벽한 파일 락 해제 & 100% 안전 설치)
+        UpdateManager.execute_real_update(master_ref, self.latest_ver, self.release_info)
 
     def _open_web_release(self):
         import webbrowser
