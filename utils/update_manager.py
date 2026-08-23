@@ -526,19 +526,30 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             parent=self
         )
 
-        # 프로그램 안전 지연 자동 재실행 (부모 프로세스가 종료되어 임시 폴더가 삭제된 후 깨끗하게 자식 실행)
+        # 프로그램 VBS 1.2초 지연 독립 안전 재실행 (임시 폴더 충돌 완전 원천 차단)
         try:
-            clean_env = get_clean_subproc_env()
-            if getattr(sys, 'frozen', False):
-                exe_path = sys.executable
-                if os.name == 'nt':
-                    cmd_str = f'timeout /t 1 /nobreak > NUL & start "" "{exe_path}"'
-                    subprocess.Popen(f'cmd.exe /c "{cmd_str}"', cwd=os.path.dirname(exe_path), env=clean_env, shell=True)
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.join(PROJECT_ROOT, "main.py")
+            if sys.platform.startswith('win'):
+                import ctypes
+                for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME']:
+                    ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
+                    if k in os.environ:
+                        del os.environ[k]
+                
+                vbs_file = os.path.join(tempfile.gettempdir(), "cosrqd_safe_update_restart.vbs")
+                escaped_exe = str(exe_path).replace('"', '""')
+                if getattr(sys, 'frozen', False):
+                    run_target = f'""{escaped_exe}""'
                 else:
-                    subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path), env=clean_env)
+                    py_exe = sys.executable.replace('"', '""')
+                    run_target = f'""{py_exe}"" ""{escaped_exe}""'
+                
+                with open(vbs_file, "w", encoding="utf-8") as f:
+                    f.write(f'WScript.Sleep 1200\nCreateObject("WScript.Shell").Run "{run_target}", 1, False\n')
+                
+                subprocess.Popen(["wscript.exe", vbs_file], close_fds=True)
             else:
-                main_script = os.path.join(PROJECT_ROOT, "main.py")
-                subprocess.Popen([sys.executable, main_script], cwd=PROJECT_ROOT, env=clean_env)
+                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path), env=get_clean_subproc_env())
         except Exception as e:
             print(f"[Update] 재실행 실패: {e}")
 
@@ -546,7 +557,8 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             self.master.winfo_toplevel().destroy()
         except:
             pass
-        sys.exit(0)
+        import os as _os
+        _os._exit(0)
 
     def _on_error(self, err):
         messagebox.showerror(

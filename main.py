@@ -121,6 +121,61 @@ def get_clean_subproc_env(extra_env=None):
     return env
 
 
+def safe_restart_application(exe_path=None, extra_env=None):
+    """
+    Windows 환경에서 PyInstaller 부모 프로세스의 환경변수(_MEIPASS2 등)와
+    임시 디렉토리 충돌을 완벽히 차단하고, 부모 종료 후 1.2초 뒤에 깨끗한 새 프로세스로 안전 재실행합니다.
+    """
+    if not exe_path:
+        exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.join(PROJECT_ROOT, "main.py")
+    
+    # 1. Windows OS 레벨 환경변수 테이블에서 _MEIPASS, _MEIPASS2 강제 삭제
+    if sys.platform.startswith('win'):
+        try:
+            import ctypes
+            for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME', 'PYINSTALLER_STRICT_UNLOAD_MODE', 'PYINSTALLER_SUPPRESS_TEMP_ERRORS']:
+                ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
+                if k in os.environ:
+                    del os.environ[k]
+        except Exception:
+            pass
+
+    # 2. 실행 명령 분기 (VBS 무창 독립 스케줄러)
+    if sys.platform.startswith('win'):
+        try:
+            import tempfile
+            vbs_file = os.path.join(tempfile.gettempdir(), "cosrqd_safe_restart.vbs")
+            escaped_exe = str(exe_path).replace('"', '""')
+            
+            if getattr(sys, 'frozen', False):
+                run_target = f'""{escaped_exe}""'
+            else:
+                py_exe = sys.executable.replace('"', '""')
+                run_target = f'""{py_exe}"" ""{escaped_exe}""'
+
+            vbs_content = (
+                'WScript.Sleep 1200\n'
+                'Set sh = CreateObject("WScript.Shell")\n'
+                f'sh.Run "{run_target}", 1, False\n'
+            )
+            with open(vbs_file, "w", encoding="utf-8") as f:
+                f.write(vbs_content)
+            
+            subprocess.Popen(["wscript.exe", vbs_file], close_fds=True)
+            print(f"[재시작] VBS 안전 독립 재실행 스케줄 등록 완료: {run_target}")
+        except Exception as vbs_err:
+            print(f"[재시작] VBS 실패, PowerShell 대체: {vbs_err}")
+            ps_cmd = f"Start-Sleep -Milliseconds 1200; Start-Process '{exe_path}'"
+            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd])
+    else:
+        clean_env = get_clean_subproc_env(extra_env)
+        subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path), env=clean_env)
+
+    # 3. 현재 프로세스 즉시 안전 종료
+    import os as _os
+    _os._exit(0)
+
+
 # 로그인/회원가입 시 표시할 법적고지 및 일반사항 전문
 LEGAL_NOTICE_FULL_TEXT = '''
 [법적 고지 및 저작권 이용 약관]
@@ -2811,25 +2866,8 @@ class App(ctk.CTk):
             import subprocess
             import sys
             
-            if getattr(sys, 'frozen', False):
-                # 단일 실행 파일(EXE) 배포 환경: 부모 종료 후 독립 지연 실행
-                exe_path = sys.executable
-                current_dir = os.path.dirname(exe_path)
-                print(f"[재시작] 실행 파일 재시작 경로: {exe_path}")
-                if os.name == 'nt':
-                    cmd_str = f'timeout /t 1 /nobreak > NUL & start "" "{exe_path}"'
-                    subprocess.Popen(f'cmd.exe /c "{cmd_str}"', cwd=current_dir, env=clean_env, shell=True)
-                else:
-                    subprocess.Popen([exe_path], cwd=current_dir, env=clean_env)
-            else:
-                # 개발 스크립트 실행 환경
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                cmd = [sys.executable] + sys.argv
-                print(f"[재시작] 개발 스크립트 재시작: {cmd}")
-                subprocess.Popen(cmd, cwd=current_dir, env=clean_env)
-            
-            # 6. 현재 프로세스 안전 종료
-            self.after(100, self.destroy)
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
+            safe_restart_application(exe_path, clean_env)
             
         except Exception as e:
             print(f"[재시작] 재시작 중 오류: {e}")
@@ -3697,16 +3735,9 @@ class App(ctk.CTk):
             try:
                 # 실행 파일 경로 결정
                 if getattr(sys, 'frozen', False):
-                    # 패키징된 실행 파일인 경우
                     executable_path = sys.executable
-                    current_dir = os.path.dirname(sys.executable)
                 else:
-                    # 개발 환경인 경우
-                    executable_path = sys.executable
-                    current_dir = os.path.dirname(os.path.abspath(__file__))
-                
-                print(f"{datetime.now()}: 실행 경로: {executable_path}")
-                print(f"{datetime.now()}: 작업 디렉토리: {current_dir}")
+                    executable_path = os.path.abspath(__file__)
                 
                 # 사용자 정보 및 재시작 상태 전달용 환경 변수 구성
                 pass_env = {}
@@ -3716,24 +3747,8 @@ class App(ctk.CTk):
                     pass_env['RESTART_USER_IS_ADMIN'] = str(self.current_user.is_admin)
                     print(f"[재시작] 사용자 정보 전달: {self.current_user.id} (관리자: {self.current_user.is_admin})")
 
-                # PyInstaller 임시 디렉토리(_MEIPASS, _MEIPASS2) 완전 정돈
-                clean_env = get_clean_subproc_env(pass_env)
-                
-                # 새 프로세스 시작 (작업 디렉토리 및 환경 변수 명시적 설정)
-                if not getattr(sys, 'frozen', False):
-                    # 개발 환경(Python 스크립트)
-                    script_path = os.path.abspath(__file__)
-                    cmd = [executable_path, script_path] + sys.argv[1:]
-                    subprocess.Popen(cmd, cwd=current_dir, env=clean_env)
-                else:
-                    # 패키징된 단일 실행 파일(EXE): 부모 종료 후 1초 지연 독립 실행
-                    if os.name == 'nt':
-                        cmd_str = f'timeout /t 1 /nobreak > NUL & start "" "{executable_path}"'
-                        subprocess.Popen(f'cmd.exe /c "{cmd_str}"', cwd=current_dir, env=clean_env, shell=True)
-                    else:
-                        subprocess.Popen([executable_path], cwd=current_dir, env=clean_env)
-
-                print(f"{datetime.now()}: 새 프로세스 시작 성공 (정돈된 환경 변수 및 지연 독립 실행 적용)")
+                # VBS 1.2초 무창 안전 독립 재실행
+                safe_restart_application(executable_path, pass_env)
             except Exception as process_error:
                 error_msg = f"새 프로세스 시작 실패: {process_error}"
                 print(f"{datetime.now()}: {error_msg}")
@@ -3745,11 +3760,6 @@ class App(ctk.CTk):
                 except Exception:
                     pass
                 return
-
-            # 8. 현재 프로세스 종료
-            print(f"{datetime.now()}: 현재 프로세스 종료")
-            import os as _os
-            _os._exit(0)
             
         except Exception as e:
             error_msg = f"프로그램 재시작 실패: {e}"
