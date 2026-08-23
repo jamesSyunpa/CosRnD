@@ -399,7 +399,16 @@ class UpdateManager:
         # 1. DB 및 설정파일 사전 안전 백업
         bk_path = cls.backup_database_before_update()
         current_pid = os.getpid()
-        app_dir = PROJECT_ROOT
+        
+        # 실제 디스크 상의 실행 파일 및 설치 디렉터리 (PyInstaller 임시 경로와 100% 분리)
+        if getattr(sys, 'frozen', False):
+            target_exe = sys.executable
+            app_dir = os.path.dirname(sys.executable)
+        else:
+            target_exe = os.path.join(PROJECT_ROOT, "dist", "CosRQD.exe")
+            if not os.path.exists(target_exe):
+                target_exe = os.path.join(PROJECT_ROOT, "main.exe")
+            app_dir = PROJECT_ROOT
         
         # 2. 독립 PowerShell 네이티브 업데이터 스크립트 작성
         temp_dir = tempfile.gettempdir()
@@ -411,6 +420,7 @@ param(
     [string]$DownloadUrl = "{download_url}",
     [string]$LatestVer = "{latest_ver}",
     [string]$AppDir = "{app_dir}",
+    [string]$TargetExe = "{target_exe}",
     [int]$ParentPid = {current_pid}
 )
 
@@ -546,10 +556,19 @@ $form.Add_Shown({{
                 $form.Refresh()
                 Start-Sleep -Milliseconds 800
 
+                # 실행 대상 결정
+                $runExe = $TargetExe
+                if (-not (Test-Path $runExe)) {{
+                    $runExe = Join-Path $AppDir "CosRQD.exe"
+                }}
+                if (-not (Test-Path $runExe)) {{
+                    $runExe = Join-Path $AppDir "main.exe"
+                }}
+
                 # 최신 프로그램 Windows 쉘 독립 실행 (상속된 _MEIPASS2 완전 차단)
                 $env:_MEIPASS2 = $null
                 $env:_MEIPASS = $null
-                Start-Process $tgtExe -UseShellExecute
+                Start-Process -FilePath $runExe -WorkingDirectory $AppDir -UseShellExecute
             }}
             
             $form.Close()
