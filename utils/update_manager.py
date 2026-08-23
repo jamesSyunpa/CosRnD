@@ -386,49 +386,208 @@ class UpdateManager:
     @classmethod
     def execute_real_update(cls, master, latest_ver: str, release_info: dict):
         """
-        GitHub 직링크를 통한 고속 다운로드 및 실제 자동 업데이트를 실행합니다.
+        [독립 네이티브 업데이터 엔진]
+        메인 프로그램을 먼저 100% 안전 종료한 후, 독립 네이티브 GUI 창이 다운로드 및 파일 교체를 완벽히 수행합니다.
         """
         download_url = release_info.get("download_url")
-        
-        if download_url:
-            # GitHub 직링크가 있으면 진행률 다운로드 창 표시
-            DownloadProgressDialog(master, latest_ver, download_url, release_info)
-        else:
-            # 링크가 없으면 런처 실행 및 브라우저 안내
-            bk_path = cls.backup_database_before_update()
-            launcher_script = os.path.join(PROJECT_ROOT, "launcher.py")
-            launcher_exe = os.path.join(PROJECT_ROOT, "launcher.exe")
-            
-            clean_env = get_clean_subproc_env()
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-            
-            launched = False
-            try:
-                if os.path.exists(launcher_exe):
-                    subprocess.Popen([launcher_exe, "--update", latest_ver], env=clean_env, creationflags=flags)
-                    launched = True
-                elif os.path.exists(launcher_script):
-                    subprocess.Popen([sys.executable, launcher_script, "--update", latest_ver], env=clean_env, creationflags=flags)
-                    launched = True
-            except Exception as e:
-                print(f"[UpdateManager] 런처 실행 오류: {e}")
+        if not download_url:
+            import webbrowser
+            webbrowser.open(release_info.get("url", f"https://github.com/{cls.GITHUB_REPO}/releases"))
+            return
 
-            if launched:
-                messagebox.showinfo(
-                    "업데이트 시작",
-                    f"🚀 최신 버전({latest_ver}) 자동 업데이트를 시작합니다.\n\n"
-                    f"• 기존 데이터베이스가 {bk_path}에 안전하게 백업되었습니다.\n"
-                    f"• 프로그램이 종료된 후 최신 버전으로 자동 교체됩니다.",
-                    parent=master
-                )
-                try:
-                    master.winfo_toplevel().destroy()
-                except:
-                    pass
-                sys.exit(0)
-            else:
-                import webbrowser
-                webbrowser.open(release_info.get("url", f"https://github.com/{cls.GITHUB_REPO}/releases"))
+        # 1. DB 및 설정파일 사전 안전 백업
+        bk_path = cls.backup_database_before_update()
+        current_pid = os.getpid()
+        app_dir = PROJECT_ROOT
+        
+        # 2. 독립 PowerShell 네이티브 업데이터 스크립트 작성
+        temp_dir = tempfile.gettempdir()
+        ps_script_path = os.path.join(temp_dir, f"cosrqd_native_updater_{int(time.time())}.ps1")
+        
+        ps_code = f'''# CosRQD Native Standalone Updater
+param(
+    [string]$DownloadUrl = "{download_url}",
+    [string]$LatestVer = "{latest_ver}",
+    [string]$AppDir = "{app_dir}",
+    [int]$ParentPid = {current_pid}
+)
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "CosRQD 자동 업데이트"
+$form.Size = New-Object System.Drawing.Size(460, 220)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.TopMost = $true
+$form.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
+
+$titleLbl = New-Object System.Windows.Forms.Label
+$titleLbl.Text = "🚀 CosRQD $LatestVer 자동 업데이트"
+$titleLbl.ForeColor = [System.Drawing.Color]::White
+$titleLbl.Font = New-Object System.Drawing.Font("맑은 고딕", 12, [System.Drawing.FontStyle]::Bold)
+$titleLbl.Location = New-Object System.Drawing.Point(25, 20)
+$titleLbl.Size = New-Object System.Drawing.Size(400, 30)
+$form.Controls.Add($titleLbl)
+
+$statusLbl = New-Object System.Windows.Forms.Label
+$statusLbl.Text = "이전 프로그램 종료 및 리소스 정리 중..."
+$statusLbl.ForeColor = [System.Drawing.Color]::FromArgb(148, 163, 184)
+$statusLbl.Font = New-Object System.Drawing.Font("맑은 고딕", 9)
+$statusLbl.Location = New-Object System.Drawing.Point(25, 55)
+$statusLbl.Size = New-Object System.Drawing.Size(400, 25)
+$form.Controls.Add($statusLbl)
+
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = New-Object System.Drawing.Point(25, 90)
+$progressBar.Size = New-Object System.Drawing.Size(395, 25)
+$progressBar.Minimum = 0
+$progressBar.Maximum = 100
+$progressBar.Value = 0
+$form.Controls.Add($progressBar)
+
+$pctLbl = New-Object System.Windows.Forms.Label
+$pctLbl.Text = "0%"
+$pctLbl.ForeColor = [System.Drawing.Color]::FromArgb(203, 213, 225)
+$pctLbl.Font = New-Object System.Drawing.Font("맑은 고딕", 9, [System.Drawing.FontStyle]::Bold)
+$pctLbl.Location = New-Object System.Drawing.Point(25, 125)
+$pctLbl.Size = New-Object System.Drawing.Size(395, 20)
+$pctLbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+$form.Controls.Add($pctLbl)
+
+$form.Add_Shown({{
+    $form.Refresh()
+    
+    # 1. 이전 메인 프로그램 프로세스 완전 종료 대기
+    if ($ParentPid -gt 0) {{
+        try {{
+            $p = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
+            if ($p) {{
+                $p.WaitForExit(5000)
+            }}
+        }} catch {{}}
+        Start-Sleep -Milliseconds 800
+    }}
+
+    # 2. 다운로드
+    $statusLbl.Text = "GitHub 최신 버전 패키지 다운로드 중..."
+    $form.Refresh()
+    
+    $tmpDir = [System.IO.Path]::GetTempPath()
+    $isExe = $DownloadUrl.ToLower().EndsWith(".exe")
+    $fileName = if ($isExe) {{ "Setup_CosRQD_$LatestVer.exe" }} else {{ "CosRQD_Update_$LatestVer.zip" }}
+    $dlFile = Join-Path $tmpDir $fileName
+    $extractDir = Join-Path $tmpDir "CosRQD_Extracted_$LatestVer"
+
+    try {{
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add("User-Agent", "CosRnD-NativeUpdater")
+        
+        $wc.Add_DownloadProgressChanged({{
+            $progressBar.Value = $_.ProgressPercentage
+            $mbRecv = [math]::Round($_.BytesReceived / 1MB, 1)
+            $mbTotal = [math]::Round($_.TotalBytesToReceive / 1MB, 1)
+            $pctLbl.Text = "$($_.ProgressPercentage)% ($mbRecv MB / $mbTotal MB)"
+            $form.Refresh()
+        }})
+        
+        $wc.Add_DownloadFileCompleted({{
+            if ($isExe) {{
+                # Setup.exe 단독 실행
+                $statusLbl.Text = "설치 마법사를 시작합니다..."
+                $progressBar.Value = 100
+                $pctLbl.Text = "100%"
+                $form.Refresh()
+                Start-Sleep -Milliseconds 600
+                $env:_MEIPASS2 = $null
+                $env:_MEIPASS = $null
+                Start-Process $dlFile
+            }} else {{
+                # ZIP 압축 해제 및 100% 덮어쓰기
+                $statusLbl.Text = "최신 버전 파일 교체 중..."
+                $form.Refresh()
+                
+                if (Test-Path $extractDir) {{ Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue }}
+                Expand-Archive -Path $dlFile -DestinationPath $extractDir -Force
+                
+                # 파일 교체
+                Copy-Item -Path "$extractDir\\*" -Destination $AppDir -Recurse -Force
+                
+                # 바로가기 단일 고정 갱신 (CosRQD.lnk)
+                $deskPath = [Environment]::GetFolderPath("Desktop")
+                $tgtExe = Join-Path $AppDir "CosRQD.exe"
+                if (-not (Test-Path $tgtExe)) {{ $tgtExe = Join-Path $AppDir "main.exe" }}
+                $icoPath = Join-Path $AppDir "Icon.ico"
+                
+                $sh = New-Object -ComObject WScript.Shell
+                $lnk = $sh.CreateShortcut((Join-Path $deskPath "CosRQD.lnk"))
+                $lnk.TargetPath = $tgtExe
+                $lnk.WorkingDirectory = $AppDir
+                if (Test-Path $icoPath) {{ $lnk.IconLocation = $icoPath }}
+                $lnk.Save()
+                
+                # 구버전 바로가기 정리
+                Get-ChildItem -Path $deskPath -Filter "*CosRQD*.lnk" | Where-Object {{ $_.Name -ne "CosRQD.lnk" }} | Remove-Item -Force -ErrorAction SilentlyContinue
+                Get-ChildItem -Path $deskPath -Filter "*화장품*.lnk" | Remove-Item -Force -ErrorAction SilentlyContinue
+
+                # 임시 파일 정리
+                Remove-Item $dlFile -Force -ErrorAction SilentlyContinue
+                Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+                
+                $statusLbl.Text = "업데이트 완료! 최신 버전을 실행합니다..."
+                $progressBar.Value = 100
+                $pctLbl.Text = "100%"
+                $form.Refresh()
+                Start-Sleep -Milliseconds 800
+
+                # 최신 프로그램 실행
+                $env:_MEIPASS2 = $null
+                $env:_MEIPASS = $null
+                Start-Process $tgtExe
+            }}
+            
+            $form.Close()
+        }})
+        
+        $wc.DownloadFileAsync((New-Object Uri($DownloadUrl)), $dlFile)
+        
+    }} catch {{
+        [System.Windows.Forms.MessageBox]::Show("다운로드 중 오류가 발생했습니다: $_", "업데이트 실패")
+        $form.Close()
+    }}
+}})
+
+[System.Windows.Forms.Application]::Run($form)
+'''
+
+        with open(ps_script_path, "w", encoding="utf-8") as pf:
+            pf.write(ps_code)
+
+        # 3. OS 레벨 환경변수 정화
+        if sys.platform.startswith('win'):
+            import ctypes
+            for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME']:
+                ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
+
+        # 4. 독립 네이티브 업데이터 실행
+        flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        subprocess.Popen(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps_script_path],
+            creationflags=flags
+        )
+        print(f"[UpdateManager] 독립 네이티브 업데이터 실행 및 메인 프로그램 즉시 종료: {ps_script_path}")
+
+        # 5. 메인 프로그램 즉시 완전 종료 (파일 락 100% 해제)
+        try:
+            master.winfo_toplevel().destroy()
+        except:
+            pass
+        import os as _os
+        _os._exit(0)
 
 
 class DownloadProgressDialog(ctk.CTkToplevel):
