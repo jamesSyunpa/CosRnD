@@ -566,14 +566,24 @@ class UpdateDialog(ctk.CTkToplevel):
                 hover_color="#16a34a",
                 command=self._on_update_clicked
             ).pack(side="right", padx=(5, 0))
+        else:
+            ctk.CTkButton(
+                btn_bar,
+                text="🔄 최신 빌드로 재설치/복구",
+                width=180,
+                font=ctk.CTkFont(weight="bold"),
+                fg_color="#0284C7",
+                hover_color="#0369A1",
+                command=self._on_update_clicked
+            ).pack(side="right", padx=(5, 0))
 
         ctk.CTkButton(
             btn_bar,
-            text="🌐 릴리즈 보기",
-            width=110,
+            text="🌐 웹에서 직접 다운로드",
+            width=150,
             fg_color="#3b82f6",
             hover_color="#2563eb",
-            command=lambda: import_webbrowser_open(self.release_info.get("url"))
+            command=self._open_web_release
         ).pack(side="right", padx=(5, 0))
 
     def _on_update_clicked(self):
@@ -587,7 +597,8 @@ class UpdateDialog(ctk.CTkToplevel):
         if confirm:
             UpdateManager.execute_real_update(self, self.latest_ver, self.release_info)
 
-def import_webbrowser_open(url):
-    import webbrowser
-    if url:
-        webbrowser.open(url)
+    def _open_web_release(self):
+        import webbrowser
+        url = self.release_info.get("url", f"https://github.com/{UpdateManager.GITHUB_REPO}/releases")
+        if url:
+            webbrowser.open(url)
