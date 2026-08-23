@@ -23,7 +23,7 @@ def main():
     ver_file = os.path.join(current_dir, "VERSION")
     cfg_file = os.path.join(current_dir, "config.ini")
     icon_file = os.path.join(current_dir, "Icon.ico")
-    version = "v65.0.1"
+    version = "v65.0.2"
     if os.path.exists(ver_file):
         with open(ver_file, "r", encoding="utf-8") as f:
             v = f.read().strip()

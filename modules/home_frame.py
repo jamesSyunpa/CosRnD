@@ -517,7 +517,7 @@ class HomeFrame(ctk.CTkFrame):
                 if ver and not ver.startswith('v') and re.match(r'^\d+(?:\.\d+)*$', ver):
                     ver = 'v' + ver
         except:
-            ver = "v65.0.1"
+            ver = "v65.0.2"
 
         # 기본 로컬 패치노트 (즉시 렌더링)
         default_text = (
