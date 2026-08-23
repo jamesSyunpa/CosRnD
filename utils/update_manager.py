@@ -497,7 +497,7 @@ $form.Add_Shown({{
         
         $wc.Add_DownloadFileCompleted({{
             if ($isExe) {{
-                # Setup.exe 단독 실행
+                # Setup.exe 단독 실행 (Windows 쉘 독립 실행)
                 $statusLbl.Text = "설치 마법사를 시작합니다..."
                 $progressBar.Value = 100
                 $pctLbl.Text = "100%"
@@ -505,7 +505,7 @@ $form.Add_Shown({{
                 Start-Sleep -Milliseconds 600
                 $env:_MEIPASS2 = $null
                 $env:_MEIPASS = $null
-                Start-Process $dlFile
+                Start-Process $dlFile -UseShellExecute
             }} else {{
                 # ZIP 압축 해제 및 100% 덮어쓰기
                 $statusLbl.Text = "최신 버전 파일 교체 중..."
@@ -544,10 +544,10 @@ $form.Add_Shown({{
                 $form.Refresh()
                 Start-Sleep -Milliseconds 800
 
-                # 최신 프로그램 실행
+                # 최신 프로그램 Windows 쉘 독립 실행 (상속된 _MEIPASS2 완전 차단)
                 $env:_MEIPASS2 = $null
                 $env:_MEIPASS = $null
-                Start-Process $tgtExe
+                Start-Process $tgtExe -UseShellExecute
             }}
             
             $form.Close()

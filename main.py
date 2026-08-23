@@ -149,7 +149,8 @@ def safe_restart_application(exe_path=None, extra_env=None):
             bat_file = os.path.join(tempfile.gettempdir(), f"cosrqd_restart_{int(time.time())}.bat")
             
             if getattr(sys, 'frozen', False):
-                run_target = f'start "" "{exe_path}"'
+                # 윈도우 쉘(explorer.exe)을 통해 100% 클린한 새 환경에서 실행 (환경변수 상속 완전 차단)
+                run_target = f'explorer.exe "{exe_path}"'
             else:
                 py_exe = sys.executable
                 run_target = f'start "" "{py_exe}" "{exe_path}"'
@@ -166,17 +167,10 @@ if not errorlevel 1 (
     goto WAIT_PROCESS
 )
 
-:: 추가 안전 딜레이 (OS가 DLL 파일 락 및 임시 폴더 삭제를 완료할 때까지 보장)
+:: 이전 프로세스 종료 후 DLL 락 해제 및 임시폴더 정리 대기
 timeout /t 1 /nobreak >nul
 
-:: 환경변수 완전 정화
-set _MEIPASS=
-set _MEIPASS2=
-set PYTHONPATH=
-set PYTHONHOME=
-set PYINSTALLER_STRICT_UNLOAD_MODE=
-
-:: 독립 프로세스 실행
+:: Windows Explorer Shell 독립 실행 (상속된 _MEIPASS2 완전 단절)
 {run_target}
 
 (goto) 2>nul & del "%~f0"
