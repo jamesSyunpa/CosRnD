@@ -556,23 +556,43 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             parent=self
         )
 
-        # 4. 독립 배치 파일 생성 (부모 종료 대기 -> 파일 락 해제 후 덮어쓰기 -> 깨끗한 새 프로세스 실행)
+        # 4. 독립 배치 파일 생성 (부모 PID 소멸 감시 -> 파일 락 해제 후 덮어쓰기 -> 깨끗한 새 프로세스 실행)
         try:
+            current_pid = os.getpid()
             bat_file = os.path.join(tempfile.gettempdir(), f"cosrqd_patch_{int(time.time())}.bat")
             exe_target = sys.executable if getattr(sys, 'frozen', False) else os.path.join(PROJECT_ROOT, "main.py")
             app_dir = PROJECT_ROOT
             
             if is_zip:
                 bat_content = f'''@echo off
+setlocal
 chcp 65001 > NUL
-timeout /t 2 /nobreak > NUL
+set PID={current_pid}
+
+:WAIT_PROCESS
+tasklist /fi "pid eq %PID%" 2>nul | find "%PID%" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto WAIT_PROCESS
+)
+
+:: 프로세스 완전 종료 후 추가 1초 대기 (OS가 DLL 파일 락 및 임시 폴더 삭제를 완료할 때까지 보장)
+timeout /t 1 /nobreak >nul
+
+:: 새 버전 파일 교체
 xcopy /s /e /y /q "{temp_extract_dir}\\*" "{app_dir}\\"
+
+:: 환경변수 완전 정화
 set _MEIPASS=
 set _MEIPASS2=
 set PYTHONPATH=
 set PYTHONHOME=
 set PYINSTALLER_STRICT_UNLOAD_MODE=
+
+:: 새 프로세스 독립 실행
 start "" "{exe_target}"
+
+:: 임시 파일 청소
 rd /s /q "{temp_extract_dir}" > NUL 2>&1
 del "{downloaded_file}" > NUL 2>&1
 (goto) 2>nul & del "%~f0"
@@ -580,7 +600,17 @@ del "{downloaded_file}" > NUL 2>&1
             else:
                 # Setup.exe 단독 실행파일인 경우
                 bat_content = f'''@echo off
-timeout /t 1 /nobreak > NUL
+setlocal
+set PID={current_pid}
+
+:WAIT_PROCESS
+tasklist /fi "pid eq %PID%" 2>nul | find "%PID%" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto WAIT_PROCESS
+)
+
+timeout /t 1 /nobreak >nul
 set _MEIPASS=
 set _MEIPASS2=
 set PYTHONPATH=

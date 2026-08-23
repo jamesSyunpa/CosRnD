@@ -123,12 +123,14 @@ def get_clean_subproc_env(extra_env=None):
 
 def safe_restart_application(exe_path=None, extra_env=None):
     """
-    Windows 환경에서 PyInstaller 부모 프로세스의 환경변수(_MEIPASS2 등)와
-    임시 디렉토리 충돌을 완벽히 차단하고, 부모 종료 후 1.2초 뒤에 깨끗한 새 프로세스로 안전 재실행합니다.
+    Windows 환경에서 부모 프로세스가 완전히 종료(PID 소멸 및 DLL/임시폴더 락 해제)된 것을
+    외부 스크립트가 직접 확인한 후, 깨끗한 환경에서 새 프로세스를 안전하게 실행합니다.
     """
     if not exe_path:
         exe_path = sys.executable if getattr(sys, 'frozen', False) else os.path.join(PROJECT_ROOT, "main.py")
     
+    current_pid = os.getpid()
+
     # 1. Windows OS 레벨 환경변수 테이블에서 _MEIPASS, _MEIPASS2 강제 삭제
     if sys.platform.startswith('win'):
         try:
@@ -140,32 +142,54 @@ def safe_restart_application(exe_path=None, extra_env=None):
         except Exception:
             pass
 
-    # 2. 실행 명령 분기 (VBS 무창 독립 스케줄러)
+    # 2. 프로세스 소멸 감시 및 안전 재실행 배치 스크립트 실행
     if sys.platform.startswith('win'):
         try:
             import tempfile
-            vbs_file = os.path.join(tempfile.gettempdir(), "cosrqd_safe_restart.vbs")
-            escaped_exe = str(exe_path).replace('"', '""')
+            bat_file = os.path.join(tempfile.gettempdir(), f"cosrqd_restart_{int(time.time())}.bat")
             
             if getattr(sys, 'frozen', False):
-                run_target = f'""{escaped_exe}""'
+                run_target = f'start "" "{exe_path}"'
             else:
-                py_exe = sys.executable.replace('"', '""')
-                run_target = f'""{py_exe}"" ""{escaped_exe}""'
+                py_exe = sys.executable
+                run_target = f'start "" "{py_exe}" "{exe_path}"'
 
-            vbs_content = (
-                'WScript.Sleep 1200\n'
-                'Set sh = CreateObject("WScript.Shell")\n'
-                f'sh.Run "{run_target}", 1, False\n'
-            )
-            with open(vbs_file, "w", encoding="utf-8") as f:
-                f.write(vbs_content)
-            
-            subprocess.Popen(["wscript.exe", vbs_file], close_fds=True)
-            print(f"[재시작] VBS 안전 독립 재실행 스케줄 등록 완료: {run_target}")
-        except Exception as vbs_err:
-            print(f"[재시작] VBS 실패, PowerShell 대체: {vbs_err}")
-            ps_cmd = f"Start-Sleep -Milliseconds 1200; Start-Process '{exe_path}'"
+            bat_content = f'''@echo off
+setlocal
+chcp 65001 > NUL
+set PID={current_pid}
+
+:WAIT_PROCESS
+tasklist /fi "pid eq %PID%" 2>nul | find "%PID%" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto WAIT_PROCESS
+)
+
+:: 추가 안전 딜레이 (OS가 DLL 파일 락 및 임시 폴더 삭제를 완료할 때까지 보장)
+timeout /t 1 /nobreak >nul
+
+:: 환경변수 완전 정화
+set _MEIPASS=
+set _MEIPASS2=
+set PYTHONPATH=
+set PYTHONHOME=
+set PYINSTALLER_STRICT_UNLOAD_MODE=
+
+:: 독립 프로세스 실행
+{run_target}
+
+(goto) 2>nul & del "%~f0"
+'''
+            with open(bat_file, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+            flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            subprocess.Popen(f'cmd.exe /c "{bat_file}"', shell=True, creationflags=flags)
+            print(f"[재시작] PID {current_pid} 소멸 감시 재실행 배치 시작: {bat_file}")
+        except Exception as err:
+            print(f"[재시작] 배치 생성 실패, 폴백 재시작 시도: {err}")
+            ps_cmd = f"Wait-Process -Id {current_pid} -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800; Start-Process '{exe_path}'"
             subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd])
     else:
         clean_env = get_clean_subproc_env(extra_env)
