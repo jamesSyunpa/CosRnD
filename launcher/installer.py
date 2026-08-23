@@ -433,7 +433,7 @@ class Installer:
                             winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
                             winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
                             winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, app_version_str)
-                            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "태성켐 (TaesungChem)")
+                            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "럭포마 (LucForma)")
                             winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
                             winreg.SetValueEx(key, "URLInfoAbout", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
                             winreg.SetValueEx(key, "HelpLink", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
