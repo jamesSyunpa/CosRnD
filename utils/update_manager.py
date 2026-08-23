@@ -704,20 +704,20 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             pass
 
     def _apply_update(self, downloaded_file):
-        # 1. DB 백업
+        """다운로드 완료 후 PowerShell 무인 백그라운드 엔진을 통해 락 해제 대기, 안전 파일 교체, 최신 버전 자동 재실행"""
+        # 1. DB 안전 백업
         bk_path = UpdateManager.backup_database_before_update()
         
-        self.status_lbl.configure(text="데이터 백업 완료 및 새 버전 교체 준비 중...")
+        self.status_lbl.configure(text="데이터 백업 완료 및 최신 버전 교체 준비 중...")
         
-        # 2. 바탕화면 및 시작메뉴 바로가기 최신화 (사전 갱신)
+        # 2. 바탕화면 바로가기 사전 갱신
         try:
             update_desktop_shortcuts(self.latest_ver)
         except Exception:
             pass
 
-        # 3. 파일 형태에 따른 안전 교체 스크립트 생성 및 실행
         is_zip = downloaded_file.lower().endswith(".zip")
-        temp_extract_dir = os.path.join(PROJECT_ROOT, "temp", "update_extracted")
+        temp_extract_dir = os.path.join(tempfile.gettempdir(), f"cosrqd_extract_{int(time.time())}")
         
         if is_zip:
             try:
@@ -732,10 +732,11 @@ class DownloadProgressDialog(ctk.CTkToplevel):
         self.status_lbl.configure(text=f"최신 버전({self.latest_ver}) 다운로드 완료! 자동 교체 및 재실행 중...")
         self.update_idletasks()
 
-        # 4. 독립 배치 파일 생성 (부모 PID 소멸 감시 -> 파일 락 해제 후 덮어쓰기 -> explorer.exe 최상위 쉘 재실행)
+        # 3. PowerShell 무인 사일런트 업데이터 스크립트 작성 (검은색 창 100% 방지, 행 걸림 100% 방지)
         try:
             current_pid = os.getpid()
-            bat_file = os.path.join(tempfile.gettempdir(), f"cosrqd_patch_{int(time.time())}.bat")
+            ps_script_path = os.path.join(tempfile.gettempdir(), f"cosrqd_silent_update_{int(time.time())}.ps1")
+            
             if getattr(sys, 'frozen', False):
                 exe_target = sys.executable
                 app_dir = os.path.dirname(sys.executable)
@@ -744,65 +745,90 @@ class DownloadProgressDialog(ctk.CTkToplevel):
                 if not os.path.exists(exe_target):
                     exe_target = os.path.join(PROJECT_ROOT, "main.exe")
                 app_dir = PROJECT_ROOT
-            
+
             if is_zip:
-                bat_content = f'''@echo off
-setlocal
-chcp 65001 > NUL
-set PID={current_pid}
+                ps_code = f'''# CosRQD PowerShell Silent Fast Updater
+$targetPid = {current_pid}
+$appDir = "{app_dir}"
+$extractDir = "{temp_extract_dir}"
+$dlFile = "{downloaded_file}"
+$exeTarget = "{exe_target}"
 
-:WAIT_PROCESS
-tasklist /fi "pid eq %PID%" 2>nul | find "%PID%" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto WAIT_PROCESS
-)
+# 1. 이전 프로그램 프로세스 종료 대기 (최대 5초)
+$waited = 0
+while ((Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -and ($waited -lt 5)) {{
+    Start-Sleep -Milliseconds 400
+    $waited += 0.4
+}}
+if (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) {{
+    Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}}
+Start-Sleep -Milliseconds 600
 
-:: 프로세스 완전 종료 후 추가 1초 대기 (OS가 DLL 파일 락 및 임시 폴더 삭제를 완료할 때까지 보장)
-timeout /t 1 /nobreak >nul
+# 2. 최신 파일 복사 및 교체
+if (Test-Path $extractDir) {{
+    Copy-Item -Path "$extractDir\\*" -Destination $appDir -Recurse -Force -ErrorAction SilentlyContinue
+}}
 
-:: 새 버전 파일 교체
-xcopy /s /e /y /q "{temp_extract_dir}\\*" "{app_dir}\\"
+# 3. 바탕화면 바로가기 최신화
+try {{
+    $deskPath = [Environment]::GetFolderPath("Desktop")
+    $icoPath = Join-Path $appDir "Icon.ico"
+    $sh = New-Object -ComObject WScript.Shell
+    $lnk = $sh.CreateShortcut((Join-Path $deskPath "CosRQD.lnk"))
+    $lnk.TargetPath = $exeTarget
+    $lnk.WorkingDirectory = $appDir
+    if (Test-Path $icoPath) {{ $lnk.IconLocation = $icoPath }}
+    $lnk.Save()
+}} catch {{}}
 
-:: 환경변수 완전 정화
-set _MEIPASS=
-set _MEIPASS2=
-set PYTHONPATH=
-set PYTHONHOME=
-set PYINSTALLER_STRICT_UNLOAD_MODE=
+# 4. 환경변수 완전 정화 및 새 버전 실행
+$env:_MEIPASS = $null
+$env:_MEIPASS2 = $null
+$env:PYTHONPATH = $null
+$env:PYTHONHOME = $null
+$env:PYINSTALLER_STRICT_UNLOAD_MODE = $null
 
-:: Windows Explorer Shell 독립 실행 (Failed to load Python DLL 100% 영구 박멸)
-explorer.exe "{exe_target}"
+if (Test-Path $exeTarget) {{
+    Start-Process -FilePath $exeTarget -WorkingDirectory $appDir -UseShellExecute
+}}
 
-:: 임시 파일 청소
-rd /s /q "{temp_extract_dir}" > NUL 2>&1
-del "{downloaded_file}" > NUL 2>&1
-(goto) 2>nul & del "%~f0"
+# 5. 임시 파일 정리
+Start-Sleep -Seconds 1
+Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $dlFile -Force -ErrorAction SilentlyContinue
+Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 '''
             else:
-                # Setup.exe 단독 실행파일인 경우
-                bat_content = f'''@echo off
-setlocal
-set PID={current_pid}
+                # Setup.exe 단독 실행 파일인 경우
+                ps_code = f'''# CosRQD PowerShell Silent Setup Launcher
+$targetPid = {current_pid}
+$dlFile = "{downloaded_file}"
 
-:WAIT_PROCESS
-tasklist /fi "pid eq %PID%" 2>nul | find "%PID%" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto WAIT_PROCESS
-)
+$waited = 0
+while ((Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -and ($waited -lt 5)) {{
+    Start-Sleep -Milliseconds 400
+    $waited += 0.4
+}}
+if (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) {{
+    Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}}
+Start-Sleep -Milliseconds 600
 
-timeout /t 1 /nobreak >nul
-set _MEIPASS=
-set _MEIPASS2=
-set PYTHONPATH=
-set PYTHONHOME=
-explorer.exe "{downloaded_file}"
-(goto) 2>nul & del "%~f0"
+$env:_MEIPASS = $null
+$env:_MEIPASS2 = $null
+$env:PYTHONPATH = $null
+$env:PYTHONHOME = $null
+
+Start-Process -FilePath $dlFile -UseShellExecute
+Start-Sleep -Seconds 2
+Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 '''
 
-            with open(bat_file, "w", encoding="utf-8") as f:
-                f.write(bat_content)
+            with open(ps_script_path, "w", encoding="utf-8-sig") as f:
+                f.write(ps_code)
 
             # OS 레벨 환경변수 정화
             if sys.platform.startswith('win'):
@@ -810,16 +836,18 @@ explorer.exe "{downloaded_file}"
                 for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME']:
                     ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
 
-            # 배치 파일 독립 백그라운드 분리 실행
+            # PowerShell 백그라운드 완전 무인 실행 (콘솔 창 100% 비표시)
+            flags = (subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS) if os.name == 'nt' else 0
             subprocess.Popen(
-                ["cmd.exe", "/c", bat_file],
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps_script_path],
                 close_fds=True,
-                creationflags=subprocess.DETACHED_PROCESS if os.name == 'nt' else 0
+                creationflags=flags
             )
+            print(f"[Update] PowerShell 무인 업데이터 실행 완료: {ps_script_path}")
         except Exception as e:
-            print(f"[Update] 패치 배치 실행 실패: {e}")
+            print(f"[Update] 업데이터 스크립트 실행 실패: {e}")
 
-        # 5. 현재 부모 프로세스 즉시 완전 종료
+        # 4. 현재 프로그램 즉시 완전 종료 (파일 락 100% 즉각 해제)
         try:
             self.master.winfo_toplevel().destroy()
         except:

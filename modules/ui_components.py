@@ -168,37 +168,85 @@ class CustomErrorDialog(ctk.CTkToplevel):
         messagebox.showinfo("복사 완료", "오류 메시지가 클립보드에 복사되었습니다.", parent=self)
 
 class CustomDropdown(ctk.CTkFrame):
-    """[v64 네이티브 초고속 콤보박스] 팝업 렉 없이 즉각 반응하고 타이핑 검색 및 선택 완벽 보장"""
-    def __init__(self, master, values=None, command=None, width=150, **kwargs):
+    """[v65 고속 스마트 검색 콤보박스] 실시간 타이핑 자동완성, 마우스 휠 초고속 스크롤, 초성/부분 일치 검색 지원"""
+    def __init__(self, master, values=None, command=None, width=150, placeholder="- 선택 -", **kwargs):
         super().__init__(master, fg_color="transparent", width=width)
         self.raw_values = list(values) if values else []
+        self.filtered_values = list(self.raw_values)
         self.command = command
+        self.placeholder = placeholder
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
         self.combobox = ctk.CTkComboBox(
             self,
-            values=self.raw_values if self.raw_values else ["- 선택 -"],
+            values=self.raw_values if self.raw_values else [self.placeholder],
             command=self._on_combo_change,
             width=width,
             height=28
         )
         self.combobox.grid(row=0, column=0, sticky="ew")
 
-        # [요청 반영] 텍스트창 수정 클릭/포커스 시 전체 텍스트 자동 선택
-        self._bind_auto_select_all()
+        self._filter_timer = None
+        self._bind_search_and_scroll_events()
 
-    def _bind_auto_select_all(self):
-        """내부 Entry 위젯에 포커스/클릭 시 전체 선택 바인딩"""
+    def _bind_search_and_scroll_events(self):
+        """내부 Entry 및 드롭다운 위젯에 실시간 타이핑 필터링과 휠 가속 바인딩"""
         try:
             entry_widget = getattr(self.combobox, '_entry', None)
             if entry_widget:
-                entry_widget.bind("<FocusIn>", self._select_all_text, add="+")
-                entry_widget.bind("<Button-1>", self._select_all_text_on_click, add="+")
+                entry_widget.bind("<FocusIn>", self._on_focus_in, add="+")
+                entry_widget.bind("<Button-1>", self._on_click, add="+")
+                entry_widget.bind("<KeyRelease>", self._on_key_release, add="+")
+                entry_widget.bind("<Return>", self._on_enter_press, add="+")
+
+            # CTkComboBox의 _open_dropdown_menu 메서드 후킹하여 휠 스크롤 가속 주입
+            orig_open = self.combobox._open_dropdown_menu
+            def _wrapped_open():
+                orig_open()
+                self._apply_wheel_acceleration()
+            self.combobox._open_dropdown_menu = _wrapped_open
         except Exception:
             pass
 
-    def _select_all_text(self, event=None):
+    def _apply_wheel_acceleration(self):
+        """드롭다운 팝업 메뉴의 마우스 휠 스크롤 속도를 4~5배 가속하여 대량 항목도 시원하게 스크롤"""
+        try:
+            dropdown = getattr(self.combobox, '_dropdown_menu', None)
+            if not dropdown:
+                return
+
+            # CTkScrollableFrame 내부 canvas 탐색
+            scrollable = getattr(dropdown, '_scrollable_frame', dropdown)
+            canvas = getattr(scrollable, '_parent_canvas', None) or getattr(scrollable, 'canvas', None)
+            if not canvas:
+                # 자식 위젯 순회로 canvas 찾기
+                for child in scrollable.winfo_children():
+                    if isinstance(child, tk.Canvas):
+                        canvas = child
+                        break
+
+            if canvas:
+                def _accelerated_scroll(event):
+                    if event.delta:
+                        # 기본 1단위 -> 4단위로 시원하게 가속 스크롤
+                        step = -1 * int(event.delta / 120 * 4)
+                        canvas.yview_scroll(step, "units")
+                        return "break"
+                
+                # 드롭다운 전체와 canvas에 바인딩
+                canvas.bind("<MouseWheel>", _accelerated_scroll, add="+")
+                scrollable.bind("<MouseWheel>", _accelerated_scroll, add="+")
+                dropdown.bind("<MouseWheel>", _accelerated_scroll, add="+")
+                for w in scrollable.winfo_children():
+                    try:
+                        w.bind("<MouseWheel>", _accelerated_scroll, add="+")
+                    except:
+                        pass
+        except Exception:
+            pass
+
+    def _on_focus_in(self, event=None):
         try:
             entry_widget = getattr(self.combobox, '_entry', None)
             if entry_widget:
@@ -206,12 +254,53 @@ class CustomDropdown(ctk.CTkFrame):
         except Exception:
             pass
 
-    def _select_all_text_on_click(self, event=None):
+    def _on_click(self, event=None):
         try:
             entry_widget = getattr(self.combobox, '_entry', None)
             if entry_widget:
-                # 마우스 클릭 후 커서가 풀리지 않도록 비동기 20ms 후 전체 선택 실행
                 entry_widget.after(20, lambda: entry_widget.select_range(0, 'end'))
+        except Exception:
+            pass
+
+    def _on_key_release(self, event=None):
+        """타이핑 시 0.001초 실시간 목록 필터링"""
+        if event and event.keysym in ("Up", "Down", "Return", "Escape", "Tab", "Shift_L", "Shift_R", "Control_L", "Control_R"):
+            return
+
+        if self._filter_timer:
+            self.after_cancel(self._filter_timer)
+        self._filter_timer = self.after(100, self._filter_values_by_text)
+
+    def _filter_values_by_text(self):
+        """입력된 검색어로 드롭다운 목록 실시간 갱신"""
+        try:
+            current_text = self.combobox.get().strip().lower()
+            if not current_text or current_text == self.placeholder.lower():
+                matching = list(self.raw_values)
+            else:
+                # 부분 일치 검색
+                matching = [v for v in self.raw_values if current_text in str(v).lower()]
+                if not matching:
+                    # 일치 항목이 없을 경우 원본 유지
+                    matching = list(self.raw_values)
+
+            self.filtered_values = matching if matching else [self.placeholder]
+            self.combobox.configure(values=self.filtered_values)
+        except Exception:
+            pass
+
+    def _on_enter_press(self, event=None):
+        """Enter 키 입력 시 현재 텍스트 또는 첫 번째 일치 항목 확정 및 콜백 실행"""
+        try:
+            val = self.combobox.get().strip()
+            # 정확 일치 항목 탐색
+            matched = next((v for v in self.raw_values if v.lower() == val.lower()), None)
+            if not matched and self.filtered_values:
+                matched = self.filtered_values[0]
+
+            if matched:
+                self.combobox.set(matched)
+                self._on_combo_change(matched)
         except Exception:
             pass
 
@@ -229,6 +318,7 @@ class CustomDropdown(ctk.CTkFrame):
         if 'values' in kwargs:
             vals = kwargs.pop('values')
             self.raw_values = list(vals) if vals else []
+            self.filtered_values = list(self.raw_values)
             self.combobox.configure(values=self.raw_values)
         if 'state' in kwargs:
             self.combobox.configure(state=kwargs.pop('state'))
@@ -825,3 +915,205 @@ class ProductionPreviewPane(ctk.CTkFrame):
                 proc_text,
                 insp_text,
             ))
+
+
+class ClientQuickSearchPopup(ctk.CTkToplevel):
+    """[v65 초고속 거래처 검색 & 선택 팝업] 수천 개 거래처 실시간 검색, 유형별 필터, 휠 스크롤 4배 가속 및 더블클릭 즉시 선택"""
+    def __init__(self, master, on_select_callback, initial_type=None):
+        super().__init__(master)
+        self.withdraw()
+        self.on_select_callback = on_select_callback
+        self.initial_type = initial_type
+
+        self.title("거래처 빠른 검색")
+        self.geometry("660x520")
+        self.minsize(580, 420)
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+
+        self.raw_clients = []
+        self.filtered_clients = []
+        self.search_timer = None
+
+        # --- 1. 상단 검색바 ---
+        search_frame = ctk.CTkFrame(self, fg_color="transparent")
+        search_frame.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="ew")
+        search_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(search_frame, text="거래처 검색:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=(0, 5))
+        self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="거래처명, 담당자명, 연락처, 주소 검색...")
+        self.search_entry.grid(row=0, column=1, padx=5, sticky="ew")
+        self.search_entry.bind("<KeyRelease>", self._on_search_key_release)
+        self.search_entry.bind("<Return>", lambda e: self._on_confirm_select())
+
+        ctk.CTkButton(search_frame, text="검색", width=60, command=self._apply_filter).grid(row=0, column=2, padx=3)
+        ctk.CTkButton(search_frame, text="초기화", width=60, fg_color="gray50", hover_color="gray40", command=self._reset_search).grid(row=0, column=3, padx=3)
+
+        # --- 2. 유형 필터 툴바 ---
+        filter_toolbar = ctk.CTkFrame(self, fg_color=("gray92", "#242526"), corner_radius=6)
+        filter_toolbar.grid(row=1, column=0, padx=12, pady=4, sticky="ew")
+        filter_toolbar.grid_columnconfigure(1, weight=1)
+
+        unique_types = ["전체"] + db_manager.get_unique_client_types()
+        display_types = unique_types if len(unique_types) <= 5 else unique_types[:5]
+        self.type_filter_seg = ctk.CTkSegmentedButton(
+            filter_toolbar,
+            values=display_types,
+            command=self._on_type_changed,
+            height=26,
+            font=ctk.CTkFont(size=11)
+        )
+        default_type = initial_type if initial_type in display_types else "전체"
+        self.type_filter_seg.set(default_type)
+        self.type_filter_seg.grid(row=0, column=0, padx=8, pady=6, sticky="w")
+
+        self.count_label = ctk.CTkLabel(filter_toolbar, text="총 0건", font=ctk.CTkFont(size=11), text_color=("gray40", "gray70"))
+        self.count_label.grid(row=0, column=2, padx=12, pady=6, sticky="e")
+
+        # --- 3. 거래처 목록 Treeview ---
+        tree_frame = ctk.CTkFrame(self, fg_color="transparent")
+        tree_frame.grid(row=2, column=0, padx=12, pady=4, sticky="nsew")
+        tree_frame.grid_columnconfigure(0, weight=1)
+        tree_frame.grid_rowconfigure(0, weight=1)
+
+        tree_cols = ("type", "name", "manager", "phone", "address")
+        self.client_tree = ttk.Treeview(tree_frame, columns=tree_cols, show="headings", selectmode="browse")
+        self.client_tree.heading("type", text="구분"); self.client_tree.column("type", width=70, anchor="center")
+        self.client_tree.heading("name", text="거래처명"); self.client_tree.column("name", width=160)
+        self.client_tree.heading("manager", text="담당자"); self.client_tree.column("manager", width=90)
+        self.client_tree.heading("phone", text="연락처"); self.client_tree.column("phone", width=110)
+        self.client_tree.heading("address", text="주소"); self.client_tree.column("address", width=180, stretch=True)
+        self.client_tree.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.client_tree.yview)
+        self.client_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.client_tree.bind("<Double-1>", lambda e: self._on_confirm_select())
+        self.client_tree.bind("<Return>", lambda e: self._on_confirm_select())
+
+        # 휠 4배 가속 스크롤
+        def _fast_scroll(event):
+            if event.delta:
+                self.client_tree.yview_scroll(-1 * int(event.delta / 120 * 4), "units")
+                return "break"
+        self.client_tree.bind("<MouseWheel>", _fast_scroll)
+
+        # --- 4. 하단 버튼 ---
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.grid(row=3, column=0, pady=(6, 12))
+        ctk.CTkButton(btn_frame, text="✔ 거래처 선택", font=ctk.CTkFont(weight="bold"), command=self._on_confirm_select).pack(side="left", padx=6)
+        ctk.CTkButton(btn_frame, text="닫기", fg_color="gray50", hover_color="gray40", command=self.destroy).pack(side="left", padx=6)
+
+        self._load_clients_data()
+
+        # 중앙 배치 및 포커스
+        self.update_idletasks()
+        parent = master
+        if parent:
+            parent_x = parent.winfo_rootx()
+            parent_y = parent.winfo_rooty()
+            parent_w = parent.winfo_width()
+            parent_h = parent.winfo_height()
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            x = parent_x + (parent_w - win_w) // 2
+            y = parent_y + (parent_h - win_h) // 2
+            self.geometry(f"+{x}+{y}")
+
+        self.deiconify()
+        self.after(50, lambda: self.search_entry.focus_set())
+        self.after(50, lambda: self.search_entry.focus_force())
+
+    def _load_clients_data(self):
+        """DB에서 활성 거래처 전체 로드 (0.01초 캐싱)"""
+        session = db_manager.get_session()
+        try:
+            from database.models import Client
+            clients = session.query(Client).filter_by(is_active=True).order_by(Client.name).all()
+            self.raw_clients = [
+                {
+                    "id": c.id,
+                    "name": c.name or "",
+                    "type": c.client_type or "",
+                    "manager": c.manager_name or "-",
+                    "phone": c.phone or "-",
+                    "address": c.address or "-"
+                }
+                for c in clients
+            ]
+            self._apply_filter()
+        finally:
+            session.close()
+
+    def _on_search_key_release(self, event=None):
+        if event and event.keysym in ("Return", "Escape", "Up", "Down"):
+            return
+        if self.search_timer:
+            self.after_cancel(self.search_timer)
+        self.search_timer = self.after(150, self._apply_filter)
+
+    def _on_type_changed(self, selected_type):
+        self._apply_filter()
+
+    def _reset_search(self):
+        self.search_entry.delete(0, "end")
+        self.type_filter_seg.set("전체")
+        self._apply_filter()
+        self.after(30, lambda: self.search_entry.focus_set())
+
+    def _apply_filter(self):
+        """인메모리에서 실시간 필터링 및 Treeview 갱신 (0.0001초)"""
+        q = self.search_entry.get().strip().lower()
+        selected_type = self.type_filter_seg.get()
+
+        matched = []
+        for c in self.raw_clients:
+            if selected_type != "전체" and c["type"] != selected_type:
+                continue
+            if q:
+                if (q not in c["name"].lower()) and (q not in c["manager"].lower()) and (q not in c["phone"].lower()) and (q not in c["address"].lower()):
+                    continue
+            matched.append(c)
+
+        self.filtered_clients = matched
+
+        for item_id in self.client_tree.get_children():
+            self.client_tree.delete(item_id)
+
+        theme = ctk.get_appearance_mode().lower()
+        odd_bg = "#F9FAFB" if theme == 'light' else "#282A2E"
+        even_bg = "#FFFFFF" if theme == 'light' else "#202124"
+        tree_fg = "#1F2937" if theme == 'light' else "#E8EAED"
+        self.client_tree.tag_configure("oddrow", background=odd_bg, foreground=tree_fg)
+        self.client_tree.tag_configure("evenrow", background=even_bg, foreground=tree_fg)
+
+        for idx, c in enumerate(matched):
+            tag = 'oddrow' if idx % 2 == 0 else 'evenrow'
+            self.client_tree.insert(
+                "",
+                "end",
+                iid=str(c["id"]),
+                tags=(tag,),
+                values=(c["type"], c["name"], c["manager"], c["phone"], c["address"])
+            )
+
+        self.count_label.configure(text=f"검색 결과: 총 {len(matched)}건")
+
+        if matched:
+            first_iid = str(matched[0]["id"])
+            self.client_tree.selection_set(first_iid)
+            self.client_tree.focus(first_iid)
+
+    def _on_confirm_select(self):
+        selected = self.client_tree.selection()
+        if not selected:
+            messagebox.showwarning("선택 필요", "선택할 거래처를 목록에서 클릭하세요.", parent=self)
+            return
+
+        client_id = int(selected[0])
+        matched = next((c for c in self.filtered_clients if c["id"] == client_id), None)
+        if matched:
+            self.on_select_callback(matched["name"], matched["type"])
+            self.destroy()

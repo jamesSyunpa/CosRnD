@@ -6,9 +6,7 @@ from tkcalendar import DateEntry
 from database.db_manager import db_manager
 from database.models import Client, Formulation, FormulationItem, Material, User
 from datetime import datetime
-from modules import excel_handler
-from modules.ui_components import CustomErrorDialog, CustomDropdown, AddMaterialDialog
-from utils import center_window_on_mouse_display, safe_focus
+from modules.ui_components import CustomErrorDialog, CustomDropdown, AddMaterialDialog, ClientQuickSearchPopup
 
 # Circular Import 방지: document_management 대신 ui_components에서 직접 import 했습니다.
 from modules.ui_components import try_convert_to_float, HelpPopup
@@ -266,13 +264,24 @@ class FormulationEditPopup(ctk.CTkToplevel):
         client_selection_frame = ctk.CTkFrame(experiment_info_frame, fg_color="transparent")
         client_selection_frame.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
         client_selection_frame.grid_columnconfigure(0, weight=1)
-        client_selection_frame.grid_columnconfigure(1, weight=2)
+        client_selection_frame.grid_columnconfigure(1, weight=3)
 
         all_client_types = [self.texts['select_type']] + db_manager.get_unique_client_types()
-        self.formulation_client_type_combo = CustomDropdown(client_selection_frame, values=all_client_types, width=90, command=self.update_formulation_client_combo)
-        self.formulation_client_type_combo.grid(row=0, column=0, padx=(0, 4), sticky="ew")
-        self.formulation_client_name_combo = CustomDropdown(client_selection_frame, values=[self.texts['select_client']], command=self.on_client_select, width=150)
-        self.formulation_client_name_combo.grid(row=0, column=1, sticky="ew")
+        self.formulation_client_type_combo = CustomDropdown(client_selection_frame, values=all_client_types, width=80, command=self.update_formulation_client_combo)
+        self.formulation_client_type_combo.grid(row=0, column=0, padx=(0, 3), sticky="ew")
+        self.formulation_client_name_combo = CustomDropdown(client_selection_frame, values=[self.texts['select_client']], command=self.on_client_select, width=130)
+        self.formulation_client_name_combo.grid(row=0, column=1, padx=(0, 3), sticky="ew")
+        
+        # [v65] 거래처 빠른 검색 팝업 버튼 (수천 개 거래처 초고속 검색 & 휠 가속 지원)
+        self.client_quick_search_btn = ctk.CTkButton(
+            client_selection_frame,
+            text="🔍",
+            width=28,
+            height=28,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._open_client_quick_search
+        )
+        self.client_quick_search_btn.grid(row=0, column=2, sticky="e")
 
         # 3행: LAB NO. / 차수
         ctk.CTkLabel(experiment_info_frame, text="LAB NO.").grid(row=3, column=0, padx=(5, 5), pady=5, sticky="w")
@@ -1247,6 +1256,21 @@ class FormulationEditPopup(ctk.CTkToplevel):
                 self.client_details_label.configure(text=details)
         except Exception as e: print(f"거래처 상세 정보 로드 중 오류: {e}")
         finally: session.close()
+
+    def _open_client_quick_search(self):
+        """대량 거래처 고속 검색 및 즉각 선택 팝업 열기"""
+        cur_type = self.formulation_client_type_combo.get()
+        init_t = cur_type if cur_type != self.texts.get('select_type', '- 선택 -') else None
+        ClientQuickSearchPopup(self, self._on_quick_client_selected, initial_type=init_t)
+
+    def _on_quick_client_selected(self, client_name, client_type):
+        """빠른 검색 팝업에서 거래처 선택 시 콤보박스 및 담당자 정보 즉시 자동 동기화"""
+        if client_type and client_type != self.formulation_client_type_combo.get():
+            self.formulation_client_type_combo.set(client_type)
+            self.update_formulation_client_combo(client_type)
+        
+        self.formulation_client_name_combo.set(client_name)
+        self.on_client_select(client_name)
 
     def export_formulation_to_excel(self): # noqa
         # 내보내기 직전에 LAB NO.를 다시 한번 업데이트하여 최신 상태를 보장합니다.
