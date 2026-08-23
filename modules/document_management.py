@@ -401,7 +401,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             if selected_tab == "처방 목록":
                 self.load_formulations()
             elif selected_tab == "원료/성분 조회":
-                pass
+                self.after(80, self._focus_ingredient_lookup_textbox)
             elif selected_tab == "견적":
                 self.load_formulation_for_quotation(silent=True)
             elif selected_tab == "전성분":
@@ -605,6 +605,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.ingredient_lookup_textbox = ctk.CTkTextbox(text_frame, height=100, font=ctk.CTkFont(size=12))
         self.ingredient_lookup_textbox.grid(row=1, column=0, sticky="ew")
         self.ingredient_lookup_textbox.bind("<Control-Return>", lambda e: self.search_ingredients_by_list())
+        self.ingredient_lookup_textbox.bind("<Button-1>", self._focus_ingredient_lookup_textbox)
+
+        if hasattr(self.ingredient_lookup_textbox, "_textbox"):
+            self.ingredient_lookup_textbox._textbox.bind("<Button-1>", self._focus_ingredient_lookup_textbox)
 
         # --- 결과 표시 영역 ---
         result_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
@@ -673,6 +677,16 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.lookup_material_rows = []
         self.lookup_complex_rows = []
         self.selected_complex_materials = self.selected_lookup_items
+
+    def _focus_ingredient_lookup_textbox(self, event=None):
+        """성분 조회 텍스트박스에 강제로 100% 포커스를 설정합니다."""
+        try:
+            if hasattr(self, 'ingredient_lookup_textbox') and self.ingredient_lookup_textbox:
+                self.ingredient_lookup_textbox.focus_set()
+                if hasattr(self.ingredient_lookup_textbox, "_textbox") and self.ingredient_lookup_textbox._textbox:
+                    self.ingredient_lookup_textbox._textbox.focus_set()
+        except Exception:
+            pass
 
     def search_ingredients_by_list(self):
         """입력된 성분명/CAS No 리스트로 DB에서 검색"""
