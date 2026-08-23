@@ -562,7 +562,7 @@ class LauncherMainWindow(QMainWindow):
                 return
             
             bin_dir = install_path / "bin"
-            exe_candidates = list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [bin_dir / "main.exe"]
+            exe_candidates = list(bin_dir.glob("CosRQD*.exe")) + list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [f for f in bin_dir.glob("*.exe") if not f.name.startswith("Setup_")] + [bin_dir / "main.exe"]
             app_path = next((c for c in exe_candidates if c.exists()), None)
             
             if not app_path:

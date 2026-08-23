@@ -253,7 +253,7 @@ class Installer:
         try:
             # Check required files exist
             bin_dir = install_path / "bin"
-            exe_candidates = list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [bin_dir / "main.exe"]
+            exe_candidates = list(bin_dir.glob("CosRQD*.exe")) + list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [f for f in bin_dir.glob("*.exe") if not f.name.startswith("Setup_")] + [bin_dir / "main.exe"]
             main_exe = next((c for c in exe_candidates if c.exists()), None)
             
             if not main_exe:
@@ -317,8 +317,8 @@ class Installer:
         # 바탕화면 및 시작메뉴 단축아이콘 생성
         try:
             bin_dir = install_path / "bin"
-            exe_candidates = list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [bin_dir / "main.exe"]
-            target_exe = next((c for c in exe_candidates if c.exists()), bin_dir / "main.exe")
+            exe_candidates = list(bin_dir.glob("CosRQD*.exe")) + list(bin_dir.glob("화장품연구관리_*.exe")) + list(bin_dir.glob("CosRnD*.exe")) + [f for f in bin_dir.glob("*.exe") if not f.name.startswith("Setup_")] + [bin_dir / "main.exe"]
+            target_exe = next((c for c in exe_candidates if c.exists()), bin_dir / "CosRQD.exe")
             
             icon_path = bin_dir / "Icon.ico"
             if not icon_path.exists():
