@@ -639,22 +639,42 @@ $Shortcut.Save()
             except Exception as e:
                 logger.warning(f"Failed to remove shortcuts: {e}")
             
-            # 4. Windows 레지스트리 Uninstall 키 삭제
+            # 4. Windows 레지스트리 Uninstall 키 완전 삭제
             if sys.platform.startswith('win'):
                 try:
+                    import subprocess
                     import winreg
-                    reg_paths = [
-                        r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
-                        r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-                    ]
-                    for root_key in [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]:
-                        for base_path in reg_paths:
-                            for app_key_name in ["CosRQD", "CosRnD"]:
+                    
+                    # 방법 1: reg delete 명령어로 OS 레벨에서 강제 삭제
+                    for root_str in ["HKCU", "HKLM"]:
+                        for sub_path in [
+                            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+                            r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+                        ]:
+                            for app_name in ["CosRQD", "CosRnD"]:
                                 try:
-                                    winreg.DeleteKey(root_key, f"{base_path}\\{app_key_name}")
-                                    logger.info(f"Deleted registry key: {base_path}\\{app_key_name}")
+                                    full_reg = f"{root_str}\\{sub_path}\\{app_name}"
+                                    subprocess.run(["reg", "delete", full_reg, "/f"], capture_output=True)
+                                    logger.info(f"Deleted registry via reg delete: {full_reg}")
                                 except Exception:
                                     pass
+                    
+                    # 방법 2: winreg.DeleteKeyEx 및 DeleteKey로 32/64비트 키 직접 삭제
+                    for root_key in [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]:
+                        for base_path in [
+                            r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+                            r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+                        ]:
+                            for app_name in ["CosRQD", "CosRnD"]:
+                                for flag in [0, winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY]:
+                                    try:
+                                        winreg.DeleteKeyEx(root_key, f"{base_path}\\{app_name}", flag, 0)
+                                        logger.info(f"Deleted registry via DeleteKeyEx: {base_path}\\{app_name}")
+                                    except Exception:
+                                        try:
+                                            winreg.DeleteKey(root_key, f"{base_path}\\{app_name}")
+                                        except Exception:
+                                            pass
                 except Exception as e:
                     logger.warning(f"Failed to delete registry keys: {e}")
             
