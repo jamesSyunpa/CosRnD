@@ -330,7 +330,7 @@ class Installer:
                 if src_icon.exists():
                     shutil.copy2(src_icon, icon_path)
             
-            app_ver_name = f"CosRnD_{version}" if version else "CosRnD (화장품연구관리)"
+            app_ver_name = f"CosRQD_{version}" if version else "CosRQD (화장품연구관리)"
             self.create_shortcuts(target_exe, app_ver_name, icon_path)
         except Exception as shortcut_err:
             logger.error(f"Failed to create shortcuts during installation: {shortcut_err}")
@@ -403,11 +403,11 @@ class Installer:
             
             # 64비트 및 32비트 레지스트리 경로 모두 등록 시도 (Wow6432Node 대응)
             reg_paths = [
-                r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CosRnD",
-                r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\CosRnD"
+                r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CosRQD",
+                r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\CosRQD"
             ]
             
-            install_dir = target_exe.parent.parent # C:\CosRnD
+            install_dir = target_exe.parent.parent # C:\CosRQD
             uninst_candidates = list(target_exe.parent.glob("Setup_*.exe"))
             uninst_exe = uninst_candidates[0] if uninst_candidates else target_exe
             uninstall_string = f'"{uninst_exe}" --uninstall'

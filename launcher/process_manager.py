@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class ProcessManager:
     """Manages application process lifecycle"""
     
-    def __init__(self, app_exe_name: str = "화장품연구관리_v1.0.exe", app_name: str = "CosRnD"):
+    def __init__(self, app_exe_name: str = "main.exe", app_name: str = "CosRQD"):
         """
         Initialize process manager.
         

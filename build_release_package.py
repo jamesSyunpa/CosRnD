@@ -23,7 +23,7 @@ def main():
             if v:
                 version = v if v.startswith("v") else f"v{v}"
                 
-    print(f"=== CosRnD {version} Setup Package Build Starting ===")
+    print(f"=== CosRQD {version} Setup Package Build Starting ===")
     dist_dir = os.path.join(current_dir, "dist")
     
     # 2. Build main application
@@ -80,7 +80,7 @@ def main():
             return
         
     # 5. Copy to final release directory
-    release_dir = os.path.join(current_dir, "CosRnD_Release")
+    release_dir = os.path.join(current_dir, "CosRQD_Release")
     if os.path.exists(release_dir):
         shutil.rmtree(release_dir)
     os.makedirs(release_dir, exist_ok=True)
@@ -89,8 +89,8 @@ def main():
     dest_setup = os.path.join(release_dir, f"Setup_화장품연구관리_{version}.exe")
     shutil.copy2(setup_exe, dest_setup)
 
-    # 배포용 app.zip도 함께 CosRnD_Release에 백업 (네이버 카페 첨부용)
-    dest_zip = os.path.join(release_dir, f"CosRnD_{version}_Release.zip")
+    # 배포용 app.zip도 함께 CosRQD_Release에 백업 (네이버 카페 첨부용)
+    dest_zip = os.path.join(release_dir, f"CosRQD_{version}_Release.zip")
     shutil.copy2(zip_path, dest_zip)
 
     # 네이버 카페 50MB 제한 대비 40MB 분할 파일 자동 생성

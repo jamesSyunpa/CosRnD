@@ -95,7 +95,7 @@ def main():
     # 윈도우 작업표시줄 아이콘 정합성을 위한 AppUserModelID 설정
     try:
         import ctypes
-        myappid = 'TaesungChem.CosRnD.Installer.v1.0.3'
+        myappid = 'TaesungChem.CosRQD.Launcher.v65.0.1'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception as appid_err:
         print(f"[STARTUP] AppUserModelID 설정 실패: {appid_err}")
@@ -104,7 +104,7 @@ def main():
     logger = logging.getLogger(__name__)
     
     logger.info("=" * 60)
-    logger.info("CosRnD Launcher Starting")
+    logger.info("CosRQD Launcher Starting")
     logger.info("=" * 60)
     
     try:
