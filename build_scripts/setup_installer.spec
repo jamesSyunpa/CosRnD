@@ -30,13 +30,22 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# VERSION 파일에서 버전 동적 로드
+ver_path = os.path.join(project_root, 'VERSION')
+ver_str = 'v65.0.23'
+if os.path.exists(ver_path):
+    with open(ver_path, 'r', encoding='utf-8') as f:
+        v = f.read().strip()
+        if v:
+            ver_str = v if v.startswith('v') else f'v{v}'
+
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.datas,
     [],
-    name='Setup_CosRQD_v65.0.22',
+    name=f'Setup_CosRQD_{ver_str}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

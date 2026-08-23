@@ -136,22 +136,32 @@ def read_version() -> str:
     try:
         import re
         import os
+        import sys
         
-        # 1순위: 폴더 이름에서 버전 추출 (예: CosRnD_v57 -> v57)
-        current_dir = Path(__file__).parent
-        folder_name = current_dir.name
-        version_match = re.search(r'_v(\d+)', folder_name)
-        if version_match:
-            return f"v{version_match.group(1)}"
-        
-        # 2순위: VERSION 파일
-        version_file = current_dir / "VERSION"
-        if version_file.exists():
-            return version_file.read_text(encoding='utf-8').strip()
+        # 1. sys._MEIPASS 내부 VERSION 파일 (PyInstaller 실행 시)
+        meipass = getattr(sys, '_MEIPASS', '')
+        if meipass:
+            vf = Path(meipass) / "VERSION"
+            if vf.exists():
+                return vf.read_text(encoding='utf-8').strip()
+
+        # 2. 실행 디렉토리 및 상위 디렉토리 VERSION 파일
+        current_dir = Path(__file__).resolve().parent
+        for candidate_dir in [current_dir, current_dir.parent, Path(sys.executable).parent]:
+            vf = candidate_dir / "VERSION"
+            if vf.exists():
+                return vf.read_text(encoding='utf-8').strip()
+
+        # 3. 폴더 이름에서 버전 추출 (예: CosRnD_v65 -> v65)
+        for folder_name in [current_dir.name, current_dir.parent.name]:
+            version_match = re.search(r'[vV]?(\d+\.\d+\.\d+|\d+\.\d+|\d+)', folder_name)
+            if version_match:
+                v = version_match.group(0)
+                return v if v.startswith('v') else f"v{v}"
     except Exception:
         pass
     
-    return "v65.0.3"
+    return "v65.0.6"
 
 
 def main():
@@ -159,7 +169,8 @@ def main():
     # 윈도우 작업표시줄 아이콘 정합성을 위한 AppUserModelID 설정
     try:
         import ctypes
-        myappid = 'Luckfortma.CosRQD.Launcher.v65.0.3'
+        ver_str = read_version()
+        myappid = f'Luckfortma.CosRQD.Launcher.{ver_str}'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception as appid_err:
         print(f"[STARTUP] AppUserModelID 설정 실패: {appid_err}")

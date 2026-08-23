@@ -103,7 +103,12 @@ def main():
     dest_setup = os.path.join(release_dir, f"Setup_CosRQD_{version}.exe")
     shutil.copy2(setup_exe, dest_setup)
 
-    # 6. 배포용 Setup_CosRQD_{version}.zip 생성 (설치 마법사 Setup.exe를 ZIP으로 패키징)
+    # 6. 자동 업데이트 전용 패키지 (CosRQD_{version}_Update.zip) 배포
+    update_zip = os.path.join(release_dir, f"CosRQD_{version}_Update.zip")
+    shutil.copy2(zip_path, update_zip)
+    print(f"[Success] 자동 업데이트 전용 ZIP 생성 완료: {update_zip}")
+
+    # 7. 배포용 Setup_CosRQD_{version}.zip 생성 (설치 마법사 Setup.exe를 ZIP으로 패키징)
     dest_zip = os.path.join(release_dir, f"Setup_CosRQD_{version}.zip")
     if os.path.exists(dest_zip):
         os.remove(dest_zip)
