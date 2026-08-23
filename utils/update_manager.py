@@ -20,6 +20,7 @@ import subprocess
 import urllib.request
 import urllib.error
 import ssl
+import time
 from datetime import datetime
 import customtkinter as ctk
 from tkinter import messagebox, ttk
