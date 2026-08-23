@@ -16,10 +16,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
 
-from launcher.config_manager import ConfigManager
-from launcher.installer import Installer, InstallationError
-from launcher.updater import Updater, UpdateError
-from launcher.process_manager import ProcessManager
+try:
+    from launcher.config_manager import ConfigManager
+    from launcher.installer import Installer, InstallationError
+    from launcher.updater import Updater, UpdateError
+    from launcher.process_manager import ProcessManager
+except ImportError:
+    from config_manager import ConfigManager
+    from installer import Installer, InstallationError
+    from updater import Updater, UpdateError
+    from process_manager import ProcessManager
 
 
 logger = logging.getLogger(__name__)

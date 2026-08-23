@@ -10,9 +10,15 @@ a = Analysis(
     binaries=[],
     datas=[
         (os.path.join(project_root, 'dist', 'app.zip'), '.'),
-        (os.path.join(project_root, 'Icon.ico'), '.')
+        (os.path.join(project_root, 'Icon.ico'), '.'),
+        (os.path.join(project_root, 'launcher'), 'launcher')
     ],
-    hiddenimports=['PyQt6', 'psutil', 'requests', 'customtkinter', 'PIL', 'win32api', 'win32con'],
+    hiddenimports=[
+        'launcher', 'launcher.installer', 'launcher.launcher_gui', 
+        'launcher.config_manager', 'launcher.process_manager', 'launcher.updater',
+        'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
+        'psutil', 'requests', 'customtkinter', 'PIL', 'win32api', 'win32con'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

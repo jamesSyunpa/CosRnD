@@ -12,6 +12,11 @@ import logging
 from pathlib import Path
 import os
 
+# PyInstaller 번들 및 로컬 환경 sys.path 안전 등록
+base_dir = Path(getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__))))
+if str(base_dir) not in sys.path:
+    sys.path.insert(0, str(base_dir))
+
 def unblock_self():
     """
     최초 실행 시 인터넷에서 다운로드되어 발생하는 Windows 스마트스크린 차단(MotW)을
@@ -37,7 +42,6 @@ def unblock_self():
 unblock_self()
 
 from launcher.config_manager import ConfigManager
-
 from launcher.launcher_gui import run_launcher_gui
 
 

@@ -4,6 +4,11 @@ import shutil
 import subprocess
 import sys
 
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 def run_pyinstaller(spec_path):
     print(f"[Build] PyInstaller starting for: {spec_path}")
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", spec_path]
@@ -14,8 +19,10 @@ def run_pyinstaller(spec_path):
 def main():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # 1. VERSION 확인
+    # 1. VERSION 및 설정 확인
     ver_file = os.path.join(current_dir, "VERSION")
+    cfg_file = os.path.join(current_dir, "config.ini")
+    icon_file = os.path.join(current_dir, "Icon.ico")
     version = "v65.0.1"
     if os.path.exists(ver_file):
         with open(ver_file, "r", encoding="utf-8") as f:
@@ -118,8 +125,8 @@ def main():
     print(f"1. Setup Installer (실행 설치용): {dest_setup}")
     print(f"2. Setup ZIP Package (깃허브/클라우드용): {dest_zip}")
     print(f"3. Cafe Split Files (카페 분할 첨부용):")
-    print(f"   • {os.path.basename(dest_zip)}.001")
-    print(f"   • {os.path.basename(dest_zip)}.002")
+    print(f"   - {os.path.basename(dest_zip)}.001")
+    print(f"   - {os.path.basename(dest_zip)}.002")
     print("=======================================================")
 
 if __name__ == "__main__":
