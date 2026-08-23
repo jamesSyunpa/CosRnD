@@ -628,20 +628,76 @@ class DocumentManagementFrame(ctk.CTkFrame):
         result_frame.grid_rowconfigure(1, weight=1)
         self.lookup_result_frame = result_frame  # 참조 저장
 
-        # [v64 신규] 상단 틀고정 헤더 & 빠른선택 툴바 전용 컨테이너 (스크롤 시에도 상단에 영구 고정)
+        # [v64/v65 상단 틀고정 헤더 & 빠른선택 툴바 전용 컨테이너] (스크롤 시에도 상단에 영구 고정)
         self.lookup_sticky_header_frame = ctk.CTkFrame(result_frame, fg_color="transparent")
         self.lookup_sticky_header_frame.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         self.lookup_sticky_header_frame.grid_columnconfigure(0, weight=1)
 
-        # [단일 통합 결과 스크롤 프레임] (헤더 아래 row=1에 단독 위치)
-        result_frame.grid_rowconfigure(1, weight=1)
-        self.lookup_unified_frame = ctk.CTkScrollableFrame(result_frame, label_text="")
-        self.lookup_unified_frame.grid(row=1, column=0, sticky="nsew")
-        self.lookup_unified_frame.grid_columnconfigure(0, weight=1)
-        self.lookup_unified_rows = []
-        self.selected_lookup_items = {}
+        # [초고속 고성능 표(Treeview) 컨테이너 프레임] (헤더 아래 row=1에 단독 위치)
+        self.lookup_tree_container = ctk.CTkFrame(result_frame, fg_color="transparent")
+        self.lookup_tree_container.grid(row=1, column=0, sticky="nsew")
+        self.lookup_tree_container.grid_columnconfigure(0, weight=1)
+        self.lookup_tree_container.grid_rowconfigure(0, weight=1)
+
+        # 표(Treeview) 컬럼 정의
+        self.lookup_tree_cols = ("chk", "badge", "code", "name", "ingredients", "supplier", "stock", "cas_no", "function")
+        self.lookup_tree = ttk.Treeview(
+            self.lookup_tree_container,
+            columns=self.lookup_tree_cols,
+            show="headings",
+            selectmode="extended"
+        )
+
+        lookup_col_defs = {
+            "chk": ("선택", 45, "center", False),
+            "badge": ("구분", 130, "center", False),
+            "code": ("원료코드", 85, "center", False),
+            "name": ("원료명", 200, "w", False),
+            "ingredients": ("매칭 및 전성분 구성", 340, "w", True),
+            "supplier": ("공급사", 110, "w", False),
+            "stock": ("입고/가격 정보", 120, "w", False),
+            "cas_no": ("CAS 번호", 105, "center", False),
+            "function": ("주요 기능", 150, "w", False),
+        }
+        for col_id, (header_text, width, align, stretch) in lookup_col_defs.items():
+            self.lookup_tree.heading(
+                col_id,
+                text=header_text,
+                command=lambda c=col_id: self.sort_treeview_column(self.lookup_tree, c, False)
+            )
+            self.lookup_tree.column(col_id, width=width, anchor=align, stretch=stretch)
+
+        self.lookup_tree.grid(row=0, column=0, sticky="nsew")
+
+        # 스크롤바 연결
+        lookup_v_scroll = ttk.Scrollbar(self.lookup_tree_container, orient="vertical", command=self.lookup_tree.yview)
+        self.lookup_tree.configure(yscrollcommand=lookup_v_scroll.set)
+        lookup_v_scroll.grid(row=0, column=1, sticky="ns")
+
+        lookup_h_scroll = ttk.Scrollbar(self.lookup_tree_container, orient="horizontal", command=self.lookup_tree.xview)
+        self.lookup_tree.configure(xscrollcommand=lookup_h_scroll.set)
+        lookup_h_scroll.grid(row=1, column=0, sticky="ew")
+
+        # 표 인터랙션 바인딩
+        self.lookup_tree.bind("<Button-1>", self._on_lookup_tree_click)
+        self.lookup_tree.bind("<space>", self._on_lookup_tree_space)
+        self.lookup_tree.bind("<Double-1>", self._on_lookup_tree_double_click)
+
+        # 초기 안내 메시지 오버레이 프레임
+        self.lookup_guide_frame = ctk.CTkFrame(self.lookup_tree_container, fg_color=("gray95", "gray17"), corner_radius=8)
+        self.lookup_guide_label = ctk.CTkLabel(
+            self.lookup_guide_frame,
+            text="🔍 성분명을 입력한 후 검색 버튼을 누르세요.",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=("gray30", "gray70")
+        )
+        self.lookup_guide_label.pack(pady=40)
+        self.lookup_guide_frame.grid(row=0, column=0, sticky="nsew")
 
         # 하위 호환용 참조
+        self.lookup_unified_frame = self.lookup_tree_container
+        self.lookup_unified_rows = []
+        self.selected_lookup_items = {}
         self.lookup_material_frame = self.lookup_unified_frame
         self.lookup_complex_frame = self.lookup_unified_frame
         self.lookup_material_rows = []
@@ -693,20 +749,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
         return terms
 
     def _render_empty_search_guidance(self, message):
-        """검색 결과가 없거나 입력이 필요할 때 모달 팝업 대신 결과 영역에 직관적인 안내 카드를 렌더링합니다."""
+        """검색 결과가 없거나 입력이 필요할 때 표 위에 직관적인 안내 카드를 표시합니다."""
         self._clear_unified_lookup_frame()
-        if not hasattr(self, 'lookup_unified_frame'):
-            return
-        
-        info_frame = ctk.CTkFrame(self.lookup_unified_frame, fg_color=("gray95", "gray17"), corner_radius=8, border_width=1, border_color=("gray80", "gray30"))
-        info_frame.pack(fill="x", padx=10, pady=30)
-        
-        ctk.CTkLabel(
-            info_frame,
-            text=message,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=("gray30", "gray70")
-        ).pack(pady=25)
+        if hasattr(self, 'lookup_guide_label') and hasattr(self, 'lookup_guide_frame'):
+            self.lookup_guide_label.configure(text=message)
+            self.lookup_guide_frame.grid(row=0, column=0, sticky="nsew")
+            self.lookup_guide_frame.lift()
 
     def _get_material_search_cache(self, force_refresh=False):
         """원료 및 전성분 고속 검색을 위한 정규화 인메모리 캐시를 반환합니다. (0.001초 초고속 룩업 지원)"""
@@ -889,14 +937,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
                         "primary_ing": matched_ing_list[0]["name_ko"] if matched_ing_list else item_data["name"],
                         "match_count": m_count,
                         "total_ing_count": total_ing_count,
-                        "is_blend": is_blend
+                        "is_blend": is_blend,
+                        "is_exact_full_match": (m_count == total_ing_count)
                     })
 
-            # [정렬 규칙]:
-            # 1. 단일 성분(total_ing_count == 1)을 최우선으로 배치 (is_blend == False)
-            # 2. 단일 성분들은 검색된 성분명 카테고리(primary_ing)별로 모아서 그룹화 정렬
-            # 3. 그 다음 복합 원료는 성분 수(total_ing_count) 적은 순서 -> 매칭 수 많은 순
-            # 4. 원료코드 및 원료명 순으로 정렬
             matched_items.sort(key=lambda x: (
                 0 if not x["is_blend"] else 1,
                 x["primary_ing"] if not x["is_blend"] else "",
@@ -912,282 +956,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
             else:
                 self._render_empty_search_guidance("🔍 검색 결과가 없습니다. 입력하신 성분명이나 CAS No를 확인해 주세요.")
 
-            # 검색 후 즉시 포커스를 텍스트박스로 복원
             self.after(30, self._focus_ingredient_lookup_textbox)
             self.after(100, self._focus_ingredient_lookup_textbox)
 
         except Exception as e:
             self._render_empty_search_guidance(f"⚠️ 성분 조회 중 오류 발생: {e}")
             print(f"[LOOKUP-ERROR] {e}")
-            self.after(50, self._focus_ingredient_lookup_textbox)
-
-    def _clear_unified_lookup_frame(self):
-        """통합 결과 프레임 및 틀고정 헤더의 모든 위젯 및 데이터 안전 초기화 (CTkScrollableFrame 내부 캔버스 절대 보호)"""
-        # 1. 헤더 영역 위젯들 안전 삭제
-        if hasattr(self, 'lookup_sticky_header_frame') and self.lookup_sticky_header_frame:
-            for widget in list(self.lookup_sticky_header_frame.winfo_children()):
-                try:
-                    widget.destroy()
-                except Exception:
-                    pass
-
-        # 2. 이전에 렌더링된 카드들만 정확히 삭제 (CTkScrollableFrame의 내부 캔버스/스크롤바 절대 보존)
-        if hasattr(self, 'lookup_unified_rows') and self.lookup_unified_rows:
-            for card in self.lookup_unified_rows:
-                try:
-                    card.destroy()
-                except Exception:
-                    pass
-
-        # 3. 더 보기 버튼 프레임 삭제
-        if hasattr(self, '_load_more_btn_frame') and self._load_more_btn_frame:
-            try:
-                self._load_more_btn_frame.destroy()
-            except Exception:
-                pass
-            self._load_more_btn_frame = None
-
-        self.lookup_unified_rows = []
-        self.selected_lookup_items = {}
-        self.lookup_material_rows = []
-        self.lookup_complex_rows = []
-        self.selected_complex_materials = self.selected_lookup_items
-        self._cached_lookup_items = []
-        self._current_rendered_count = 0
-
-    def _show_lookup_treeview(self):
-        pass
-
-    def _show_lookup_material_frame(self):
-        pass
-
-    def _update_quick_select_button_styles(self):
-        """체크박스 상태에 따라 빠른 선택 버튼들의 활성/비활성 색상을 동적으로 갱신합니다."""
-        if not hasattr(self, 'quick_select_buttons') or not hasattr(self, 'selected_lookup_items'):
-            return
-        
-        # 카테고리별 대상 및 활성 상태 계산 (100% 일치는 복합원료 중 100% 일치만 대상으로 하여 단일성분과 완전 분리)
-        targets = {"exact_100": [], "blend_only": [], "single_only": [], "all": []}
-        
-        for mat_id, item_tuple in self.selected_lookup_items.items():
-            chk_var = item_tuple[0]
-            item_info = item_tuple[2] if len(item_tuple) >= 3 else {}
-            
-            is_blend = item_info.get("is_blend", False)
-            is_exact = item_info.get("is_exact_full_match", False)
-
-            targets["all"].append(chk_var)
-            if is_blend:
-                targets["blend_only"].append(chk_var)
-                if is_exact:
-                    targets["exact_100"].append(chk_var)
-            else:
-                targets["single_only"].append(chk_var)
-
-        color_map = {
-            "exact_100": ("#16A34A", "#15803D"),   # 활성 초록
-            "blend_only": ("#4F46E5", "#4338CA"),  # 활성 보라
-            "single_only": ("#0288D1", "#0277BD"), # 활성 파랑
-            "all": ("#00897B", "#00695C"),         # 활성 청록
-        }
-        inactive_color = ("gray75", "gray30")
-        inactive_hover = ("gray65", "gray40")
-
-        for key, btn in self.quick_select_buttons.items():
-            chk_list = targets.get(key, [])
-            if chk_list and all(v.get() for v in chk_list):
-                # 전부 체크된 경우 -> 활성화 컬러 적용
-                act_fg, act_hov = color_map.get(key, ("#16A34A", "#15803D"))
-                btn.configure(fg_color=act_fg, hover_color=act_hov, text_color="white")
-            else:
-                # 미선택 / 일부 선택인 경우 -> 세련된 기본 회색 적용
-                btn.configure(fg_color=inactive_color, hover_color=inactive_hover, text_color=("black", "gray90"))
-
-    def _toggle_lookup_selection(self, filter_type="all"):
-        """검색 결과에서 조건별(100%일치 복합원료, 복합원료 전체, 단일성분, 전체)로 중복 선택 및 재클릭 시 토글 해제 처리합니다."""
-        if not hasattr(self, 'selected_lookup_items'):
-            return
-        
-        # 1. 전체 해제 요청인 경우
-        if filter_type == "none":
-            for mat_id, item_tuple in self.selected_lookup_items.items():
-                item_tuple[0].set(False)
-            self._update_quick_select_button_styles()
-            return
-
-        # 2. 해당 필터 조건에 부합하는 대상 아이템들 추출
-        target_items = []
-        for mat_id, item_tuple in self.selected_lookup_items.items():
-            chk_var = item_tuple[0]
-            item_info = item_tuple[2] if len(item_tuple) >= 3 else {}
-            is_blend = item_info.get("is_blend", False)
-            is_exact = item_info.get("is_exact_full_match", False)
-
-            is_match = False
-            if filter_type == "all":
-                is_match = True
-            elif filter_type == "exact_100":
-                # 복합원료 중 100% 일치만 선택 (단일성분과 완전 격리)
-                is_match = bool(is_blend and is_exact)
-            elif filter_type == "blend_only":
-                is_match = bool(is_blend)
-            elif filter_type == "single_only":
-                is_match = not bool(is_blend)
-            
-            if is_match:
-                target_items.append(chk_var)
-
-        if not target_items:
-            return
-
-        # 3. 토글 판단: 대상 아이템들이 '모두' 체크되어 있는 경우에만 '해제(False)'하고,
-        # 하나라도 체크 안 된 것이 있다면 '선택(True)'
-        all_checked = all(var.get() for var in target_items)
-        new_val = not all_checked
-
-        for var in target_items:
-            var.set(new_val)
-
-        # 4. 버튼 색상 즉시 동기화
-        self._update_quick_select_button_styles()
-
-    def _render_unified_lookup_results(self, title_info, items_data, search_terms_count=0):
-        """모든 검색 결과를 단일 통일된 프리미엄 카드 그리드로 일관되게 렌더링 (헤더 틀고정 지원)"""
-        self._clear_unified_lookup_frame()
-        if not hasattr(self, 'lookup_unified_frame'):
-            return
-
-        is_eng = getattr(self, 'lookup_export_lang_var', None) and "영문" in self.lookup_export_lang_var.get()
-
-        # [헤더 틀고정]: 스크롤되지 않는 lookup_sticky_header_frame에 헤더 대시보드 고정 마운트
-        header_parent = getattr(self, 'lookup_sticky_header_frame', self.lookup_unified_frame)
-        dash_frame = ctk.CTkFrame(header_parent, fg_color=("gray90", "gray20"), corner_radius=6)
-        dash_frame.pack(fill="x", padx=2, pady=(0, 4))
-        dash_frame.grid_columnconfigure(0, weight=1)
-
-        # 상단 요약 타이틀 및 통계
-        top_info_row = ctk.CTkFrame(dash_frame, fg_color="transparent")
-        top_info_row.pack(fill="x", padx=10, pady=(6, 4))
-
-        summary_text = f"📊 {title_info} (발견 {len(items_data)}건)" if not is_eng else f"📊 {title_info} (Found {len(items_data)} items)"
-        ctk.CTkLabel(top_info_row, text=summary_text, font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
-
-        btn_txt = "🚀 선택한 원료로 신규 처방 개발" if not is_eng else "🚀 Create Formulation with Selected"
-        ctk.CTkButton(
-            top_info_row,
-            text=btn_txt,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color="#00897B", hover_color="#00695C",
-            height=30,
-            command=self._create_formulation_from_selected_complex
-        ).pack(side="right")
-
-        # [신규 기능] 부분부분 원터치 일괄 선택 액션 툴바 (기본 미선택 회색 -> 체크 시 컬러 활성화)
-        select_bar = ctk.CTkFrame(dash_frame, fg_color="transparent")
-        select_bar.pack(fill="x", padx=10, pady=(0, 6))
-
-        ctk.CTkLabel(select_bar, text="⚡ 빠른 선택:", font=ctk.CTkFont(size=11, weight="bold"), text_color=("gray30", "gray70")).pack(side="left", padx=(0, 6))
-
-        self.quick_select_buttons = {}
-        inactive_color = ("gray75", "gray30")
-        inactive_hover = ("gray65", "gray40")
-
-        # 1. 100% 정확 일치만 선택 (복합원료 대상)
-        exact_100_count = sum(1 for item in items_data if item.get("is_blend", False) and item.get("is_exact_full_match", False))
-        btn_exact_text = f"🎯 100% 일치 복합원료 ({exact_100_count}건)" if not is_eng else f"🎯 100% Blend ({exact_100_count})"
-        self.quick_select_buttons["exact_100"] = ctk.CTkButton(
-            select_bar,
-            text=btn_exact_text,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=inactive_color, hover_color=inactive_hover,
-            text_color=("black", "gray90"),
-            height=24,
-            command=lambda: self._toggle_lookup_selection("exact_100")
-        )
-        self.quick_select_buttons["exact_100"].pack(side="left", padx=3)
-
-        # 2. 복합원료만 선택
-        blend_count = sum(1 for item in items_data if item.get("is_blend", False))
-        btn_blend_text = f"⭐ 복합원료만 ({blend_count}건)" if not is_eng else f"⭐ Blends ({blend_count})"
-        self.quick_select_buttons["blend_only"] = ctk.CTkButton(
-            select_bar,
-            text=btn_blend_text,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=inactive_color, hover_color=inactive_hover,
-            text_color=("black", "gray90"),
-            height=24,
-            command=lambda: self._toggle_lookup_selection("blend_only")
-        )
-        self.quick_select_buttons["blend_only"].pack(side="left", padx=3)
-
-        # 3. 단일성분만 선택
-        single_count = len(items_data) - blend_count
-        btn_single_text = f"🧪 단일성분만 ({single_count}건)" if not is_eng else f"🧪 Singles ({single_count})"
-        self.quick_select_buttons["single_only"] = ctk.CTkButton(
-            select_bar,
-            text=btn_single_text,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color=inactive_color, hover_color=inactive_hover,
-            text_color=("black", "gray90"),
-            height=24,
-            command=lambda: self._toggle_lookup_selection("single_only")
-        )
-        self.quick_select_buttons["single_only"].pack(side="left", padx=3)
-
-        # 4. 전체 선택
-        self.quick_select_buttons["all"] = ctk.CTkButton(
-            select_bar,
-            text="✓ 전체 선택" if not is_eng else "✓ Select All",
-            font=ctk.CTkFont(size=11),
-            fg_color=inactive_color, hover_color=inactive_hover,
-            text_color=("black", "gray90"),
-            height=24,
-            command=lambda: self._toggle_lookup_selection("all")
-        )
-        self.quick_select_buttons["all"].pack(side="left", padx=3)
-
-        # 5. 선택 해제
-        ctk.CTkButton(
-            select_bar,
-            text="✕ 선택 해제" if not is_eng else "✕ Deselect",
-            font=ctk.CTkFont(size=11),
-            fg_color=("gray75", "gray30"), hover_color=("gray65", "gray40"),
-            text_color=("black", "gray90"),
-            height=24,
-            command=lambda: self._toggle_lookup_selection("none")
-        ).pack(side="left", padx=3)
-
-        # 대량 결과 청크 렌더링 (초기 100개 0.03초 초고속 렌더링 + 더보기 지원으로 GUI 프리징 100% 박멸)
-        self._cached_lookup_items = items_data
-        self._current_rendered_count = 0
-        self._render_more_lookup_cards(chunk_size=100)
-
-    def _render_more_lookup_cards(self, chunk_size=100):
-        """저장된 검색 결과 데이터를 분할하여 렉 없이 점진적으로 렌더링"""
-        if not hasattr(self, '_cached_lookup_items') or not self._cached_lookup_items:
-            return
-        
-        # 이전 '더 보기' 버튼 프레임이 있다면 제거
-        if hasattr(self, '_load_more_btn_frame') and self._load_more_btn_frame:
-            try:
-                self._load_more_btn_frame.destroy()
-            except Exception:
-                pass
-            self._load_more_btn_frame = None
-
-        is_eng = getattr(self, 'lookup_export_lang_var', None) and "영문" in self.lookup_export_lang_var.get()
-        total_items = len(self._cached_lookup_items)
-        start_idx = self._current_rendered_count
-        end_idx = min(start_idx + chunk_size, total_items)
-        
-        row_idx = start_idx + 1
-        for i in range(start_idx, end_idx):
-            item = self._cached_lookup_items[i]
-            mat = item.get("material")
-            m_code = item.get("code") or (mat.code if mat else "-")
-            m_name = (mat.name_en if is_eng and mat and mat.name_en else (mat.name if mat else item.get("name", "-")))
-            badge_text = item.get("badge_text", "원료 정보")
-            badge_color = item.get("badge_color", "#0288D1")
             supplier_text = item.get("supplier_text", "-")
             stock_text = item.get("stock_text", "-")
             sub_tags = item.get("tags", [])
