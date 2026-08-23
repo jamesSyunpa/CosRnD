@@ -103,9 +103,13 @@ def main():
     dest_setup = os.path.join(release_dir, f"Setup_CosRQD_{version}.exe")
     shutil.copy2(setup_exe, dest_setup)
 
-    # 6. 배포용 Setup_CosRQD_{version}.zip 생성
+    # 6. 배포용 Setup_CosRQD_{version}.zip 생성 (설치 마법사 Setup.exe를 ZIP으로 패키징)
     dest_zip = os.path.join(release_dir, f"Setup_CosRQD_{version}.zip")
-    shutil.copy2(zip_path, dest_zip)
+    if os.path.exists(dest_zip):
+        os.remove(dest_zip)
+    with zipfile.ZipFile(dest_zip, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.write(dest_setup, f"Setup_CosRQD_{version}.exe")
+    print(f"[Success] 인스톨러 ZIP 패키징 완료: {dest_zip}")
 
     # 네이버 카페 50MB 제한 대비 40MB 분할 파일 자동 생성
     chunk_size = 40 * 1024 * 1024  # 40MB
