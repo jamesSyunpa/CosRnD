@@ -42,7 +42,7 @@ def unblock_self():
 unblock_self()
 
 from launcher.config_manager import ConfigManager
-from launcher.launcher_gui import run_launcher_gui
+from launcher.launcher_gui import run_launcher_gui, run_uninstaller_gui
 
 
 # Configure logging
@@ -99,7 +99,7 @@ def main():
     # 윈도우 작업표시줄 아이콘 정합성을 위한 AppUserModelID 설정
     try:
         import ctypes
-        myappid = 'LucForma.CosRQD.Launcher.v65.0.1'
+        myappid = 'Luckfortma.CosRQD.Launcher.v65.0.1'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception as appid_err:
         print(f"[STARTUP] AppUserModelID 설정 실패: {appid_err}")
@@ -119,6 +119,12 @@ def main():
         # Initialize configuration manager
         config_manager = ConfigManager()
         
+        # Check if uninstall mode is requested
+        if any(arg.lower() in ['--uninstall', '/uninstall', '-uninstall', 'uninstall'] for arg in sys.argv[1:]):
+            logger.info("Uninstall mode requested via command line argument")
+            run_uninstaller_gui(config_manager, version)
+            return 0
+            
         # Check if this is first run or existing installation
         if config_manager.exists():
             logger.info("Existing installation detected")

@@ -672,6 +672,57 @@ class LauncherMainWindow(QMainWindow):
             QMessageBox.critical(self, "업데이트 실패", message)
 
 
+def run_uninstaller_gui(config_manager: ConfigManager, version: str):
+    """
+    Run dedicated uninstaller confirmation and removal dialog.
+    """
+    import os
+    app = QApplication.instance()
+    if not app:
+        app = QApplication(sys.argv)
+    app.setApplicationName("CosRQD 제거")
+    
+    install_path = None
+    if config_manager.exists():
+        install_path = config_manager.get_install_path()
+    if not install_path:
+        default_local = Path(os.environ.get("LOCALAPPDATA", "")) / "CosRQD"
+        if default_local.exists():
+            install_path = default_local
+            
+    if not install_path or not install_path.exists():
+        QMessageBox.information(
+            None,
+            "제거 완료",
+            "설치된 CosRQD 프로그램을 찾을 수 없거나 이미 제거되었습니다."
+        )
+        return
+        
+    reply = QMessageBox.question(
+        None,
+        "CosRQD 프로그램 제거",
+        f"CosRQD_v{version} (화장품연구개발 플랫폼) 및 관련 실행 파일을\n컴퓨터에서 완전히 제거하시겠습니까?\n\n(참고: 사용자가 작성한 연구 데이터 및 백업 파일은 안전하게 보존됩니다.)",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No
+    )
+    
+    if reply == QMessageBox.StandardButton.Yes:
+        installer = Installer()
+        success = installer.uninstall(install_path, keep_user_data=True)
+        if success:
+            QMessageBox.information(
+                None,
+                "제거 완료",
+                "CosRQD 프로그램이 컴퓨터에서 성공적으로 제거되었습니다."
+            )
+        else:
+            QMessageBox.warning(
+                None,
+                "제거 오류",
+                "일부 파일을 제거하는 도중 오류가 발생했습니다.\n실행 중인 프로그램을 종료한 후 다시 시도해 주세요."
+            )
+
+
 def run_launcher_gui(config_manager: ConfigManager, version: str):
     """
     Run launcher GUI application.
@@ -681,7 +732,7 @@ def run_launcher_gui(config_manager: ConfigManager, version: str):
         version: Application version
     """
     app = QApplication(sys.argv)
-    app.setApplicationName("CosRnD 런처")
+    app.setApplicationName("CosRQD 런처")
     
     # Check if already installed
     if config_manager.exists():

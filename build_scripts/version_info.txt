@@ -15,11 +15,11 @@ VSVersionInfo(
       [
       StringTable(
         '041204b0',
-        [StringStruct('CompanyName', 'LucForma (럭포마)'),
+        [StringStruct('CompanyName', 'Luckfortma (럭포마)'),
         StringStruct('FileDescription', 'CosRQD Cosmetic R&D Platform Setup Installer'),
         StringStruct('FileVersion', '65.0.1.0'),
         StringStruct('InternalName', 'Setup_CosRQD'),
-        StringStruct('LegalCopyright', 'Copyright (C) 2025-2026 LucForma. All rights reserved.'),
+        StringStruct('LegalCopyright', 'Copyright (C) 2025-2026 Luckfortma. All rights reserved.'),
         StringStruct('OriginalFilename', 'Setup_CosRQD_v65.0.1.exe'),
         StringStruct('ProductName', 'CosRQD'),
         StringStruct('ProductVersion', '65.0.1.0')])

@@ -433,7 +433,7 @@ class Installer:
                             winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
                             winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(icon_path))
                             winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, app_version_str)
-                            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "럭포마 (LucForma)")
+                            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "럭포마 (Luckfortma)")
                             winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
                             winreg.SetValueEx(key, "URLInfoAbout", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
                             winreg.SetValueEx(key, "HelpLink", 0, winreg.REG_SZ, "https://cafe.naver.com/cosrqd")
@@ -454,33 +454,67 @@ class Installer:
     
     def uninstall(self, install_path: Path, keep_user_data: bool = True) -> bool:
         """
-        Uninstall the application.
-        
-        Args:
-            install_path: Installation directory
-            keep_user_data: If True, preserve user data/config
-            
-        Returns:
-            True if uninstallation was successful
+        Uninstall the application (files, shortcuts, and Windows registry).
         """
         try:
             logger.info(f"Uninstalling from: {install_path}")
             
-            if not install_path.exists():
-                logger.warning("Installation directory does not exist")
-                return True
+            # 1. 실행 중인 프로세스 종료 시도
+            try:
+                import subprocess
+                subprocess.run(["taskkill", "/F", "/IM", "CosRQD.exe", "/T"], capture_output=True)
+                subprocess.run(["taskkill", "/F", "/IM", "main.exe", "/T"], capture_output=True)
+            except Exception:
+                pass
             
-            if keep_user_data:
-                # Remove only bin directory
-                bin_dir = install_path / "bin"
-                if bin_dir.exists():
-                    shutil.rmtree(bin_dir)
-                    logger.info("Removed application binaries")
-            else:
-                # Remove entire installation
-                shutil.rmtree(install_path)
-                logger.info("Removed entire installation directory")
+            # 2. 설치 폴더 정리
+            if install_path.exists():
+                if keep_user_data:
+                    # 바이너리 폴더만 제거
+                    bin_dir = install_path / "bin"
+                    if bin_dir.exists():
+                        shutil.rmtree(bin_dir, ignore_errors=True)
+                        logger.info("Removed application binaries")
+                else:
+                    # 전체 설치 디렉터리 제거
+                    shutil.rmtree(install_path, ignore_errors=True)
+                    logger.info("Removed entire installation directory")
             
+            # 3. 바탕화면 및 시작메뉴 바로가기 제거
+            try:
+                desktop_dir = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
+                start_menu_dir = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+                for base_dir in [desktop_dir, start_menu_dir]:
+                    if base_dir.exists():
+                        for lnk in list(base_dir.glob("CosRQD*.lnk")) + list(base_dir.glob("CosRnD*.lnk")) + list(base_dir.glob("*화장품연구관리*.lnk")):
+                            try:
+                                lnk.unlink()
+                                logger.info(f"Removed shortcut: {lnk}")
+                            except Exception:
+                                pass
+            except Exception as e:
+                logger.warning(f"Failed to remove shortcuts: {e}")
+            
+            # 4. Windows 레지스트리 Uninstall 키 삭제
+            if sys.platform.startswith('win'):
+                try:
+                    import winreg
+                    reg_paths = [
+                        r"Software\Microsoft\Windows\CurrentVersion\Uninstall",
+                        r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+                    ]
+                    for root_key in [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]:
+                        for base_path in reg_paths:
+                            for app_key_name in ["CosRQD", "CosRnD"]:
+                                try:
+                                    winreg.DeleteKey(root_key, f"{base_path}\\{app_key_name}")
+                                    logger.info(f"Deleted registry key: {base_path}\\{app_key_name}")
+                                except Exception:
+                                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to delete registry keys: {e}")
+            
+            logger.info("Uninstallation complete")
             return True
         except Exception as e:
             logger.error(f"Uninstallation failed: {e}")
