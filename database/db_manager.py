@@ -217,34 +217,8 @@ class DBManager:
 
     def get_local_db_path(self) -> str:
         db_dir = self.get_db_relative_path()
+        os.makedirs(db_dir, exist_ok=True)
         target_path = os.path.join(db_dir, "cosmetic.db")
-        
-        # 이전 CosRnD 경로 또는 Documents 경로에서 AppData/CosRQD 경로로 자동 데이터베이스 이전(마이그레이션) 수행
-        try:
-            appdata_root = os.getenv('APPDATA', os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming'))
-            old_cosrnd_folder = os.path.join(appdata_root, 'CosRnD')
-            old_candidates = [
-                os.path.join(old_cosrnd_folder, 'Data', 'cosmetic.db'),
-                os.path.join(os.path.expanduser('~'), 'Documents', 'CosRnD', 'Data', 'cosmetic.db'),
-                os.path.join(os.path.expanduser('~'), 'Documents', 'CosRQD', 'Data', 'cosmetic.db'),
-            ]
-            for old_path in old_candidates:
-                if os.path.exists(old_path) and not os.path.exists(target_path):
-                    os.makedirs(db_dir, exist_ok=True)
-                    shutil.copy2(old_path, target_path)
-                    print(f"[마이그레이션] 기존 DB({old_path})를 신규 CosRQD 경로({target_path})로 복사 완료")
-                    break
-                    
-            # 구버전 AppData/CosRnD 폴더가 남아있고 신규 target_path가 안전하게 확보된 경우 구버전 잔재 폴더 완전 정리/삭제
-            if os.path.exists(old_cosrnd_folder) and os.path.exists(target_path):
-                try:
-                    shutil.rmtree(old_cosrnd_folder, ignore_errors=True)
-                    print(f"[정리] 구버전 폴더({old_cosrnd_folder})를 완벽히 삭제 정리하였습니다.")
-                except Exception as del_err:
-                    print(f"[정리 알림] 구버전 폴더 삭제 대기: {del_err}")
-        except Exception as mig_err:
-            print(f"[경고] 기존 DB 마이그레이션 실패: {mig_err}")
-            
         return target_path
 
     def cleanup_db_files(self):
@@ -328,26 +302,10 @@ class DBManager:
         os.makedirs(os.path.dirname(local_db_path), exist_ok=True)
         shared_db_path = config.get('Paths', 'shared_db_path', fallback=None)
 
-        # 만약 config.ini에 shared_db_path가 없거나 해당 경로가 존재하지 않는 경우, OneDrive 및 네트워크 드라이브 자동 스캔
+        # 만약 config.ini에 shared_db_path가 없거나 해당 경로가 존재하지 않는 경우 기본 로컬 DB 디렉토리 사용
         if not shared_db_path or not os.path.exists(shared_db_path):
-            print("[INFO] 유효한 공유 DB 경로가 설정되지 않았습니다. OneDrive 및 네트워크 폴더 자동 스캔을 시도합니다...")
-            discovered_paths = discover_database_paths()
-            if discovered_paths:
-                # 첫 번째 유효한 경로를 자동으로 책정
-                auto_path = discovered_paths[0]
-                shared_db_path = auto_path
-                print(f"[INFO] 자동으로 감지된 DB 경로를 책정합니다: {auto_path}")
-                
-                # config.ini에 자동 감지된 경로 저장
-                try:
-                    if not config.has_section('Paths'):
-                        config.add_section('Paths')
-                    config.set('Paths', 'shared_db_path', auto_path)
-                    config.set('Paths', 'database_dir', auto_path)
-                    with open(config_path, 'w', encoding='utf-8') as configfile:
-                        config.write(configfile)
-                except Exception as save_err:
-                    print(f"[경고] 자동 감지된 경로 저장 실패 (무시): {save_err}")
+            shared_db_path = os.path.dirname(local_db_path)
+            print(f"[INFO] 기본 로컬 DB 디렉토리 사용: {shared_db_path}")
 
         # Normalize shared_db_path: config stores only the folder. If a full file
         # path was stored, handle gracefully, but prefer folder paths.
