@@ -814,6 +814,7 @@ class DataManagementFrame(ctk.CTkFrame):
 
         if user:
             for key, entry in self.user_entries.items():
+                entry.configure(state="normal")
                 entry.delete(0, "end")
 
             self.user_entries["username"].insert(0, user.username or "")
@@ -881,8 +882,8 @@ class DataManagementFrame(ctk.CTkFrame):
                         pass
 
     def save_user(self):
-        username = self.user_entries["username"].get()
-        password = self.user_entries["password"].get()
+        username = self.user_entries["username"].get().strip()
+        password = self.user_entries["password"].get().strip()
         if not username:
             messagebox.showwarning("입력 오류", "사용자 ID는 필수 항목입니다.")
             return
@@ -891,13 +892,13 @@ class DataManagementFrame(ctk.CTkFrame):
         log_action = ""
         session = db_manager.get_session()
         try:
-            is_edit = hasattr(self, '_selected_user_id') and self._selected_user_id
+            is_edit = bool(hasattr(self, '_selected_user_id') and self._selected_user_id)
             if is_edit:
                 user = session.query(User).filter_by(id=self._selected_user_id).first()
                 if not user:
                     raise Exception("선택된 사용자를 찾을 수 없습니다.")
             else:
-                # 신규 사용자
+                # 신규 사용자 검증
                 if not password:
                     messagebox.showwarning("입력 오류", "새 사용자는 비밀번호를 반드시 입력해야 합니다.")
                     return
@@ -905,10 +906,7 @@ class DataManagementFrame(ctk.CTkFrame):
                 if existing_user:
                     messagebox.showerror("저장 오류", "이미 존재하는 사용자 ID입니다.")
                     return
-                user = User(username=username)
-                session.add(user)
 
-            # --- 변경 사항 로깅 ---
             # 권한 가져오기
             role_display = self.user_role_combo.get()
             role_code = self.role_options.get(role_display, "RD")
@@ -918,53 +916,54 @@ class DataManagementFrame(ctk.CTkFrame):
                 is_master_target = (user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD')
                 if is_master_target:
                     role_code = 'MSAD'
-            
-            # 신규 사용자에 대한 MSAD 권한 제한 검증
-            if not (hasattr(self, '_selected_user_id') and self._selected_user_id):  # 신규 사용자인 경우
-                if role_code == "MSAD" and self.has_admin:  # 이미 관리자가 있는데 MSAD 권한을 시도하는 경우
+            else:
+                # 신규 사용자에 대한 MSAD 권한 제한 검증
+                if role_code == "MSAD" and self.has_admin:
                     messagebox.showerror("권한 오류", 
                         "이미 관리자 계정이 존재합니다.\n"
                         "보안상 추가 관리자 계정 생성은 제한됩니다.\n"
                         "다른 권한을 선택해주세요.")
                     return
             
-            # is_admin은 권한 코드에 따라 자동 설정 (정책: RQD도 관리자 취급)
+            # is_admin 자동 설정
             is_admin_value = (role_code in ("MSAD", "RQD"))
             self.is_admin_var.set("on" if is_admin_value else "off")
             
             new_values = {
-                "real_name": self.user_entries["real_name"].get(),
-                "manager_code": self.user_entries["manager_code"].get(),
-                "position": self.user_entries["position"].get(),
-                "contact": self.user_entries["contact"].get(),
-                "zip_code": self.user_entries["zip_code"].get(),
-                "address": self.user_entries["address"].get(),
+                "real_name": self.user_entries["real_name"].get().strip(),
+                "manager_code": self.user_entries["manager_code"].get().strip(),
+                "position": self.user_entries["position"].get().strip(),
+                "contact": self.user_entries["contact"].get().strip(),
+                "zip_code": self.user_entries["zip_code"].get().strip(),
+                "address": self.user_entries["address"].get().strip(),
                 "관리자 권한": is_admin_value,
                 "role": role_code
             }
 
             # manager_code 중복 검사 (빈 문자열은 제외)
-            manager_code = new_values["manager_code"].strip()
-            if manager_code:  # 값이 있을 때만 중복 검사
-                existing_manager = session.query(User).filter(
-                    User.manager_code == manager_code,
-                    User.id != user.id  # 자기 자신은 제외
-                ).first()
+            manager_code = new_values["manager_code"]
+            if manager_code:
+                query = session.query(User).filter(User.manager_code == manager_code)
+                if is_edit:
+                    query = query.filter(User.id != user.id)
+                existing_manager = query.first()
                 if existing_manager:
                     messagebox.showerror("저장 오류", 
                         f"담당번호 '{manager_code}'는 이미 사용 중입니다.\n"
                         f"사용자: {existing_manager.username} ({existing_manager.real_name or '이름 없음'})")
                     return
 
-            if not user.id: # 신규 생성
+            # 비밀번호 해싱 준비
+            hashed_pw_str = None
+            if password:
+                hashed_pw_str = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+            if not is_edit:
+                # 신규 생성: 객체 생성 시 모든 필수값(username, password)을 즉시 채운 후 add
                 log_action = "신규 생성"
-                # 화이트리스트 필드만 기록 + 빈값은 생략
                 def add_nonempty(label, value):
-                    if value is None:
-                        return
-                    if isinstance(value, str) and not value.strip():
-                        return
-                    log_entries.append(f"{label}: '{value}'")
+                    if value is not None and str(value).strip():
+                        log_entries.append(f"{label}: '{value}'")
 
                 log_entries.append(f"사용자 ID: '{username}'")
                 add_nonempty("실명", new_values.get("real_name"))
@@ -972,57 +971,64 @@ class DataManagementFrame(ctk.CTkFrame):
                 add_nonempty("직책", new_values.get("position"))
                 add_nonempty("연락처", new_values.get("contact"))
                 add_nonempty("권한", new_values.get("role"))
-                if password:
-                    log_entries.append("초기 비밀번호 설정됨")
-            else: # 수정
+                log_entries.append("초기 비밀번호 설정됨")
+
+                user = User(
+                    username=username,
+                    password=hashed_pw_str,
+                    real_name=new_values["real_name"] or None,
+                    manager_code=new_values["manager_code"] or None,
+                    position=new_values["position"] or None,
+                    contact=new_values["contact"] or None,
+                    zip_code=new_values["zip_code"] or None,
+                    address=new_values["address"] or None,
+                    role=new_values["role"],
+                    is_admin=new_values["관리자 권한"]
+                )
+                session.add(user)
+            else:
+                # 기존 사용자 정보 수정
                 log_action = "정보 수정"
                 def log_change(field_name, old_val, new_val):
                     if old_val != new_val:
                         log_entries.append(f"{self.get_user_label_by_key(field_name)}: '{old_val}' -> '{new_val}'")
-                # 화이트리스트 변경만 기록 (실명, 담당번호, 직책, 연락처, 권한, 관리자 권한)
+
                 log_change("real_name", user.real_name or "", new_values["real_name"])
                 log_change("manager_code", user.manager_code or "", new_values["manager_code"])
                 log_change("position", user.position or "", new_values["position"])
                 log_change("contact", user.contact or "", new_values["contact"])
                 log_change("관리자 권한", user.is_admin, new_values["관리자 권한"])
                 
-                # 권한 변경 로깅
                 old_role = getattr(user, 'role', 'RD')
                 if old_role != new_values["role"]:
                     log_entries.append(f"권한: '{old_role}' -> '{new_values['role']}'")
                 
                 if password:
                     log_entries.append("비밀번호가 변경되었습니다.")
+                    user.password = hashed_pw_str
 
-            # --- 데이터베이스 업데이트 ---
-            if password:
-                hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-                user.password = hashed_password.decode('utf-8')
-            
-            user.real_name = new_values["real_name"]
-            # manager_code가 빈 문자열이면 None으로 설정 (UNIQUE 제약조건 회피)
-            user.manager_code = new_values["manager_code"] if new_values["manager_code"].strip() else None
-            user.position = new_values["position"]
-            user.contact = new_values["contact"]
-            user.zip_code = new_values["zip_code"]
-            user.address = new_values["address"]
-            # 마스터 계정은 권한/관리자값 불변 유지
-            if is_edit and ((user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD')):
-                user.is_admin = True
-                user.role = 'MSAD'
-            else:
-                user.is_admin = new_values["관리자 권한"]
-                user.role = new_values["role"]  # 권한 저장
-            
+                user.real_name = new_values["real_name"] or None
+                user.manager_code = new_values["manager_code"] or None
+                user.position = new_values["position"] or None
+                user.contact = new_values["contact"] or None
+                user.zip_code = new_values["zip_code"] or None
+                user.address = new_values["address"] or None
+                
+                if (user.username == 'admin') or (getattr(user, 'role', '') == 'MSAD'):
+                    user.is_admin = True
+                    user.role = 'MSAD'
+                else:
+                    user.is_admin = new_values["관리자 권한"]
+                    user.role = new_values["role"]
+
             if log_entries:
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 log_header = f"[{timestamp}] by {self.current_user.username} - {log_action}"
                 log_message = f"{log_header}\n- " + "\n- ".join(log_entries)
-                
                 user.change_log = (user.change_log + "\n\n" if user.change_log else "") + log_message
 
             session.commit()
-            messagebox.showinfo("성공", "사용자 정보가 저장되었습니다.")
+            messagebox.showinfo("성공", "사용자 정보가 성공적으로 저장되었습니다.")
         except Exception as e:
             session.rollback()
             import traceback
@@ -1034,7 +1040,6 @@ class DataManagementFrame(ctk.CTkFrame):
             session.close()
             self.clear_user_form()
             self.load_users()
-            # 권한 옵션 업데이트 (관리자 생성/삭제 시 권한 선택지 변경)
             self.update_role_options()
 
     def delete_user(self):
