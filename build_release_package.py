@@ -65,14 +65,13 @@ def main():
                 
     print(f"[Success] Compression complete: {zip_path}")
     
-    # 4. Build Setup_화장품연구관리_v65.0.1.exe
+    # 4. Build Setup_CosRQD_{version}.exe
     setup_spec = os.path.join(current_dir, "build_scripts", "setup_installer.spec")
     run_pyinstaller(setup_spec)
     
-    setup_exe = os.path.join(dist_dir, f"Setup_화장품연구관리_{version}.exe")
+    setup_exe = os.path.join(dist_dir, f"Setup_CosRQD_{version}.exe")
     if not os.path.exists(setup_exe):
-        # setup_installer.spec의 name 확인
-        alt_exe = os.path.join(dist_dir, "Setup_화장품연구관리_v1.0.3.exe")
+        alt_exe = os.path.join(dist_dir, f"Setup_화장품연구관리_{version}.exe")
         if os.path.exists(alt_exe):
             setup_exe = alt_exe
         else:
@@ -85,12 +84,12 @@ def main():
         shutil.rmtree(release_dir)
     os.makedirs(release_dir, exist_ok=True)
     
-    # Copy Setup_화장품연구관리_{version}.exe
-    dest_setup = os.path.join(release_dir, f"Setup_화장품연구관리_{version}.exe")
+    # Copy Setup_CosRQD_{version}.exe
+    dest_setup = os.path.join(release_dir, f"Setup_CosRQD_{version}.exe")
     shutil.copy2(setup_exe, dest_setup)
 
-    # 배포용 app.zip도 함께 CosRQD_Release에 백업 (네이버 카페 첨부용)
-    dest_zip = os.path.join(release_dir, f"CosRQD_{version}_Release.zip")
+    # 6. 배포용 Setup_CosRQD_{version}.zip 생성
+    dest_zip = os.path.join(release_dir, f"Setup_CosRQD_{version}.zip")
     shutil.copy2(zip_path, dest_zip)
 
     # 네이버 카페 50MB 제한 대비 40MB 분할 파일 자동 생성
@@ -108,10 +107,11 @@ def main():
     
     print("\n=======================================================")
     print(f"[Success] Release packaging successful!")
-    print(f"1. Final Setup File (MYBOX/클라우드용): {dest_setup}")
-    print(f"2. Cafe Direct Attachment Files (카페 직접 첨부용):")
-    print(f"   • {os.path.basename(dest_zip)}.001 (40.0 MB)")
-    print(f"   • {os.path.basename(dest_zip)}.002 (38.1 MB)")
+    print(f"1. Setup Installer (실행 설치용): {dest_setup}")
+    print(f"2. Setup ZIP Package (깃허브/클라우드용): {dest_zip}")
+    print(f"3. Cafe Split Files (카페 분할 첨부용):")
+    print(f"   • {os.path.basename(dest_zip)}.001")
+    print(f"   • {os.path.basename(dest_zip)}.002")
     print("=======================================================")
 
 if __name__ == "__main__":
