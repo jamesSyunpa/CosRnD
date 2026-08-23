@@ -12,13 +12,14 @@ a = Analysis(
         (os.path.join(project_root, 'dist', 'app.zip'), '.'),
         (os.path.join(project_root, 'Icon.ico'), '.'),
         (os.path.join(project_root, 'launcher'), 'launcher')
-    ],
+    ] + ([(__import__('certifi').where(), 'certifi')] if hasattr(__import__('certifi'), 'where') else []),
     hiddenimports=[
         'launcher', 'launcher.installer', 'launcher.launcher_gui', 
         'launcher.config_manager', 'launcher.process_manager', 'launcher.updater',
         'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
         'psutil', 'requests', 'customtkinter', 'PIL', 'win32api', 'win32con',
-        'win32com', 'win32com.client', 'pythoncom'
+        'win32com', 'win32com.client', 'pythoncom',
+        'certifi', 'urllib3', 'charset_normalizer', 'idna'
     ],
     hookspath=[],
     hooksconfig={},

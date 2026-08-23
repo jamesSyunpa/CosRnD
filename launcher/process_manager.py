@@ -16,6 +16,35 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def get_clean_subproc_env(extra_env=None):
+    """
+    런처에서 메인 애플리케이션을 구동할 때 런처 자신의 PyInstaller 임시 환경변수
+    (_MEIPASS, _MEIPASS2 등)를 완전히 제거하여, 자식 프로세스가 독립적인 고유 임시 환경을
+    올바르게 생성하도록 보장합니다.
+    """
+    env = os.environ.copy()
+    keys_to_remove = [
+        '_MEIPASS',
+        '_MEIPASS2',
+        'PYTHONPATH',
+        'PYTHONHOME',
+        'PYINSTALLER_STRICT_UNLOAD_MODE',
+        'PYINSTALLER_SUPPRESS_TEMP_ERRORS'
+    ]
+    for key in keys_to_remove:
+        if key in env:
+            del env[key]
+
+    if extra_env:
+        for k, v in extra_env.items():
+            if v is not None:
+                env[k] = str(v)
+            elif k in env:
+                del env[k]
+
+    return env
+
+
 class ProcessManager:
     """Manages application process lifecycle"""
     
@@ -179,7 +208,7 @@ class ProcessManager:
     
     def start_application(self, app_path: Path, wait: bool = False) -> Optional[subprocess.Popen]:
         """
-        Start the application.
+        Start the application with clean environment.
         
         Args:
             app_path: Path to the application executable
@@ -197,16 +226,19 @@ class ProcessManager:
         logger.info(f"Starting application: {app_path}")
         
         try:
-            # Start in the application directory
             cwd = app_path.parent
+            clean_env = get_clean_subproc_env()
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
             
             if wait:
-                subprocess.run([str(app_path)], cwd=cwd, check=True)
+                subprocess.run([str(app_path)], cwd=cwd, env=clean_env, check=True)
                 return None
             else:
                 process = subprocess.Popen(
                     [str(app_path)],
                     cwd=cwd,
+                    env=clean_env,
+                    creationflags=flags,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )

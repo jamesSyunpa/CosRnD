@@ -16,8 +16,10 @@ import zipfile
 import tempfile
 import configparser
 import threading
-import requests
 import subprocess
+import urllib.request
+import urllib.error
+import ssl
 from datetime import datetime
 import customtkinter as ctk
 from tkinter import messagebox, ttk
@@ -143,48 +145,53 @@ class UpdateManager:
     @classmethod
     def check_github_release(cls) -> tuple:
         """
-        GitHub Releases 최신 정보를 비동기로 조회합니다.
+        GitHub Releases 최신 정보를 비동기로 조회합니다 (urllib 표준 라이브러리 사용).
         반환값: (found: bool, version: str, release_info: dict)
         """
-        headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "CosRnD-UpdateEngine"
-        }
+        req = urllib.request.Request(
+            cls.GITHUB_API_URL,
+            headers={
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "CosRnD-UpdateEngine"
+            }
+        )
         try:
-            r = requests.get(cls.GITHUB_API_URL, headers=headers, timeout=3.5)
-            if r.status_code == 200:
-                data = r.json()
-                tag = data.get("tag_name", "").strip()
-                if tag:
-                    if not tag.startswith('v') and re.match(r'^\d+', tag):
-                        tag = 'v' + tag
-                    
-                    # 첨부파일 다운로드 링크 찾기
-                    download_url = None
-                    file_name = None
-                    file_size = 0
-                    assets = data.get("assets", [])
-                    for ast in assets:
-                        aname = ast.get("name", "")
-                        if aname.endswith((".zip", ".exe")):
-                            download_url = ast.get("browser_download_url")
-                            file_name = aname
-                            file_size = ast.get("size", 0)
-                            # patch나 setup 우선
-                            if "patch" in aname.lower() or "setup" in aname.lower():
-                                break
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=4.0, context=ctx) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode('utf-8'))
+                    tag = data.get("tag_name", "").strip()
+                    if tag:
+                        if not tag.startswith('v') and re.match(r'^\d+', tag):
+                            tag = 'v' + tag
+                        
+                        # 첨부파일 다운로드 링크 찾기
+                        download_url = None
+                        file_name = None
+                        file_size = 0
+                        assets = data.get("assets", [])
+                        for ast in assets:
+                            aname = ast.get("name", "")
+                            if aname.endswith((".zip", ".exe")):
+                                download_url = ast.get("browser_download_url")
+                                file_name = aname
+                                file_size = ast.get("size", 0)
+                                if "patch" in aname.lower() or "setup" in aname.lower():
+                                    break
 
-                    rel_info = {
-                        "title": data.get("name") or f"CosRQD {tag}",
-                        "date": (data.get("published_at") or "")[:10],
-                        "summary": data.get("body", ""),
-                        "url": data.get("html_url", f"https://github.com/{cls.GITHUB_REPO}/releases"),
-                        "download_url": download_url,
-                        "file_name": file_name,
-                        "file_size": file_size,
-                        "source": "github"
-                    }
-                    return (True, tag, rel_info)
+                        rel_info = {
+                            "title": data.get("name") or f"CosRQD {tag}",
+                            "date": (data.get("published_at") or "")[:10],
+                            "summary": data.get("body", ""),
+                            "url": data.get("html_url", f"https://github.com/{cls.GITHUB_REPO}/releases"),
+                            "download_url": download_url,
+                            "file_name": file_name,
+                            "file_size": file_size,
+                            "source": "github"
+                        }
+                        return (True, tag, rel_info)
         except Exception as e:
             print(f"[UpdateManager] GitHub 릴리즈 조회: {e}")
         return (False, "", {})
@@ -371,13 +378,23 @@ class DownloadProgressDialog(ctk.CTkToplevel):
                 os.makedirs(temp_dir, exist_ok=True)
                 target_file = os.path.join(temp_dir, f"update_{self.latest_ver}.zip")
 
-                r = requests.get(self.download_url, stream=True, timeout=30)
-                total_size = int(r.headers.get('content-length', 0))
-                downloaded = 0
+                req = urllib.request.Request(
+                    self.download_url,
+                    headers={"User-Agent": "CosRnD-UpdateEngine"}
+                )
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
 
-                with open(target_file, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=65536):
-                        if chunk:
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded = 0
+
+                    with open(target_file, 'wb') as f:
+                        while True:
+                            chunk = response.read(65536)
+                            if not chunk:
+                                break
                             f.write(chunk)
                             downloaded += len(chunk)
                             if total_size > 0:

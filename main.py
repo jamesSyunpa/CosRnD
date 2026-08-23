@@ -3,6 +3,31 @@ import os
 import subprocess
 import time
 
+# [보안 & 안정성] 부모 프로세스로부터 상속된 잔여 PyInstaller 임시 환경변수 방어
+if os.name == 'nt':
+    for _k in ['_MEIPASS2', 'PYINSTALLER_STRICT_UNLOAD_MODE', 'PYINSTALLER_SUPPRESS_TEMP_ERRORS']:
+        if _k in os.environ:
+            del os.environ[_k]
+
+# [SSL & Certifi 안정성 보장] certifi.where() 경로 유효성 검사 및 안전 복구
+try:
+    import certifi
+    ca_path = certifi.where()
+    if not os.path.exists(ca_path):
+        cur_meipass = getattr(sys, '_MEIPASS', '')
+        for candidate in [
+            os.path.join(cur_meipass, 'certifi', 'cacert.pem'),
+            os.path.join(cur_meipass, 'cacert.pem'),
+            os.path.join(os.path.dirname(sys.executable), 'cacert.pem')
+        ]:
+            if os.path.exists(candidate):
+                certifi.where = lambda c=candidate: c
+                os.environ['SSL_CERT_FILE'] = candidate
+                os.environ['REQUESTS_CA_BUNDLE'] = candidate
+                break
+except Exception:
+    pass
+
 def unblock_self():
     """
     최초 실행 시 인터넷에서 다운로드되어 발생하는 Windows 스마트스크린 차단(MotW)을

@@ -16,13 +16,14 @@ a = Analysis(
         (os.path.join(project_root, 'utils'), 'utils'),
         (os.path.join(project_root, 'Icon.ico'), '.'),
         (os.path.join(project_root, 'VERSION'), '.'),
-        (os.path.join(project_root, 'config.ini'), '.')
-    ],
+        (os.path.join(project_root, 'config.ini'), '.'),
+    ] + ([(__import__('certifi').where(), 'certifi')] if hasattr(__import__('certifi'), 'where') else []),
     hiddenimports=[
         'win32event', 'win32api', 'winerror', 'sqlite3', 
         'sqlalchemy.ext.baked', 'babel.numbers', 'customtkinter', 
         'PIL', 'PIL._tkinter_finder', 'pandas', 'openpyxl', 
-        'bs4', 'requests', 'bcrypt', 'cryptography'
+        'bs4', 'requests', 'bcrypt', 'cryptography',
+        'certifi', 'urllib3', 'charset_normalizer', 'idna'
     ],
     hookspath=[],
     hooksconfig={},
