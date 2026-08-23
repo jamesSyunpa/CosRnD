@@ -17,9 +17,15 @@ import tempfile
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # --- 경로 설정을 읽기 위한 설정 ---
-def _get_excel_config_path(app_dir_name: str = 'CosRnD') -> str:
+def _get_excel_config_path(app_dir_name: str = 'CosRQD') -> str:
     appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), app_dir_name)
-    return os.path.join(appdata_dir, 'config.ini')
+    target_config = os.path.join(appdata_dir, 'config.ini')
+    if os.path.exists(target_config):
+        return target_config
+    root_config = os.path.join(PROJECT_ROOT, 'config.ini')
+    if os.path.exists(root_config):
+        return root_config
+    return target_config
 
 CONFIG_FILE_PATH = _get_excel_config_path()
 
@@ -75,23 +81,27 @@ def _load_workbook_robust(file_path, data_only=True):
 def get_excel_path():
     """config.ini에서 엑셀 기본 경로를 읽어옵니다."""
     config = configparser.ConfigParser()
-    config.read(CONFIG_FILE_PATH, encoding='utf-8')
-    # 경로가 비어있으면 사용자 문서/CosRnD/ExcelData 폴더를 기본값으로 사용
+    cfg_path = _get_excel_config_path()
+    if os.path.exists(cfg_path):
+        config.read(cfg_path, encoding='utf-8')
     path = config.get('Paths', 'excel_dir', fallback='').strip()
     if not path or not os.path.isdir(path):
-        default_path = os.path.join(os.path.expanduser('~'), 'Documents', 'CosRnD', 'ExcelData')
+        default_path = os.path.join(os.path.expanduser('~'), 'Documents', 'CosRQD', 'ExcelData')
         os.makedirs(default_path, exist_ok=True)
         return default_path
     return path
 
 def save_excel_path(path):
     """선택된 경로를 config.ini에 저장합니다."""
+    cfg_path = _get_excel_config_path()
     config = configparser.ConfigParser()
-    config.read(CONFIG_FILE_PATH, encoding='utf-8')
+    if os.path.exists(cfg_path):
+        config.read(cfg_path, encoding='utf-8')
     if not config.has_section('Paths'):
         config.add_section('Paths')
     config.set('Paths', 'excel_dir', path)
-    with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as configfile:
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+    with open(cfg_path, 'w', encoding='utf-8') as configfile:
         config.write(configfile)
 
 def get_timestamped_filename(default_filename):
@@ -1613,6 +1623,55 @@ def try_convert_to_float(value):
         return round(val, 8)
     except (ValueError, TypeError):
         return value
+
+def import_data(file_path: str | None = None) -> list[dict] | None:
+    """단일 시트 엑셀 파일에서 데이터를 읽어 딕셔너리 리스트로 반환합니다."""
+    if file_path is None:
+        initial_dir = get_excel_path()
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialdir=initial_dir,
+            title="가져올 엑셀 파일 선택"
+        )
+        if not file_path:
+            return None
+
+    save_excel_path(os.path.dirname(file_path))
+
+    def clean_cell(cell):
+        if cell is None:
+            return ""
+        if isinstance(cell, str):
+            cell = cell.strip()
+            if cell == "-":
+                return ""
+        return cell
+
+    try:
+        workbook = _load_workbook_robust(file_path, data_only=True)
+        sheet = workbook.active
+        
+        headers = [cell.value for cell in sheet[1]]
+        headers = [str(h).strip() if h is not None else f"col_{idx}" for idx, h in enumerate(headers)]
+        
+        data_list = []
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            if all(cell is None or str(cell).strip() in ("", "-") for cell in row):
+                continue
+            row = list(row) + [None] * (len(headers) - len(row))
+            row = [clean_cell(cell) for cell in row]
+            row_data = dict(zip(headers, row))
+            data_list.append(row_data)
+            
+        return data_list
+    except PermissionError:
+        messagebox.showerror("오류", f"파일이 열려 있습니다.\n파일을 닫고 다시 시도해주세요.\n\n경로: {file_path}")
+        return None
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        messagebox.showerror("오류", f"파일을 읽는 중 오류가 발생했습니다: {e}")
+        return None
 
 def import_multisheet_data():
     """여러 시트를 가진 엑셀 파일에서 데이터를 가져옵니다."""

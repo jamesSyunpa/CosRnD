@@ -8,7 +8,7 @@ import os
 DEFAULT_HELP_TOPICS = [
     {
         "category": "기초 시작",
-        "title": "CosRnD 화장품 연구관리 시스템 시작 가이드",
+        "title": "CosRQD 화장품 연구관리 시스템 시작 가이드",
         "desc": "프로그램 최초 로그인, 사내 공유 DB 설정 및 기본 테마 설정 안내",
         "keywords": ["시작", "로그인", "설정", "설치", "DB", "기초", "공유"],
         "url": "https://cafe.naver.com/ca-fe/cafes/31737320/articles/4"
@@ -43,7 +43,7 @@ DEFAULT_HELP_TOPICS = [
     },
     {
         "category": "공식 카페",
-        "title": "CosRnD 공식 네이버 카페 전체 게시판 바로가기",
+        "title": "CosRQD 공식 네이버 카페 전체 게시판 바로가기",
         "desc": "질의응답(Q&A), 기능 개선 요청 및 최신 화장품 R&D 정보 커뮤니티",
         "keywords": ["카페", "커뮤니티", "질문", "Q&A", "게시판", "업데이트", "건의"],
         "url": "https://cafe.naver.com/ca-fe/cafes/31737320"
@@ -52,7 +52,7 @@ DEFAULT_HELP_TOPICS = [
 
 class HelpViewer(ctk.CTkToplevel):
     """네이버 카페 도움말 검색 및 새창 뷰어 팝업 다이얼로그"""
-    def __init__(self, master=None, title="CosRnD 도움말/사용 설명서"):
+    def __init__(self, master=None, title="CosRQD 도움말/사용 설명서"):
         super().__init__(master)
         
         self.title(title)
@@ -80,7 +80,7 @@ class HelpViewer(ctk.CTkToplevel):
         
         ctk.CTkLabel(
             hdr_frame, 
-            text="📖 CosRnD 도움말 / 사용 설명서", 
+            text="📖 CosRQD 도움말 / 사용 설명서", 
             font=ctk.CTkFont(size=17, weight="bold")
         ).pack(side="left")
         

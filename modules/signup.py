@@ -252,7 +252,7 @@ class SignupWindow(ctk.CTkToplevel):
         # config 경로 획득
         config_path = getattr(self.master, 'config_path', None)
         if not config_path or not os.path.exists(config_path):
-            config_path = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'CosRnD', 'config.ini')
+            config_path = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'CosRQD', 'config.ini')
             if not os.path.exists(config_path):
                 config_path = os.path.join(PROJECT_ROOT, 'config.ini')
 

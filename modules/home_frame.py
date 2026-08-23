@@ -321,7 +321,7 @@ class HomeFrame(ctk.CTkFrame):
         already_agreed = False
         try:
             # 1. AppData 및 로컬 config.ini 경로 탐색
-            appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'CosRnD')
+            appdata_dir = os.path.join(os.getenv('APPDATA', os.path.expanduser('~')), 'CosRQD')
             target_config = os.path.join(appdata_dir, 'config.ini')
             exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else PROJECT_ROOT
             local_config = os.path.join(exe_dir, 'config.ini')
