@@ -446,9 +446,7 @@ class Installer:
                         except PermissionError:
                             continue
                         except Exception as e:
-                            pass
-                    except Exception as e:
-                        logger.warning(f"Failed to write registry key {reg_path} on {hkey}: {e}")
+                            logger.warning(f"Failed to write registry key {reg_path} on {hkey} with flag {access_flag}: {e}")
                         
             logger.info("Control Panel app list registration complete")
         except Exception as e:
