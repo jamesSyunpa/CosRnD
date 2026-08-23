@@ -21,11 +21,11 @@ DEFAULT_HELP_TOPICS = [
         "url": "https://cafe.naver.com/ca-fe/cafes/31737320/articles/4"
     },
     {
-        "category": "태성 원료",
-        "title": "태성켐 원료 원클릭 샘플/견적 신청 및 기술서류(TDS/MSDS) 다운로드",
-        "desc": "태성켐 원료 1순위 추천, 원클릭 샘플 신청 및 규격서/성적서 자동 다운로드",
-        "keywords": ["태성", "태성켐", "샘플", "견적", "TDS", "MSDS", "다운로드", "서류"],
-        "url": "https://cafe.naver.com/ca-fe/cafes/31737320/articles/4"
+        "category": "원료 관리",
+        "title": "화장품 표준 원료 데이터베이스 및 기술서류(TDS/MSDS/COA) 관리",
+        "desc": "원료 검색, 성분 분석, 규격서/성적서 등록 및 처방 연동 관리 가이드",
+        "keywords": ["원료", "성분", "샘플", "견적", "TDS", "MSDS", "COA", "다운로드", "서류"],
+        "url": "https://cafe.naver.com/cosrqd"
     },
     {
         "category": "품질 서류",

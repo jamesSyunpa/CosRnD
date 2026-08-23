@@ -481,7 +481,7 @@ class UpdateDialog(ctk.CTkToplevel):
             f"📢 [제목: {title_text}]\n"
             f"📅 [배포일: {self.release_info.get('date', '최근')}]\n"
             f"--------------------------------------------------\n"
-            f"{summary_text if summary_text else '태성켐 원료 추천 및 시스템 성능 안정화 패치가 포함되어 있습니다.'}\n\n"
+            f"{summary_text if summary_text else 'CosRQD 시스템 기능 개선 및 안정화 패치가 포함되어 있습니다.'}\n\n"
             f"🛡️ [데이터 100% 무손실 보장]\n"
             f"업데이트 시 기존 연구 데이터(처방/원료 DB 및 거래처 정보)는 자동으로 안전 백업된 후 완벽히 보존됩니다."
         )

@@ -551,10 +551,10 @@ class HomeFrame(ctk.CTkFrame):
 
         # 기본 로컬 패치노트 (즉시 렌더링)
         default_text = (
-            f"🚀 [현재 버전: {ver} - 태성 배포용]\n"
+            f"🚀 [현재 버전: {ver} - 럭포마 공식 정식 배포판]\n"
             f"--------------------------------------------------\n"
             f"✨ [{ver} 주요 기능 및 변경 내역]\n"
-            f"• 🌿 태성켐 원료 1순위 추천 및 샘플/견적 신청 연동\n"
+            f"• 🛡️ 데이터베이스 원클릭 안전 백업 및 전체 복원 기능 탑재\n"
             f"• 📄 품질관리 시험성적서(COA) 및 원료목록보고서 자동화\n"
             f"• 📢 네이버 공식 카페(CosRQD) 실시간 공지사항 연동\n"
             f"• ⚙️ 시스템 설정에서 업데이트 방식(자동/수동) 제어 지원\n"
@@ -562,7 +562,7 @@ class HomeFrame(ctk.CTkFrame):
             f"• 🧪 처방 개발 버전 관리 및 통합 R&D 변경 타임라인 피드\n"
             f"• ⚡ 데이터베이스(DB) 마이그레이션 및 자동 복구 스위트 탑재\n"
             f"--------------------------------------------------\n"
-            f"🌐 공식 배포처: 네이버 카페 (https://cafe.naver.com/cosrqd)"
+            f"🌐 개발 및 공식 배포: 럭포마 (https://cafe.naver.com/cosrqd)"
         )
 
         self.update_textbox.configure(state="normal")
@@ -583,9 +583,9 @@ class HomeFrame(ctk.CTkFrame):
                         f"🚀 [공식 릴리즈 업데이트: {tag} ({pub_date})]\n"
                         f"📢 {title}\n"
                         f"--------------------------------------------------\n"
-                        f"{body if body else '태성켐 원료 추천 및 시스템 성능 안정화 패치가 포함되어 있습니다.'}\n\n"
+                        f"{body if body else 'CosRQD 연구개발 통합 시스템 기능 개선 및 안정화 패치가 포함되어 있습니다.'}\n\n"
                         f"--------------------------------------------------\n"
-                        f"🌐 공식 배포처: 네이버 카페 (https://cafe.naver.com/cosrqd)"
+                        f"🌐 개발 및 공식 배포: 럭포마 (https://cafe.naver.com/cosrqd)"
                     )
 
                     def _update_ui():

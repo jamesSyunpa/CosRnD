@@ -274,7 +274,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
         curr_ver = UpdateManager.get_current_version()
         self.update_ver_lbl = ctk.CTkLabel(
             update_cfg_frame, 
-            text=f"현재 버전: {curr_ver} (태성 배포용)", 
+            text=f"현재 버전: {curr_ver} (럭포마 공식 배포판)", 
             font=ctk.CTkFont(size=12), 
             text_color=("gray30", "gray75")
         )
@@ -497,7 +497,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
             if hasattr(self, 'update_mode_segmented'):
                 self.update_mode_segmented.set("자동 업데이트 (권장)" if update_mode == 'auto' else "수동 업데이트")
             if hasattr(self, 'update_ver_lbl'):
-                self.update_ver_lbl.configure(text=f"현재 버전: {UpdateManager.get_current_version()} (태성 배포용)")
+                self.update_ver_lbl.configure(text=f"현재 버전: {UpdateManager.get_current_version()} (럭포마 공식 배포판)")
         except Exception as up_err:
             print(f"[Settings] 업데이트 모드 로딩 실패: {up_err}")
 
