@@ -36,11 +36,11 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Setup_CosRQD_v65.0.19',
+    name='Setup_CosRQD_v65.0.21',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # 콘솔창 숨기기
@@ -53,3 +53,4 @@ exe = EXE(
     icon=[os.path.join(project_root, 'Icon.ico')],
     version=os.path.join(spec_dir, 'version_info.txt'),
 )
+

@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 import os
 
 spec_dir = os.path.abspath(SPECPATH)
@@ -48,7 +48,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -59,3 +59,4 @@ exe = EXE(
     entitlements_file=None,
     icon=[os.path.join(project_root, 'Icon.ico')],
 )
+

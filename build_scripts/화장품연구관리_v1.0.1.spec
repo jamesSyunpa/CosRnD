@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 import os
 
 # Get the directory of the spec file to resolve paths relatively
@@ -36,7 +36,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,  # 콘솔창 숨기기
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -50,7 +50,8 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='화장품연구관리_v1.0.1',
 )
+
