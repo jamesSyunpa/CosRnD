@@ -17,7 +17,8 @@ a = Analysis(
         'launcher', 'launcher.installer', 'launcher.launcher_gui', 
         'launcher.config_manager', 'launcher.process_manager', 'launcher.updater',
         'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
-        'psutil', 'requests', 'customtkinter', 'PIL', 'win32api', 'win32con'
+        'psutil', 'requests', 'customtkinter', 'PIL', 'win32api', 'win32con',
+        'win32com', 'win32com.client', 'pythoncom'
     ],
     hookspath=[],
     hooksconfig={},
@@ -48,4 +49,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=[os.path.join(project_root, 'Icon.ico')],
+    version=os.path.join(spec_dir, 'version_info.txt'),
 )

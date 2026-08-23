@@ -399,55 +399,123 @@ class Installer:
 
         return [d for d in dirs if d.exists()]
 
+    def _create_single_shortcut(self, target_exe: Path, shortcut_path: Path, working_dir: Path, icon_path: Path) -> bool:
+        """단일 바로가기 파일을 3중 안전망(win32com -> VBScript -> PowerShell)으로 생성"""
+        # 1. win32com.client (가장 안정적이고 빠름)
+        try:
+            import win32com.client
+            shell = win32com.client.Dispatch('WScript.Shell')
+            shortcut = shell.CreateShortCut(str(shortcut_path))
+            shortcut.Targetpath = str(target_exe)
+            shortcut.WorkingDirectory = str(working_dir)
+            if icon_path.exists():
+                shortcut.IconLocation = str(icon_path)
+            shortcut.save()
+            if shortcut_path.exists():
+                logger.info(f"[win32com] Shortcut created at {shortcut_path}")
+                return True
+        except Exception as com_err:
+            logger.debug(f"win32com failed for {shortcut_path}: {com_err}")
+
+        # 2. VBScript 임시 스크립트 실행
+        try:
+            import tempfile
+            import subprocess
+            vbs_content = f'''
+Set oWS = WScript.CreateObject("WScript.Shell")
+sLinkFile = "{str(shortcut_path)}"
+Set oLink = oWS.CreateShortcut(sLinkFile)
+oLink.TargetPath = "{str(target_exe)}"
+oLink.WorkingDirectory = "{str(working_dir)}"
+oLink.IconLocation = "{str(icon_path)}"
+oLink.Save
+'''
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.vbs', delete=False, encoding='cp949') as vbs_f:
+                vbs_f.write(vbs_content)
+                vbs_path = vbs_f.name
+            try:
+                subprocess.run(["cscript", "//nologo", vbs_path], capture_output=True, check=True)
+                if shortcut_path.exists():
+                    logger.info(f"[VBScript] Shortcut created at {shortcut_path}")
+                    return True
+            finally:
+                try:
+                    os.remove(vbs_path)
+                except Exception:
+                    pass
+        except Exception as vbs_err:
+            logger.debug(f"VBScript failed for {shortcut_path}: {vbs_err}")
+
+        # 3. PowerShell 스크립트 파일 실행
+        try:
+            import tempfile
+            import subprocess
+            ps_content = f'''
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut("{str(shortcut_path)}")
+$Shortcut.TargetPath = "{str(target_exe)}"
+$Shortcut.WorkingDirectory = "{str(working_dir)}"
+$Shortcut.IconLocation = "{str(icon_path)}"
+$Shortcut.Save()
+'''
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.ps1', delete=False, encoding='utf-8') as ps_f:
+                ps_f.write(ps_content)
+                ps_path = ps_f.name
+            try:
+                subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps_path], capture_output=True, check=True)
+                if shortcut_path.exists():
+                    logger.info(f"[PowerShell] Shortcut created at {shortcut_path}")
+                    return True
+            finally:
+                try:
+                    os.remove(ps_path)
+                except Exception:
+                    pass
+        except Exception as ps_err:
+            logger.debug(f"PowerShell failed for {shortcut_path}: {ps_err}")
+
+        return False
+
     def create_shortcuts(self, target_exe: Path, shortcut_name: str, icon_path: Path):
         """윈도우 바탕화면 및 시작메뉴에 단축 아이콘 생성 및 제어판 앱 등록"""
         try:
-            import subprocess
-            shortcut_dirs = self._get_all_shortcut_dirs()
+            working_dir = target_exe.parent
             
-            # 사용자 바탕화면 및 시작메뉴에 생성
+            # 사용자 바탕화면 & 시작메뉴 경로 수집
             target_dirs = []
             desktop_dir = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
             start_menu_dir = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
             
-            # 기본 경로 추가
             for d in [desktop_dir, start_menu_dir]:
-                if d.exists():
+                if d.exists() and d not in target_dirs:
                     target_dirs.append(d)
                     
-            # API로 탐지된 디렉터리 추가
-            for d in shortcut_dirs:
-                if d not in target_dirs:
+            for d in self._get_all_shortcut_dirs():
+                # 쓰기 가능한 사용자 폴더 위주로 추가 (Public/ProgramData 제외)
+                if d.exists() and "Users" in str(d) and d not in target_dirs:
                     target_dirs.append(d)
             
+            success_count = 0
             for base_dir in target_dirs:
                 shortcut_path = base_dir / f"{shortcut_name}.lnk"
-                working_dir = target_exe.parent
-                
-                ps_script = f"""
-                $WshShell = New-Object -ComObject WScript.Shell
-                $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
-                $Shortcut.TargetPath = "{target_exe}"
-                $Shortcut.WorkingDirectory = "{working_dir}"
-                $Shortcut.IconLocation = "{icon_path}"
-                $Shortcut.Save()
-                """
-                
-                try:
-                    subprocess.run(
-                        ["powershell", "-NoProfile", "-Command", ps_script],
-                        capture_output=True,
-                        check=True
-                    )
-                    logger.info(f"Shortcut created successfully at {shortcut_path}")
-                except Exception as sub_err:
-                    logger.warning(f"Failed to create shortcut at {shortcut_path}: {sub_err}")
+                if self._create_single_shortcut(target_exe, shortcut_path, working_dir, icon_path):
+                    success_count += 1
             
+            logger.info(f"Successfully created {success_count} shortcuts across system")
+            
+            # 윈도우 쉘 아이콘 캐시 새로고침
+            if sys.platform.startswith('win'):
+                try:
+                    import ctypes
+                    ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+                except Exception:
+                    pass
+
             # 윈도우 제어판 '앱 및 기능'(프로그램 추가/제거)에 등록
             self.register_in_windows_uninstall(target_exe, shortcut_name, icon_path)
             
         except Exception as e:
-            logger.error(f"Failed to create shortcut: {e}")
+            logger.error(f"Failed to create shortcuts: {e}")
 
     def register_in_windows_uninstall(self, target_exe: Path, display_name: str, icon_path: Path):
         """윈도우 레지스트리에 언인스톨 정보를 등록하여 제어판의 설치된 앱 리스트에 노출시킵니다."""
