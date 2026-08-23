@@ -26,42 +26,50 @@ def main():
     print(f"=== CosRQD {version} Setup Package Build Starting ===")
     dist_dir = os.path.join(current_dir, "dist")
     
-    # 2. Build main application
-    main_spec = os.path.join(current_dir, "build_scripts", f"화장품연구관리_{version}.spec")
+    # 2. Build main application (One-file CosRQD.exe 우선)
+    main_spec = os.path.join(current_dir, "build_scripts", f"CosRQD_{version}.spec")
     if not os.path.exists(main_spec):
-        # 없으면 1.0.3 또는 기본 spec fallback
+        main_spec = os.path.join(current_dir, "build_scripts", f"화장품연구관리_{version}.spec")
+    if not os.path.exists(main_spec):
         main_spec = os.path.join(current_dir, "build_scripts", "setup_installer.spec")
         
     run_pyinstaller(main_spec)
     
-    app_folder = os.path.join(dist_dir, f"화장품연구관리_{version}")
-    if not os.path.exists(app_folder):
-        print(f"[Error] Built folder not found: {app_folder}")
-        return
-        
-    # 복사: 빌드 폴더 내에 VERSION 및 config.ini 파일 포함
-    if os.path.exists(ver_file):
-        print(f"[Processing] Copying VERSION to {app_folder}")
-        shutil.copy2(ver_file, os.path.join(app_folder, "VERSION"))
-
-    cfg_file = os.path.join(current_dir, "config.ini")
-    if os.path.exists(cfg_file):
-        print(f"[Processing] Copying config.ini to {app_folder}")
-        shutil.copy2(cfg_file, os.path.join(app_folder, "config.ini"))
-
-    # 3. Compress the built app folder to app.zip
+    # 3. Create app.zip bundle for installer
     zip_path = os.path.join(dist_dir, "app.zip")
     print(f"[Processing] Packaging {zip_path}...")
-    
     if os.path.exists(zip_path):
         os.remove(zip_path)
         
+    cosrqd_single_exe = os.path.join(dist_dir, "CosRQD.exe")
+    app_folder = os.path.join(dist_dir, f"화장품연구관리_{version}")
+    
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
-        for root, dirs, files in os.walk(app_folder):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, app_folder)
-                zip_ref.write(file_path, arcname)
+        if os.path.exists(cosrqd_single_exe):
+            # One-file 모드: CosRQD.exe 단일 파일 및 필수 설정 파일만 zip에 포함
+            print(f"[Processing] Adding single executable: {cosrqd_single_exe}")
+            zip_ref.write(cosrqd_single_exe, "CosRQD.exe")
+            if os.path.exists(ver_file):
+                zip_ref.write(ver_file, "VERSION")
+            if os.path.exists(cfg_file):
+                zip_ref.write(cfg_file, "config.ini")
+            icon_file = os.path.join(current_dir, "Icon.ico")
+            if os.path.exists(icon_file):
+                zip_ref.write(icon_file, "Icon.ico")
+        elif os.path.exists(app_folder):
+            # Onedir 모드
+            if os.path.exists(ver_file):
+                shutil.copy2(ver_file, os.path.join(app_folder, "VERSION"))
+            if os.path.exists(cfg_file):
+                shutil.copy2(cfg_file, os.path.join(app_folder, "config.ini"))
+            for root, dirs, files in os.walk(app_folder):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, app_folder)
+                    zip_ref.write(file_path, arcname)
+        else:
+            print(f"[Error] No built artifacts found in {dist_dir}")
+            return
                 
     print(f"[Success] Compression complete: {zip_path}")
     
