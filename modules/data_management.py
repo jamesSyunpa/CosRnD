@@ -308,8 +308,15 @@ class DataManagementFrame(ctk.CTkFrame):
         self.user_delete_button = ctk.CTkButton(user_button_frame, text=self.texts['delete'], command=self.delete_user, fg_color="#D32F2F", hover_color="#B71C1C")
         self.user_delete_button.pack(side="left", padx=5)
 
+        # ===== 가운데: 드래그 크기 조절 분할 바 (Sash) =====
+        self.user_sash = ctk.CTkFrame(tab_frame, width=7, cursor="sb_h_double_arrow", fg_color="gray30")
+        self.user_sash.grid(row=0, column=1, sticky="ns", padx=(2, 2))
+        self.user_sash.bind("<Button-1>", self.on_user_sash_press)
+        self.user_sash.bind("<B1-Motion>", self.on_user_sash_drag)
+
+        # ===== 우측: 사용자 목록 리스트 =====
         user_list_frame = ctk.CTkFrame(tab_frame)
-        user_list_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+        user_list_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
         user_list_frame.grid_rowconfigure(1, weight=1)
         user_list_frame.grid_columnconfigure(0, weight=1)
 
@@ -341,18 +348,39 @@ class DataManagementFrame(ctk.CTkFrame):
         user_tree_columns = self.texts['user_tree_columns']
         user_column_ids = [k for k in user_tree_columns if k != 'id']
         self.user_tree = ttk.Treeview(user_list_frame, columns=user_column_ids, show="headings", selectmode="browse")
-        self.user_tree.heading("username", text=user_tree_columns['username']); self.user_tree.column("username", width=120) # noqa
-        self.user_tree.heading("real_name", text=user_tree_columns['real_name']); self.user_tree.column("real_name", width=100) # noqa
-        self.user_tree.heading("manager_code", text=user_tree_columns['manager_code']); self.user_tree.column("manager_code", width=100, anchor="center") # noqa
-        self.user_tree.heading("position", text=user_tree_columns['position']); self.user_tree.column("position", width=120) # noqa
-        self.user_tree.heading("contact", text=user_tree_columns['contact']); self.user_tree.column("contact", width=120) # noqa
-        self.user_tree.heading("role", text=user_tree_columns['role']); self.user_tree.column("role", width=80, anchor="center") # noqa
-        self.user_tree.heading("is_admin", text=user_tree_columns['is_admin']); self.user_tree.column("is_admin", width=100, anchor="center") # noqa
+        
+        self.user_tree.heading("username", text=user_tree_columns['username'])
+        self.user_tree.column("username", width=130, minwidth=80, stretch=True)
+        
+        self.user_tree.heading("real_name", text=user_tree_columns['real_name'])
+        self.user_tree.column("real_name", width=120, minwidth=80, stretch=True)
+        
+        self.user_tree.heading("manager_code", text=user_tree_columns['manager_code'])
+        self.user_tree.column("manager_code", width=100, minwidth=60, anchor="center", stretch=True)
+        
+        self.user_tree.heading("position", text=user_tree_columns['position'])
+        self.user_tree.column("position", width=120, minwidth=80, stretch=True)
+        
+        self.user_tree.heading("contact", text=user_tree_columns['contact'])
+        self.user_tree.column("contact", width=140, minwidth=90, stretch=True)
+        
+        self.user_tree.heading("role", text=user_tree_columns['role'])
+        self.user_tree.column("role", width=90, minwidth=60, anchor="center", stretch=True)
+        
+        self.user_tree.heading("is_admin", text=user_tree_columns['is_admin'])
+        self.user_tree.column("is_admin", width=100, minwidth=70, anchor="center", stretch=True)
+        
         self.user_tree.grid(row=1, column=0, sticky="nsew")
 
+        # 수직 스크롤바
         user_scrollbar = ttk.Scrollbar(user_list_frame, orient="vertical", command=self.user_tree.yview)
         self.user_tree.configure(yscrollcommand=user_scrollbar.set)
         user_scrollbar.grid(row=1, column=1, sticky="ns")
+
+        # 수평 스크롤바
+        user_h_scrollbar = ttk.Scrollbar(user_list_frame, orient="horizontal", command=self.user_tree.xview)
+        self.user_tree.configure(xscrollcommand=user_h_scrollbar.set)
+        user_h_scrollbar.grid(row=2, column=0, sticky="ew")
 
         self.user_tree.bind("<<TreeviewSelect>>", self.on_user_tree_select)
         self.load_users()
