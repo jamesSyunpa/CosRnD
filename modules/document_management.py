@@ -592,13 +592,31 @@ class DocumentManagementFrame(ctk.CTkFrame):
         text_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         text_frame.grid_columnconfigure(0, weight=1)
         
-        self.ingredient_lookup_textbox = ctk.CTkTextbox(text_frame, height=100, 
-            font=ctk.CTkFont(size=12))
+        self._lookup_placeholder_text = self.texts.get(
+            "ingredient_lookup_placeholder", 
+            "성분명(한글/영문) 또는 CAS No를 줄 단위로 입력하세요..."
+        )
+        self._is_lookup_placeholder_active = True
+        
+        self.ingredient_lookup_textbox = ctk.CTkTextbox(text_frame, height=100, font=ctk.CTkFont(size=12))
         self.ingredient_lookup_textbox.grid(row=0, column=0, sticky="ew")
-        self.ingredient_lookup_textbox.insert("0.0", self.texts.get("ingredient_lookup_placeholder", 
-            "성분명(한글/영문) 또는 CAS No를 줄 단위로 입력하세요..."))
-        # 포커스 시 플레이스홀더 삭제
-        self.ingredient_lookup_textbox.bind("<FocusIn>", self._on_lookup_textbox_focus_in)
+        self.ingredient_lookup_textbox.insert("0.0", self._lookup_placeholder_text)
+        self.ingredient_lookup_textbox.configure(text_color="gray55")
+
+        # 클릭, 포커스, 키 입력 시 즉각적인 플레이스홀더 해제 바인딩 (내부 _textbox 포함 100% 감지)
+        self.ingredient_lookup_textbox.bind("<FocusIn>", self._on_lookup_textbox_activate)
+        self.ingredient_lookup_textbox.bind("<Button-1>", self._on_lookup_textbox_activate)
+        self.ingredient_lookup_textbox.bind("<KeyPress>", self._on_lookup_textbox_activate)
+        self.ingredient_lookup_textbox.bind("<FocusOut>", self._on_lookup_textbox_focus_out)
+        self.ingredient_lookup_textbox.bind("<Control-Return>", lambda e: self.search_ingredients_by_list())
+
+        if hasattr(self.ingredient_lookup_textbox, "_textbox"):
+            inner_tb = self.ingredient_lookup_textbox._textbox
+            inner_tb.bind("<FocusIn>", self._on_lookup_textbox_activate)
+            inner_tb.bind("<Button-1>", self._on_lookup_textbox_activate)
+            inner_tb.bind("<KeyPress>", self._on_lookup_textbox_activate)
+            inner_tb.bind("<FocusOut>", self._on_lookup_textbox_focus_out)
+            inner_tb.bind("<Control-Return>", lambda e: self.search_ingredients_by_list())
 
         # --- 결과 표시 영역 ---
         result_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
@@ -668,20 +686,33 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.lookup_complex_rows = []
         self.selected_complex_materials = self.selected_lookup_items
 
-    def _on_lookup_textbox_focus_in(self, event):
-        """텍스트박스 포커스 시 플레이스홀더 텍스트 삭제"""
-        placeholder = self.texts.get("ingredient_lookup_placeholder", "성분명(한글/영문) 또는 CAS No를 줄 단위로 입력하세요...")
-        current_text = self.ingredient_lookup_textbox.get("0.0", "end-1c").strip()
-        if current_text == placeholder:
+    def _on_lookup_textbox_activate(self, event=None):
+        """텍스트박스 클릭/포커스/키 입력 시 플레이스홀더 텍스트를 즉시 완전 삭제하고 정상 글자색으로 전환"""
+        if getattr(self, '_is_lookup_placeholder_active', False):
+            self._is_lookup_placeholder_active = False
             self.ingredient_lookup_textbox.delete("0.0", "end")
+            # 테마에 맞는 기본 텍스트 색상 복원
+            self.ingredient_lookup_textbox.configure(text_color=("black", "white"))
+
+    def _on_lookup_textbox_focus_out(self, event=None):
+        """포커스 해제 시 내용이 비어있으면 다시 연회색 플레이스홀더 복원"""
+        content = self.ingredient_lookup_textbox.get("0.0", "end-1c").strip()
+        if not content:
+            self._is_lookup_placeholder_active = True
+            self.ingredient_lookup_textbox.delete("0.0", "end")
+            self.ingredient_lookup_textbox.insert("0.0", self._lookup_placeholder_text)
+            self.ingredient_lookup_textbox.configure(text_color="gray55")
 
     def search_ingredients_by_list(self):
         """입력된 성분명/CAS No 리스트로 DB에서 검색"""
+        if getattr(self, '_is_lookup_placeholder_active', False):
+            messagebox.showwarning(self.texts.get("warning", "경고"), 
+                self.texts.get("enter_search_terms", "검색할 성분명 또는 CAS No를 입력하세요."), parent=self)
+            return
+
         # 입력 텍스트 가져오기
         input_text = self.ingredient_lookup_textbox.get("0.0", "end-1c").strip()
-        placeholder = self.texts.get("ingredient_lookup_placeholder", "")
-        
-        if not input_text or input_text == placeholder:
+        if not input_text or input_text == getattr(self, '_lookup_placeholder_text', ''):
             messagebox.showwarning(self.texts.get("warning", "경고"), 
                 self.texts.get("enter_search_terms", "검색할 성분명 또는 CAS No를 입력하세요."), parent=self)
             return
@@ -1537,9 +1568,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.lookup_result_label.configure(
             text=self.texts.get("lookup_results_count", "검색 결과: {count}건").format(count=0))
         # 텍스트박스 초기화
+        self._is_lookup_placeholder_active = True
         self.ingredient_lookup_textbox.delete("0.0", "end")
-        self.ingredient_lookup_textbox.insert("0.0", 
-            self.texts.get("ingredient_lookup_placeholder", "성분명(한글/영문) 또는 CAS No를 줄 단위로 입력하세요..."))
+        self.ingredient_lookup_textbox.insert("0.0", getattr(self, '_lookup_placeholder_text', "성분명(한글/영문) 또는 CAS No를 줄 단위로 입력하세요..."))
+        self.ingredient_lookup_textbox.configure(text_color="gray55")
 
     def export_ingredient_lookup_to_excel(self):
         """성분/원료 조회 결과를 표준 Excel로 내보냅니다. (선택된 원료가 있으면 선택된 것만 내보내고, 없으면 안내 또는 전체 내보내기)"""
