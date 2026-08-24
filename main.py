@@ -3242,57 +3242,21 @@ class App(ctk.CTk):
         t.start()
 
     def prompt_user_for_update(self, latest_version, changelog):
-        """사용자에게 업데이트 진행 여부를 묻는 알림창을 표시합니다."""
-        home_frame = self.frames.get(FRAME_HOME)
-        if home_frame and hasattr(home_frame, 'notice_textbox'):
-            try:
-                home_frame.notice_textbox.configure(state="normal")
-                notice_text = f"📢 [신규 업데이트 알림] 새로운 버전({latest_version})이 출시되었습니다!\n"
-                notice_text += f"변경 사항:\n{changelog}\n"
-                notice_text += f"--------------------------------------------------\n"
-                home_frame.notice_textbox.insert("1.0", notice_text)
-                home_frame.notice_textbox.configure(state="disabled")
-            except Exception:
-                pass
-        
-        msg = f"새로운 업데이트({latest_version})가 준비되었습니다.\n\n[변경 사항]\n{changelog}\n\n지금 프로그램을 종료하고 자동 업데이트를 진행하시겠습니까?"
-        if messagebox.askyesno("업데이트 알림", msg, parent=self):
-            self.execute_auto_update()
-
-    def execute_auto_update(self):
-        """런처를 구동하여 자동 업데이트를 적용하고 앱을 종료합니다."""
+        """사용자에게 업데이트 안내 창(UpdateDialog)을 즉시 표시합니다."""
         try:
-            import subprocess
-            import os
-            import sys
-            
-            parent_dir = os.path.dirname(application_path)
-            paths_to_try = [
-                os.path.join(parent_dir, 'launcher.exe'),
-                os.path.join(application_path, 'launcher.exe'),
-                os.path.join(application_path, 'launcher.py'),
-                os.path.join(parent_dir, 'launcher.py'),
-            ]
-            
-            launcher_exec = None
-            for path in paths_to_try:
-                if os.path.exists(path):
-                    launcher_exec = path
-                    break
-            
-            if launcher_exec:
-                clean_env = get_clean_subproc_env()
-                flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-                if launcher_exec.endswith('.py'):
-                    subprocess.Popen([sys.executable, launcher_exec], env=clean_env, creationflags=flags)
-                else:
-                    subprocess.Popen([launcher_exec], env=clean_env, creationflags=flags)
-                
-                self.on_closing()
-            else:
-                messagebox.showerror("업데이트 오류", "업데이트 설치 프로그램(launcher.exe)을 찾을 수 없습니다.\n수동 업데이트를 진행해주세요.", parent=self)
+            from utils.update_manager import UpdateManager, UpdateDialog
+            is_available, cur_ver, lat_ver, info = UpdateManager.check_for_remote_update()
+            if not info:
+                info = {
+                    "title": f"CosRQD {latest_version}",
+                    "summary": changelog,
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "url": f"https://github.com/{UpdateManager.GITHUB_REPO}/releases"
+                }
+            if self.winfo_exists():
+                UpdateDialog(self, cur_ver, lat_ver, info, is_new=True)
         except Exception as e:
-            messagebox.showerror("업데이트 오류", f"업데이트 실행 중 오류가 발생했습니다: {e}", parent=self)
+            print(f"[UPDATE-PROMPT] 업데이트 팝업 표시 실패: {e}")
 
     def start_db_sync_check(self):
         """공유 DB의 변경 사항을 주기적으로 확인하는 타이머를 시작합니다."""

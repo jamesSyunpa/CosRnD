@@ -189,7 +189,7 @@ class UpdateManager:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
 
         # 기본 안전 폴백
-        return "v65.0.31"
+        return "v65.0.32"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:
@@ -737,12 +737,13 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             pass
 
     def _apply_update(self, downloaded_file):
-        """다운로드 완료 후 PowerShell 무인 백그라운드 엔진을 통해 락 해제 대기, 안전 파일 교체, 최신 버전 자동 재실행"""
+        """다운로드 완료 후 락 해제 대기, 안전 파일 교체, 최신 버전 자동 재실행을 100% 신뢰할 수 있는 방식으로 수행"""
         # 1. DB 안전 백업
         bk_path = UpdateManager.backup_database_before_update()
         
         self.status_lbl.configure(text="데이터 백업 완료 및 최신 버전 교체 준비 중...")
-        
+        self.update_idletasks()
+
         # 2. 바탕화면 바로가기 사전 갱신
         try:
             update_desktop_shortcuts(self.latest_ver)
@@ -750,9 +751,50 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             pass
 
         is_zip = downloaded_file.lower().endswith(".zip")
-        temp_extract_dir = os.path.join(tempfile.gettempdir(), f"cosrqd_extract_{int(time.time())}")
+        is_exe = downloaded_file.lower().endswith(".exe")
         
-        if is_zip:
+        if getattr(sys, 'frozen', False):
+            exe_target = sys.executable
+            app_dir = os.path.dirname(sys.executable)
+        else:
+            exe_target = os.path.join(PROJECT_ROOT, "dist", "CosRQD.exe")
+            if not os.path.exists(exe_target):
+                exe_target = os.path.join(PROJECT_ROOT, "main.exe")
+            app_dir = PROJECT_ROOT
+
+        current_pid = os.getpid()
+
+        # OS 환경변수 정화
+        if sys.platform.startswith('win'):
+            import ctypes
+            for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME', 'PYINSTALLER_STRICT_UNLOAD_MODE']:
+                try:
+                    ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
+                    os.environ.pop(k, None)
+                except Exception:
+                    pass
+
+        if is_exe:
+            # Setup.exe 단독 인스톨러 실행인 경우
+            self.status_lbl.configure(text="설치 마법사를 시작합니다...")
+            self.update_idletasks()
+            time.sleep(0.3)
+
+            flags = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS) if os.name == 'nt' else 0
+            subprocess.Popen([downloaded_file], creationflags=flags, close_fds=True)
+            print(f"[Update] Setup 인스톨러 독립 프로세스 실행 완료: {downloaded_file}")
+
+            # 메인 프로그램 즉시 종료
+            try:
+                self.master.winfo_toplevel().destroy()
+            except Exception:
+                pass
+            import os as _os
+            _os._exit(0)
+
+        elif is_zip:
+            # ZIP 패키지 자동 교체인 경우
+            temp_extract_dir = os.path.join(tempfile.gettempdir(), f"cosrqd_extract_{int(time.time())}")
             try:
                 if os.path.exists(temp_extract_dir):
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
@@ -762,131 +804,77 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             except Exception as ex:
                 print(f"[Update] 압축 해제 오류: {ex}")
 
-        self.status_lbl.configure(text=f"최신 버전({self.latest_ver}) 다운로드 완료! 자동 교체 및 재실행 중...")
-        self.update_idletasks()
-
-        # 3. PowerShell 무인 사일런트 업데이터 스크립트 작성 (검은색 창 100% 방지, 행 걸림 100% 방지)
-        try:
-            current_pid = os.getpid()
-            ps_script_path = os.path.join(tempfile.gettempdir(), f"cosrqd_silent_update_{int(time.time())}.ps1")
-            
-            if getattr(sys, 'frozen', False):
-                exe_target = sys.executable
-                app_dir = os.path.dirname(sys.executable)
+            # 단일 하위 폴더 포함 여부 검사
+            sub_items = os.listdir(temp_extract_dir)
+            if len(sub_items) == 1 and os.path.isdir(os.path.join(temp_extract_dir, sub_items[0])):
+                actual_source = os.path.join(temp_extract_dir, sub_items[0])
             else:
-                exe_target = os.path.join(PROJECT_ROOT, "dist", "CosRQD.exe")
-                if not os.path.exists(exe_target):
-                    exe_target = os.path.join(PROJECT_ROOT, "main.exe")
-                app_dir = PROJECT_ROOT
+                actual_source = temp_extract_dir
 
-            if is_zip:
-                ps_code = f'''# CosRQD PowerShell Silent Fast Updater
-$targetPid = {current_pid}
-$appDir = "{app_dir}"
-$extractDir = "{temp_extract_dir}"
-$dlFile = "{downloaded_file}"
-$exeTarget = "{exe_target}"
+            self.status_lbl.configure(text=f"최신 버전({self.latest_ver}) 교체 및 자동 재실행 중...")
+            self.update_idletasks()
 
-# 1. 이전 프로그램 프로세스 종료 대기 (최대 5초)
-$waited = 0
-while ((Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -and ($waited -lt 5)) {{
-    Start-Sleep -Milliseconds 400
-    $waited += 0.4
-}}
-if (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) {{
-    Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
-}}
-Start-Sleep -Milliseconds 600
+            # 100% 무오류 Windows 배치 스크립트 작성 (PowerShell 보안 정책/STA 오류 원천 차단)
+            bat_path = os.path.join(tempfile.gettempdir(), f"cosrqd_update_{int(time.time())}.bat")
+            bat_content = f"""@echo off
+chcp 65001 > nul
+set TARGET_PID={current_pid}
+set APP_DIR={app_dir}
+set SRC_DIR={actual_source}
+set EXE_TARGET={exe_target}
+set DL_FILE={downloaded_file}
+set EXTRACT_DIR={temp_extract_dir}
 
-# 2. 최신 파일 복사 및 교체
-if (Test-Path $extractDir) {{
-    Copy-Item -Path "$extractDir\\*" -Destination $appDir -Recurse -Force -ErrorAction SilentlyContinue
-}}
+:: 1. 부모 프로세스 종료 대기 (최대 5초)
+set /a count=0
+:WAIT_LOOP
+tasklist /fi "PID eq %TARGET_PID%" 2>nul | find "%TARGET_PID%" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    set /a count+=1
+    if %count% geq 4 (
+        taskkill /f /pid %TARGET_PID% >nul 2>&1
+    )
+    goto WAIT_LOOP
+)
+timeout /t 1 /nobreak >nul
 
-# 3. 바탕화면 바로가기 최신화
-try {{
-    $deskPath = [Environment]::GetFolderPath("Desktop")
-    $icoPath = Join-Path $appDir "Icon.ico"
-    $sh = New-Object -ComObject WScript.Shell
-    $lnk = $sh.CreateShortcut((Join-Path $deskPath "CosRQD.lnk"))
-    $lnk.TargetPath = $exeTarget
-    $lnk.WorkingDirectory = $appDir
-    if (Test-Path $icoPath) {{ $lnk.IconLocation = $icoPath }}
-    $lnk.Save()
-}} catch {{}}
+:: 2. 파일 교체
+if exist "%SRC_DIR%" (
+    xcopy /y /e /q /h /r "%SRC_DIR%\\*" "%APP_DIR%\\" >nul 2>&1
+)
 
-# 4. 환경변수 완전 정화 및 새 버전 실행
-$env:_MEIPASS = $null
-$env:_MEIPASS2 = $null
-$env:PYTHONPATH = $null
-$env:PYTHONHOME = $null
-$env:PYINSTALLER_STRICT_UNLOAD_MODE = $null
+:: 3. 환경변수 정화
+set _MEIPASS=
+set _MEIPASS2=
+set PYTHONPATH=
+set PYTHONHOME=
+set PYINSTALLER_STRICT_UNLOAD_MODE=
 
-if (Test-Path $exeTarget) {{
-    Start-Process -FilePath $exeTarget -WorkingDirectory $appDir -UseShellExecute
-}}
+:: 4. 최신 버전 프로그램 실행
+start "" "%EXE_TARGET%"
 
-# 5. 임시 파일 정리
-Start-Sleep -Seconds 1
-Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $dlFile -Force -ErrorAction SilentlyContinue
-Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-'''
-            else:
-                # Setup.exe 단독 실행 파일인 경우
-                ps_code = f'''# CosRQD PowerShell Silent Setup Launcher
-$targetPid = {current_pid}
-$dlFile = "{downloaded_file}"
+:: 5. 임시 파일 정리 및 배치 삭제
+timeout /t 2 /nobreak >nul
+if exist "%DL_FILE%" del /f /q "%DL_FILE%" >nul 2>&1
+if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" >nul 2>&1
+(goto) 2>nul & del "%~f0"
+"""
+            with open(bat_path, "w", encoding="cp949", errors="ignore") as bf:
+                bf.write(bat_content)
 
-$waited = 0
-while ((Get-Process -Id $targetPid -ErrorAction SilentlyContinue) -and ($waited -lt 5)) {{
-    Start-Sleep -Milliseconds 400
-    $waited += 0.4
-}}
-if (Get-Process -Id $targetPid -ErrorAction SilentlyContinue) {{
-    Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
-}}
-Start-Sleep -Milliseconds 600
-
-$env:_MEIPASS = $null
-$env:_MEIPASS2 = $null
-$env:PYTHONPATH = $null
-$env:PYTHONHOME = $null
-
-Start-Process -FilePath $dlFile -UseShellExecute
-Start-Sleep -Seconds 2
-Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-'''
-
-            with open(ps_script_path, "w", encoding="utf-8-sig") as f:
-                f.write(ps_code)
-
-            # OS 레벨 환경변수 정화
-            if sys.platform.startswith('win'):
-                import ctypes
-                for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME']:
-                    ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
-
-            # PowerShell 백그라운드 완전 무인 실행 (콘솔 창 100% 비표시)
+            # 배치 파일 백그라운드 독립 실행
             flags = (subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS) if os.name == 'nt' else 0
-            subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", ps_script_path],
-                close_fds=True,
-                creationflags=flags
-            )
-            print(f"[Update] PowerShell 무인 업데이터 실행 완료: {ps_script_path}")
-        except Exception as e:
-            print(f"[Update] 업데이터 스크립트 실행 실패: {e}")
+            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=flags, close_fds=True)
+            print(f"[Update] 배치 업데이터 실행 완료: {bat_path}")
 
-        # 4. 현재 프로그램 즉시 완전 종료 (파일 락 100% 즉각 해제)
-        try:
-            self.master.winfo_toplevel().destroy()
-        except:
-            pass
-        import os as _os
-        _os._exit(0)
+            # 현재 프로그램 즉시 완전 종료 (파일 락 100% 즉시 해제)
+            try:
+                self.master.winfo_toplevel().destroy()
+            except Exception:
+                pass
+            import os as _os
+            _os._exit(0)
 
     def _on_error(self, err):
         messagebox.showerror(
@@ -1045,9 +1033,17 @@ class UpdateDialog(ctk.CTkToplevel):
 
         self.release_info["download_url"] = download_url
         master_ref = self.master
+        latest_v = self.latest_ver
+        rel_info = self.release_info
         self.destroy()
-        # 메인 프로그램 즉시 종료 및 독립 네이티브 업데이터 GUI 실행 (완벽한 파일 락 해제 & 100% 안전 설치)
-        UpdateManager.execute_real_update(master_ref, self.latest_ver, self.release_info)
+
+        # 인앱 다운로드 프로그레스 다이얼로그 즉시 실행 (사용자가 다운로드 진행 상황을 직접 확인)
+        try:
+            DownloadProgressDialog(master_ref, latest_v, download_url, rel_info)
+        except Exception as ex:
+            print(f"[Update] 프로그레스 창 생성 실패: {ex}")
+            import webbrowser
+            webbrowser.open(rel_info.get("url", f"https://github.com/{UpdateManager.GITHUB_REPO}/releases"))
 
     def _open_web_release(self):
         import webbrowser
