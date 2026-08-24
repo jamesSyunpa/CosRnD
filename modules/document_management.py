@@ -9209,8 +9209,6 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             
             # 최종 삭제 확인
             confirm_msg = self.texts['delete_formulation_confirm_msg'].format(count=len(selected_ids))
-            if related_data:
-                confirm_msg += "\n\n※ 관련 데이터는 자동으로 백업됩니다."
             
             if not messagebox.askyesno(self.texts['delete_confirm'], confirm_msg, parent=self):
                 return
@@ -9273,8 +9271,6 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
             session.commit()
             
             success_msg = self.texts['delete_formulation_success_msg'].format(count=deleted_count)
-            if backup_data:
-                success_msg += f"\n\n백업 파일: {backup_filename}"
             
             messagebox.showinfo(self.texts['success'], success_msg, parent=self)
             self._selected_formulation_id = None # ID 초기화

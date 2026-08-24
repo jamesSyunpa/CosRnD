@@ -189,7 +189,7 @@ class UpdateManager:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
 
         # 기본 안전 폴백
-        return "v65.0.30"
+        return "v65.0.31"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:

@@ -1079,7 +1079,7 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showerror("삭제 불가", "기본 관리자 계정(admin)은 삭제할 수 없습니다.")
             return
 
-        if not messagebox.askyesno("삭제 확인", "정말로 선택한 사용자를 삭제하시겠습니까?\n\n※ 삭제 전 안전 복구용 백업 파일이 자동으로 저장됩니다."):
+        if not messagebox.askyesno("삭제 확인", "정말로 선택한 사용자를 삭제하시겠습니까?"):
             return
 
         session = db_manager.get_session()
@@ -1128,7 +1128,7 @@ class DataManagementFrame(ctk.CTkFrame):
 
                 session.delete(user_to_delete)
                 session.commit()
-                messagebox.showinfo("성공", "사용자가 성공적으로 삭제되었습니다.\n(안전 복구용 백업 파일이 저장되었습니다.)")
+                messagebox.showinfo("성공", "사용자가 성공적으로 삭제되었습니다.")
         except Exception as e:
             session.rollback()
             messagebox.showerror("데이터베이스 오류", f"삭제 중 오류가 발생했습니다: {e}")
@@ -1365,7 +1365,7 @@ class DataManagementFrame(ctk.CTkFrame):
             messagebox.showwarning("선택 오류", "삭제할 거래처를 목록에서 선택하세요.")
             return
 
-        if not messagebox.askyesno("삭제 확인", "정말로 선택한 거래처를 삭제하시겠습니까?\n\n※ 삭제 전 안전 복구용 백업 파일이 자동으로 저장됩니다."):
+        if not messagebox.askyesno("삭제 확인", "정말로 선택한 거래처를 삭제하시겠습니까?"):
             return
 
         session = db_manager.get_session()
@@ -1413,7 +1413,7 @@ class DataManagementFrame(ctk.CTkFrame):
 
                 session.delete(client_to_delete)
                 session.commit()
-                messagebox.showinfo("성공", "거래처가 성공적으로 삭제되었습니다.\n(안전 복구용 백업 파일이 저장되었습니다.)")
+                messagebox.showinfo("성공", "거래처가 성공적으로 삭제되었습니다.")
         except Exception as e:
             session.rollback()
             messagebox.showerror("데이터베이스 오류", f"삭제 중 오류가 발생했습니다: {e}")

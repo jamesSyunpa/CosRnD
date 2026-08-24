@@ -1929,7 +1929,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
             messagebox.showwarning("선택 오류", "삭제할 원료를 선택해주세요.")
             return
 
-        if messagebox.askyesno("삭제 확인", "선택한 원료를 삭제하시겠습니까?\n\n※ 삭제 전 안전 복구용 백업 파일이 자동으로 저장됩니다."):
+        if messagebox.askyesno("삭제 확인", "선택한 원료를 삭제하시겠습니까?"):
             session = db_manager.get_session()
             try:
                 material = session.query(Material).get(self._selected_material_id)
@@ -1985,7 +1985,7 @@ class MaterialManagementFrame(ctk.CTkFrame):
 
                     session.delete(material)
                     session.commit()
-                    messagebox.showinfo("성공", "원료가 성공적으로 삭제되었습니다.\n(안전 복구용 백업 파일이 저장되었습니다.)")
+                    messagebox.showinfo("성공", "원료가 성공적으로 삭제되었습니다.")
                     
                     # UI 새로고침
                     self.refresh_data()
