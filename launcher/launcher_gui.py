@@ -15,7 +15,7 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QProgressBar, QFileDialog, QMessageBox,
-    QStackedWidget, QLineEdit, QTextEdit, QDialog
+    QStackedWidget, QLineEdit, QTextEdit, QDialog, QCheckBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
