@@ -1069,10 +1069,12 @@ class DBManager:
         finally:
             session.close()
 
-    def search_clients(self, search_term: str):
+    def search_clients(self, search_term: str = "", client_type: str = None):
         session = self.get_session()
         try:
             query = session.query(Client)
+            if client_type and client_type not in ("전체", "All", ""):
+                query = query.filter(Client.client_type == client_type)
             if search_term:
                 search_pattern = f"%{search_term}%"
                 query = query.filter(
@@ -1180,12 +1182,14 @@ class DBManager:
         print("[초기화] 거래처 데이터가 초기화되었습니다.")
 
     def reset_materials_data(self, session):
-        """모든 원료 및 전성분 데이터를 안전하게 삭제합니다 (처방 아이템 참조 해제 후 삭제)."""
-        from database.models import Ingredient
+        """모든 원료 및 전성분 데이터를 안전하게 삭제합니다 (연동된 원료 거래처도 함께 정리)."""
+        from database.models import Ingredient, Client
         session.query(FormulationItem).update({FormulationItem.material_id: None}, synchronize_session=False)
         session.query(Ingredient).delete(synchronize_session=False)
         session.query(Material).delete(synchronize_session=False)
-        print("[초기화] 원료 및 전성분 데이터가 초기화되었습니다.")
+        # 원료 등록 시 자동 생성되었던 '원료' 유형 거래처들도 함께 정리 (직접 등록한 OEM/ODM 고객사는 안전하게 보존)
+        session.query(Client).filter(Client.client_type == '원료').delete(synchronize_session=False)
+        print("[초기화] 원료, 전성분 및 연동된 원료 공급처 데이터가 깔끔하게 초기화되었습니다.")
 
     def has_admin_users(self):
         """시스템에 관리자 권한 사용자가 이미 존재하는지 확인합니다."""

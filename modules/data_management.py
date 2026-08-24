@@ -470,17 +470,28 @@ class DataManagementFrame(ctk.CTkFrame):
         client_list_header_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(client_list_header_frame, text=self.texts['client_list'], font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(client_list_header_frame, text=self.texts['view_all_history'], command=self.show_all_client_history).grid(row=0, column=1, padx=(20, 0), sticky="w")
+        ctk.CTkButton(client_list_header_frame, text=self.texts['view_all_history'], command=self.show_all_client_history).grid(row=0, column=1, padx=(10, 10), sticky="w")
         
+        # 거래처 유형 필터 세그먼트 버튼 (전체 / OEM/ODM / 원료 / 부자재 / 기타)
+        self.client_type_filter_var = ctk.StringVar(value="전체")
+        self.client_type_filter_seg = ctk.CTkSegmentedButton(
+            client_list_header_frame,
+            values=["전체", "OEM/ODM", "원료", "부자재", "기타"],
+            variable=self.client_type_filter_var,
+            command=lambda v: self.load_clients(),
+            height=28
+        )
+        self.client_type_filter_seg.grid(row=0, column=2, padx=(5, 10), sticky="w")
+
         # --- 우측 컨트롤 (검색, 초기화, 엑셀 버튼) ---
         right_header_frame = ctk.CTkFrame(client_list_header_frame, fg_color="transparent")
-        right_header_frame.grid(row=0, column=2, sticky="e")
+        right_header_frame.grid(row=0, column=3, sticky="e")
 
         ctk.CTkLabel(right_header_frame, text=f"{self.texts['search']}:").pack(side="left", padx=(0, 5))
-        self.client_search_entry = ctk.CTkEntry(right_header_frame, width=150)
+        self.client_search_entry = ctk.CTkEntry(right_header_frame, width=130)
         self.client_search_entry.pack(side="left", padx=5)
         self.client_search_entry.bind("<KeyRelease>", self.on_client_search)
-        ctk.CTkButton(right_header_frame, text=self.texts['reset'], width=60, command=self.reset_client_search).pack(side="left", padx=5)
+        ctk.CTkButton(right_header_frame, text=self.texts['reset'], width=50, command=self.reset_client_search).pack(side="left", padx=5)
 
         client_excel_frame = ctk.CTkFrame(right_header_frame, fg_color="transparent")
         client_excel_frame.pack(side="left", padx=(10, 0))
@@ -1184,13 +1195,17 @@ class DataManagementFrame(ctk.CTkFrame):
 
     def reset_client_search(self):
         """거래처 검색창을 초기화하고 전체 목록을 다시 불러옵니다."""
-        self.client_search_entry.delete(0, "end")
+        if hasattr(self, 'client_search_entry'):
+            self.client_search_entry.delete(0, "end")
+        if hasattr(self, 'client_type_filter_var'):
+            self.client_type_filter_var.set("전체")
         self.load_clients()
 
     def load_clients(self):
-        search_term = self.client_search_entry.get().strip()
+        search_term = self.client_search_entry.get().strip() if hasattr(self, 'client_search_entry') else ""
+        selected_type = self.client_type_filter_var.get() if hasattr(self, 'client_type_filter_var') else "전체"
         for item in self.client_tree.get_children(): self.client_tree.delete(item)
-        clients = db_manager.search_clients(search_term)
+        clients = db_manager.search_clients(search_term, client_type=selected_type)
 
         for i, client in enumerate(clients):
             active_status = "Y" if client.is_active else "N"
