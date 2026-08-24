@@ -122,37 +122,41 @@ def setup_logging():
 
 
 def read_version() -> str:
-    """
-    Read application version from folder name or VERSION file.
+    r"""
+    Read application version from VERSION file or environment.
     
     Priority:
-    1. Folder name pattern (_vXX)
-    2. VERSION file
-    3. Default v1.0.0
-    
-    Returns:
-        Version string
+    1. Execution directory VERSION file (e.g. C:\CosRQD\bin\VERSION or C:\CosRQD\VERSION)
+    2. sys._MEIPASS internal VERSION file
+    3. Folder name pattern
+    4. Default fallback
     """
     try:
         import re
         import os
         import sys
         
-        # 1. sys._MEIPASS 내부 VERSION 파일 (PyInstaller 실행 시)
+        # 1. 실행 디렉토리 및 상위 디렉토리 VERSION 파일 우선 탐색
+        current_dir = Path(__file__).resolve().parent
+        for candidate_dir in [Path(sys.executable).parent, current_dir, current_dir.parent, Path(sys.executable).parent.parent]:
+            vf = candidate_dir / "VERSION"
+            if vf.exists():
+                lines = [l.strip() for l in vf.read_text(encoding='utf-8').splitlines() if l.strip()]
+                if lines:
+                    v = lines[0]
+                    return v if v.startswith('v') else f"v{v}"
+
+        # 2. sys._MEIPASS 내부 VERSION 파일 (PyInstaller 실행 시)
         meipass = getattr(sys, '_MEIPASS', '')
         if meipass:
             vf = Path(meipass) / "VERSION"
             if vf.exists():
-                return vf.read_text(encoding='utf-8').strip()
+                lines = [l.strip() for l in vf.read_text(encoding='utf-8').splitlines() if l.strip()]
+                if lines:
+                    v = lines[0]
+                    return v if v.startswith('v') else f"v{v}"
 
-        # 2. 실행 디렉토리 및 상위 디렉토리 VERSION 파일
-        current_dir = Path(__file__).resolve().parent
-        for candidate_dir in [current_dir, current_dir.parent, Path(sys.executable).parent]:
-            vf = candidate_dir / "VERSION"
-            if vf.exists():
-                return vf.read_text(encoding='utf-8').strip()
-
-        # 3. 폴더 이름에서 버전 추출 (예: CosRnD_v65 -> v65)
+        # 3. 폴더 이름에서 버전 추출
         for folder_name in [current_dir.name, current_dir.parent.name]:
             version_match = re.search(r'[vV]?(\d+\.\d+\.\d+|\d+\.\d+|\d+)', folder_name)
             if version_match:
@@ -161,7 +165,7 @@ def read_version() -> str:
     except Exception:
         pass
     
-    return "v65.0.6"
+    return "v65.0.29"
 
 
 def main():

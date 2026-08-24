@@ -3,6 +3,11 @@ import os
 import subprocess
 import time
 
+# 프로젝트 루트 경로 정의 및 sys.path 등록
+PROJECT_ROOT = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
 # [보안 & 안정성] 부모 프로세스로부터 상속된 잔여 PyInstaller 임시 환경변수 방어
 if os.name == 'nt':
     for _k in ['_MEIPASS2', 'PYINSTALLER_STRICT_UNLOAD_MODE', 'PYINSTALLER_SUPPRESS_TEMP_ERRORS']:
@@ -322,6 +327,7 @@ def check_single_instance():
         return True
 
 from utils import center_window_on_mouse_display, resource_path
+from utils.update_manager import UpdateManager
 
 if getattr(sys, 'frozen', False):
     # PyInstaller로 빌드된 경우, .exe 파일이 있는 폴더
@@ -1640,10 +1646,14 @@ class App(ctk.CTk):
                     pass
                 self._current_active_btn = None
 
+        self._last_dropdown_toggle_time = 0
+
         def show_dropdown(key, btn_widget):
+            cur_time = time.time()
             if self._current_dropdown_window and self._current_active_btn == btn_widget:
-                # 같은 버튼 클릭 시 토글 닫기
-                close_dropdown()
+                # 같은 버튼 클릭 시 0.2초 이내 중복 토글 방지 및 닫기
+                if cur_time - self._last_dropdown_toggle_time > 0.15:
+                    close_dropdown()
                 return
 
             close_dropdown()
@@ -1651,13 +1661,14 @@ class App(ctk.CTk):
             if not items:
                 return
 
+            self._last_dropdown_toggle_time = cur_time
             self._current_active_btn = btn_widget
             btn_widget.configure(fg_color=("#D0D0D0", "#333333"))
 
             # 드롭다운 창 생성 (메인 창에 종속되는 모던 플랫 서브 윈도우)
             dropdown = ctk.CTkToplevel(self)
             dropdown.overrideredirect(True)
-            dropdown.transient(self)  # 메인 창에 귀속 (단독 최상위 방지)
+            dropdown.transient(self)  # 메인 창에 귀속
             self._current_dropdown_window = dropdown
 
             # 메인 컨테이너 프레임
@@ -1694,10 +1705,7 @@ class App(ctk.CTk):
             x = btn_widget.winfo_rootx()
             y = btn_widget.winfo_rooty() + btn_widget.winfo_height() + 2
             dropdown.geometry(f"+{x}+{y}")
-
-            # 드롭다운 포커스 아웃 시 자동 닫기
-            dropdown.bind("<FocusOut>", lambda e: close_dropdown())
-            dropdown.focus_set()
+            dropdown.lift()
 
         def on_hover_btn(key, btn_widget):
             # 이미 다른 메뉴가 열려 있는 상태라면 마우스가 이동하는 순간 해당 메뉴로 즉시 전환
@@ -1705,34 +1713,46 @@ class App(ctk.CTk):
                 show_dropdown(key, btn_widget)
 
         def bind_menu_button(btn_widget, key):
+            # 마우스 클릭 및 호버 바인딩
             btn_widget.configure(command=lambda: show_dropdown(key, btn_widget))
             for widget in [btn_widget, getattr(btn_widget, '_canvas', None), getattr(btn_widget, '_text_label', None)]:
                 if widget:
+                    widget.bind("<Button-1>", lambda e, k=key, b=btn_widget: show_dropdown(k, b), add="+")
                     widget.bind("<Enter>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
                     widget.bind("<Motion>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
 
-        # 전역 클릭 및 윈도우 전환 시 메뉴 닫기 바인딩
+        # 전역 클릭 시 메뉴 바깥 클릭이면 안전하게 닫기
         def on_global_click(event):
-            if self._current_dropdown_window:
-                w = event.widget
-                menubar_widgets = [self.top_menubar_frame, self.btn_file]
-                if hasattr(self, 'btn_research'): menubar_widgets.append(self.btn_research)
-                if hasattr(self, 'btn_quality'): menubar_widgets.append(self.btn_quality)
-                if hasattr(self, 'btn_data'): menubar_widgets.append(self.btn_data)
+            if not self._current_dropdown_window:
+                return
 
-                is_in_menubar = False
-                for mw in menubar_widgets:
-                    if w == mw or (hasattr(mw, '_text_label') and w == mw._text_label) or (hasattr(mw, '_canvas') and w == mw._canvas):
-                        is_in_menubar = True
-                        break
+            # 방금 버튼을 클릭해서 드롭다운이 열린 경우(0.15초 이내)는 닫기 무시
+            if time.time() - self._last_dropdown_toggle_time < 0.15:
+                return
 
-                if not is_in_menubar:
-                    close_dropdown()
+            w = event.widget
+            # 드롭다운 창 자체나 그 내부 위젯을 클릭한 경우 닫지 않음
+            try:
+                if w == self._current_dropdown_window or str(w).startswith(str(self._current_dropdown_window)):
+                    return
+            except Exception:
+                pass
+
+            # 메뉴바 버튼들 클릭한 경우도 내부 처리되도록 허용
+            menubar_widgets = [self.top_menubar_frame, self.btn_file]
+            if hasattr(self, 'btn_research'): menubar_widgets.append(self.btn_research)
+            if hasattr(self, 'btn_quality'): menubar_widgets.append(self.btn_quality)
+            if hasattr(self, 'btn_data'): menubar_widgets.append(self.btn_data)
+
+            for mw in menubar_widgets:
+                if w == mw or (hasattr(mw, '_text_label') and w == mw._text_label) or (hasattr(mw, '_canvas') and w == mw._canvas):
+                    return
+
+            # 그 외의 모든 외부 클릭 시 드롭다운 닫기
+            close_dropdown()
 
         self.bind_all("<Button-1>", on_global_click, add="+")
-        self.bind("<FocusOut>", lambda e: close_dropdown(), add="+")
-        self.bind("<Unmap>", lambda e: close_dropdown(), add="+")
-        self.bind("<Configure>", lambda e: close_dropdown(), add="+")
+        self.bind("<Escape>", lambda e: close_dropdown(), add="+")
 
         btn_font = ctk.CTkFont(size=12, weight="normal")
 
@@ -3189,14 +3209,9 @@ class App(ctk.CTk):
                 if not update_server_url:
                     return
                 
-                current_version = "v1.0.3"
-                try:
-                    version_path = os.path.join(application_path, 'VERSION')
-                    if os.path.exists(version_path):
-                        with open(version_path, 'r', encoding='utf-8') as vf:
-                            current_version = vf.read().strip()
-                except Exception:
-                    pass
+                from utils.update_manager import UpdateManager
+                current_version = UpdateManager.get_current_version()
+                curr_tuple = UpdateManager.parse_version_tuple(current_version)
                 
                 latest_info = None
                 if update_server_url.startswith("http://") or update_server_url.startswith("https://"):
@@ -3214,8 +3229,10 @@ class App(ctk.CTk):
                 latest_version = latest_info.get("version")
                 changelog = latest_info.get("changelog", "변경 사항 없음")
                 
-                if latest_version and latest_version != current_version:
-                    self.after(50, lambda: self.prompt_user_for_update(latest_version, changelog))
+                if latest_version:
+                    latest_tuple = UpdateManager.parse_version_tuple(latest_version)
+                    if latest_tuple > curr_tuple:
+                        self.after(50, lambda: self.prompt_user_for_update(latest_version, changelog))
             except Exception as e:
                 print(f"[UPDATE-CHECK] Failed to check for updates: {e}")
                 

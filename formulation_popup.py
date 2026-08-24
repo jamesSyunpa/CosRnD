@@ -127,7 +127,7 @@ class FormulationEditPopup(ctk.CTkToplevel):
         self.resizable(True, True) # 크기 조절 활성화
         # [v64] 처방 생성/수정창 최적 뷰포트 (오른쪽 잘림 완벽 방지)
         self.minsize(1050, 680)
-        self.grab_set()
+        # [수정] 메인 화면(원료/성분 조회 등)과 번갈아가며 동시 작업을 지원하기 위해 grab_set() 비활성화 (Non-modal)
 
         try:
             init_w, init_h = 1220, 760
@@ -1467,37 +1467,3 @@ class FormulationEditPopup(ctk.CTkToplevel):
         formulation_data = excel_handler.import_formulation_template()
         if formulation_data:
             self._apply_imported_data_to_ui(formulation_data)
-
-    def add_materials_from_lookup(self, materials_list):
-        """원료/성분 조회 창에서 선택된 원료들을 처방 아이템 트리에 일괄 추가"""
-        if not materials_list:
-            return
-        
-        # 기존 등록된 원료 코드 수집 (중복 방지)
-        existing_codes = set()
-        for item_id in self.formulation_item_tree.get_children():
-            vals = self.formulation_item_tree.item(item_id, "values")
-            if len(vals) > 1:
-                existing_codes.add(vals[1])
-
-        added_count = 0
-        default_phase = "A"
-        for mat in materials_list:
-            m_code = getattr(mat, 'code', '') or ''
-            m_name = getattr(mat, 'name', '') or ''
-            if m_code and m_code in existing_codes:
-                continue
-
-            self.formulation_item_tree.insert("", "end", values=(
-                default_phase,
-                m_code,
-                m_name,
-                "0.00",  # 배합 비율 기본값
-                "0.00"   # 총량 기본값
-            ))
-            existing_codes.add(m_code)
-            added_count += 1
-
-        self.update_formulation_summary()
-        if added_count > 0:
-            messagebox.showinfo("원료 추가 완료", f"선택한 원료 {added_count}종이 처방 배합표에 자동 배치되었습니다.\n배합 비율(%)을 입력해 주세요.", parent=self)

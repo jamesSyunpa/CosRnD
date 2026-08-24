@@ -156,19 +156,40 @@ class UpdateManager:
 
     @classmethod
     def get_current_version(cls) -> str:
-        """로컬 VERSION 파일에서 현재 설치된 버전을 읽어옵니다."""
+        """설치 디렉토리, 실행 파일 경로, MEIPASS 및 PROJECT_ROOT에서 현재 버전을 정확히 읽어옵니다."""
+        candidates = []
         try:
-            v_file = os.path.join(PROJECT_ROOT, "VERSION")
-            if os.path.exists(v_file):
-                with open(v_file, "r", encoding="utf-8") as f:
-                    ver = f.read().strip()
-                    if ver:
-                        if not ver.startswith('v') and re.match(r'^\d+', ver):
-                            ver = 'v' + ver
-                        return ver
+            # 1. 실행 파일 디렉토리 (예: C:\CosRQD\bin)
+            if getattr(sys, 'frozen', False):
+                exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+                candidates.append(os.path.join(exe_dir, "VERSION"))
+                candidates.append(os.path.join(os.path.dirname(exe_dir), "VERSION"))
+            
+            # 2. PyInstaller 번들 내부 (_MEIPASS)
+            meipass = getattr(sys, '_MEIPASS', '')
+            if meipass:
+                candidates.append(os.path.join(meipass, "VERSION"))
+
+            # 3. PROJECT_ROOT 및 상위 경로
+            candidates.append(os.path.join(PROJECT_ROOT, "VERSION"))
+            candidates.append(os.path.join(os.path.dirname(PROJECT_ROOT), "VERSION"))
+            candidates.append(os.path.join(os.getcwd(), "VERSION"))
+
+            for v_file in candidates:
+                if v_file and os.path.exists(v_file):
+                    with open(v_file, "r", encoding="utf-8") as f:
+                        lines = [line.strip() for line in f if line.strip()]
+                        if lines:
+                            ver = lines[0]
+                            if ver:
+                                if not ver.startswith('v') and re.match(r'^\d+', ver):
+                                    ver = 'v' + ver
+                                return ver
         except Exception as e:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
-        return "v65.0.3"
+
+        # 기본 안전 폴백
+        return "v65.0.30"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:

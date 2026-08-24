@@ -180,6 +180,17 @@ class Installer:
                     zip_ref.extract(member, bin_dir)
                     logger.info(f"Extracted: {member}")
             
+            # VERSION 파일 및 핵심 메타데이터 동기화 보장 (bin 및 루트 폴더)
+            try:
+                bin_ver = bin_dir / "VERSION"
+                root_ver = install_path / "VERSION"
+                if bin_ver.exists():
+                    shutil.copy2(bin_ver, root_ver)
+                elif root_ver.exists():
+                    shutil.copy2(root_ver, bin_ver)
+            except Exception as ver_sync_err:
+                logger.warning(f"VERSION 동기화 실패: {ver_sync_err}")
+
             # 언인스톨러 전용 바이너리 (Uninstall.exe) 복사 배치
             try:
                 current_exe = Path(sys.executable)
