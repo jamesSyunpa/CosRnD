@@ -189,7 +189,7 @@ class UpdateManager:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
 
         # 기본 안전 폴백
-        return "v65.0.43"
+        return "v65.0.44"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:
@@ -270,26 +270,26 @@ class UpdateManager:
                         if not tag.startswith('v') and re.match(r'^\d+', tag):
                             tag = 'v' + tag
                         
-                        # 첨부파일 다운로드 링크 찾기 (1순위: _Update.zip, 2순위: .zip, 3순위: Setup_.exe)
+                        # 첨부파일 다운로드 링크 찾기 (1순위: _Update.zip (원클릭 무설치 자동 업데이트), 2순위: Setup_.exe, 3순위: .zip)
                         download_url = None
                         file_name = None
                         file_size = 0
                         assets = data.get("assets", [])
                         
-                        # 1순위: 단독 실행 인스톨러 (Setup.exe) - 가장 안전하고 GUI로 즉시 실행됨
+                        # 1순위: 자동 업데이트 전용 ZIP 패키지 (_Update.zip) - 인앱 원클릭 무설치 자동 갱신
                         for ast in assets:
                             aname = ast.get("name", "")
-                            if aname.startswith("Setup_") and aname.endswith(".exe"):
+                            if "update" in aname.lower() and aname.endswith(".zip"):
                                 download_url = ast.get("browser_download_url")
                                 file_name = aname
                                 file_size = ast.get("size", 0)
                                 break
 
-                        # 2순위: 자동 업데이트용 ZIP 패키지 (_Update.zip)
+                        # 2순위: 단독 실행 인스톨러 (Setup.exe)
                         if not download_url:
                             for ast in assets:
                                 aname = ast.get("name", "")
-                                if "update" in aname.lower() and aname.endswith(".zip"):
+                                if aname.startswith("Setup_") and aname.endswith(".exe"):
                                     download_url = ast.get("browser_download_url")
                                     file_name = aname
                                     file_size = ast.get("size", 0)
@@ -534,8 +534,20 @@ $form.Add_Shown({{
         }})
         
         $wc.Add_DownloadFileCompleted({{
+            param($sender, $e)
+            
+            if ($e.Error -ne $null) {{
+                [System.Windows.Forms.MessageBox]::Show("다운로드 실패: " + $e.Error.Message, "업데이트 오류")
+                $form.Close()
+                return
+            }}
+            
+            try {{
+                $wc.Dispose()
+            }} catch {{}}
+
             if ($isExe) {{
-                # Setup.exe 단독 실행 (Windows 쉘 독립 실행)
+                # Setup.exe 실행
                 $statusLbl.Text = "설치 마법사를 시작합니다..."
                 $progressBar.Value = 100
                 $pctLbl.Text = "100%"
@@ -543,9 +555,14 @@ $form.Add_Shown({{
                 Start-Sleep -Milliseconds 600
                 $env:_MEIPASS2 = $null
                 $env:_MEIPASS = $null
-                Start-Process -FilePath $dlFile -UseShellExecute
+                try {{
+                    Start-Process -FilePath $dlFile -Verb RunAs
+                }} catch {{
+                    Start-Process -FilePath $dlFile -UseShellExecute
+                }}
+                Start-Sleep -Milliseconds 1000
             }} else {{
-                # ZIP 압축 해제 및 100% 덮어쓰기
+                # ZIP 압축 해제 및 100% 덮어쓰기 (원클릭 무설치 자동 갱신)
                 $statusLbl.Text = "최신 버전 파일 교체 중..."
                 $form.Refresh()
                 
@@ -588,7 +605,7 @@ $form.Add_Shown({{
                 $progressBar.Value = 100
                 $pctLbl.Text = "100%"
                 $form.Refresh()
-                Start-Sleep -Milliseconds 800
+                Start-Sleep -Milliseconds 600
 
                 # 실행 대상 결정
                 $runExe = $TargetExe
@@ -604,7 +621,8 @@ $form.Add_Shown({{
                 $env:_MEIPASS = $null
                 $env:PYTHONPATH = $null
                 $env:PYTHONHOME = $null
-                Start-Process -FilePath $runExe -WorkingDirectory $AppDir -UseShellExecute
+                Start-Process -FilePath $runExe -WorkingDirectory $AppDir
+                Start-Sleep -Milliseconds 500
             }}
             
             $form.Close()
