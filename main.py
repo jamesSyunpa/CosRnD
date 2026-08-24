@@ -1648,6 +1648,21 @@ class App(ctk.CTk):
 
         self._last_dropdown_toggle_time = 0
 
+        def update_dropdown_pos():
+            if not self._current_dropdown_window or not self._current_active_btn:
+                return
+            try:
+                if not self._current_active_btn.winfo_exists() or not self._current_dropdown_window.winfo_exists():
+                    close_dropdown()
+                    return
+                self._current_active_btn.update_idletasks()
+                bx = self._current_active_btn.winfo_rootx()
+                by = self._current_active_btn.winfo_rooty() + self._current_active_btn.winfo_height() + 2
+                self._current_dropdown_window.geometry(f"+{bx}+{by}")
+                self._current_dropdown_window.lift()
+            except Exception:
+                close_dropdown()
+
         def show_dropdown(key, btn_widget):
             cur_time = time.time()
             if self._current_dropdown_window and self._current_active_btn == btn_widget:
@@ -1702,10 +1717,7 @@ class App(ctk.CTk):
 
             # 위치 계산 (버튼 바로 아래에 밀착)
             dropdown.update_idletasks()
-            x = btn_widget.winfo_rootx()
-            y = btn_widget.winfo_rooty() + btn_widget.winfo_height() + 2
-            dropdown.geometry(f"+{x}+{y}")
-            dropdown.lift()
+            update_dropdown_pos()
 
         def on_hover_btn(key, btn_widget):
             # 이미 다른 메뉴가 열려 있는 상태라면 마우스가 이동하는 순간 해당 메뉴로 즉시 전환
@@ -1750,6 +1762,18 @@ class App(ctk.CTk):
             # 그 외의 모든 외부 클릭 시 드롭다운 닫기
             close_dropdown()
 
+        def on_main_configure(event):
+            # 메인 윈도우가 이동하거나 크기가 변경될 때 드롭다운 위치 실시간 밀착 동기화
+            if event.widget == self and self._current_dropdown_window:
+                update_dropdown_pos()
+
+        def on_main_unmap(event):
+            # 메인 윈도우가 최소화되거나 화면에서 내려갈 때 닫기
+            if event.widget == self:
+                close_dropdown()
+
+        self.bind("<Configure>", on_main_configure, add="+")
+        self.bind("<Unmap>", on_main_unmap, add="+")
         self.bind_all("<Button-1>", on_global_click, add="+")
         self.bind("<Escape>", lambda *a: close_dropdown(), add="+")
 
