@@ -189,7 +189,7 @@ class UpdateManager:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
 
         # 기본 안전 폴백
-        return "v65.0.34"
+        return "v65.0.35"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:
@@ -775,16 +775,27 @@ class DownloadProgressDialog(ctk.CTkToplevel):
                     pass
 
         if is_exe:
-            # Setup.exe 단독 인스톨러 실행인 경우
+            # Setup.exe 단독 인스톨러 실행인 경우 (UAC 관리자 권한 상승 완벽 지원)
             self.status_lbl.configure(text="설치 마법사를 시작합니다...")
             self.update_idletasks()
-            time.sleep(0.3)
+            time.sleep(0.2)
 
-            flags = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS) if os.name == 'nt' else 0
-            subprocess.Popen([downloaded_file], creationflags=flags, close_fds=True)
-            print(f"[Update] Setup 인스톨러 독립 프로세스 실행 완료: {downloaded_file}")
+            try:
+                if sys.platform.startswith('win'):
+                    os.startfile(downloaded_file)
+                else:
+                    subprocess.Popen([downloaded_file])
+                print(f"[Update] Setup 인스톨러 실행 성공 (os.startfile): {downloaded_file}")
+            except Exception as run_err:
+                print(f"[Update] os.startfile 실패, ShellExecuteW 폴백: {run_err}")
+                try:
+                    import ctypes
+                    ctypes.windll.shell32.ShellExecuteW(None, "open", downloaded_file, None, None, 1)
+                except Exception as ex2:
+                    print(f"[Update] ShellExecuteW 실패: {ex2}")
+                    subprocess.Popen([downloaded_file], shell=True)
 
-            # 메인 프로그램 즉시 종료
+            # 메인 프로그램 즉시 완전 종료 (창 닫힘 및 프로세스 정상 종료)
             try:
                 self.master.winfo_toplevel().destroy()
             except Exception:
