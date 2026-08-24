@@ -236,7 +236,7 @@ class CompletionPage(QWidget):
         layout.setSpacing(20)
         
         # Success message
-        title = QLabel("설치 완료!")
+        title = QLabel("🎉 설치 완료!")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -244,31 +244,50 @@ class CompletionPage(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.message_label = QLabel(
-            "CosRQD가 성공적으로 설치되었습니다.\n\n"
-            "'완료' 버튼을 클릭하여 설치 프로그램을 종료하세요."
+            "CosRQD 시스템이 성공적으로 설치되었습니다.\n\n"
+            "'완료' 버튼을 클릭하면 프로그램이 자동으로 실행됩니다."
         )
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setWordWrap(True)
+
+        self.launch_checkbox = QCheckBox("🚀 CosRQD 바로 실행 (권장)")
+        self.launch_checkbox.setChecked(True)
+        chk_font = QFont()
+        chk_font.setPointSize(10)
+        chk_font.setBold(True)
+        self.launch_checkbox.setFont(chk_font)
         
         layout.addStretch()
         layout.addWidget(title)
         layout.addWidget(self.message_label)
-        layout.addStretch()
         
+        chk_container = QHBoxLayout()
+        chk_container.addStretch()
+        chk_container.addWidget(self.launch_checkbox)
+        chk_container.addStretch()
+        layout.addLayout(chk_container)
+        
+        layout.addStretch()
         self.setLayout(layout)
     
+    def is_launch_checked(self) -> bool:
+        """Check if launch checkbox is checked"""
+        return self.launch_checkbox.isChecked()
+
     def set_success(self, success: bool, message: str):
         """Set completion status"""
         if success:
             self.message_label.setText(
                 f"{message}\n\n"
-                "'완료' 버튼을 클릭하여 설치 프로그램을 종료하세요."
+                "'완료' 버튼을 클릭하면 프로그램이 즉시 실행됩니다."
             )
+            self.launch_checkbox.setVisible(True)
         else:
             self.message_label.setText(
                 f"설치 실패:\n{message}\n\n"
                 "다시 시도하거나 지원팀에 문의하세요."
             )
+            self.launch_checkbox.setVisible(False)
 
 
 class InstallationWizard(QMainWindow):
@@ -346,17 +365,67 @@ class InstallationWizard(QMainWindow):
             self.update_buttons()
     
     def go_next(self):
-        """Go to next page or start installation"""
+        """Go to next page or start installation or launch application"""
         current = self.pages.currentIndex()
         
         if current == 0:  # Welcome -> Path selection
             self.pages.setCurrentIndex(1)
         elif current == 1:  # Path selection -> Installation
             self.start_installation()
-        elif current == 3:  # Completion -> Close
-            self.close()
+        elif current == 3:  # Completion -> Launch & Close
+            self.launch_application_and_close()
         
         self.update_buttons()
+
+    def launch_application_and_close(self):
+        """완료 버튼 클릭 시 설치된 최신 프로그램을 자동 실행하고 인스톨러 종료"""
+        try:
+            if hasattr(self, 'completion_page') and self.completion_page.is_launch_checked():
+                install_path = self.path_page.get_install_path()
+                bin_dir = install_path / "bin"
+                
+                candidates = [
+                    bin_dir / "CosRQD.exe",
+                    install_path / "CosRQD.exe",
+                    bin_dir / "main.exe",
+                    install_path / "main.exe"
+                ]
+                for p in bin_dir.glob("*.exe"):
+                    if not p.name.startswith("Setup_"):
+                        candidates.append(p)
+                
+                target_exe = None
+                for c in candidates:
+                    if c.exists():
+                        target_exe = c
+                        break
+                
+                if target_exe and target_exe.exists():
+                    logger.info(f"Auto-launching application: {target_exe}")
+                    
+                    # 환경변수 정화
+                    if sys.platform.startswith('win'):
+                        import ctypes
+                        for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME', 'PYINSTALLER_STRICT_UNLOAD_MODE']:
+                            try:
+                                ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
+                                os.environ.pop(k, None)
+                            except Exception:
+                                pass
+                        try:
+                            os.startfile(str(target_exe))
+                        except Exception:
+                            subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent), shell=True)
+                    else:
+                        subprocess.Popen([str(target_exe)], cwd=str(target_exe.parent))
+        except Exception as e:
+            logger.error(f"Failed to auto-launch application: {e}")
+        finally:
+            self.close()
+            from PyQt6.QtWidgets import QApplication
+            QApplication.quit()
+            import os as _os
+            _os._exit(0)
     
     def update_buttons(self):
         """Update button states based on current page"""
