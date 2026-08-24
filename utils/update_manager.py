@@ -189,7 +189,7 @@ class UpdateManager:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
 
         # 기본 안전 폴백
-        return "v65.0.33"
+        return "v65.0.34"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:
@@ -276,30 +276,30 @@ class UpdateManager:
                         file_size = 0
                         assets = data.get("assets", [])
                         
-                        # 1순위: 자동 업데이트용 패키지 (_Update.zip)
+                        # 1순위: 단독 실행 인스톨러 (Setup.exe) - 가장 안전하고 GUI로 즉시 실행됨
                         for ast in assets:
                             aname = ast.get("name", "")
-                            if "update" in aname.lower() and aname.endswith(".zip"):
+                            if aname.startswith("Setup_") and aname.endswith(".exe"):
                                 download_url = ast.get("browser_download_url")
                                 file_name = aname
                                 file_size = ast.get("size", 0)
                                 break
-                        
-                        # 2순위: 일반 ZIP 파일 (분할파일 .001 등 제외)
+
+                        # 2순위: 자동 업데이트용 ZIP 패키지 (_Update.zip)
                         if not download_url:
                             for ast in assets:
                                 aname = ast.get("name", "")
-                                if aname.endswith(".zip") and not re.search(r'\.\d{3}$', aname):
+                                if "update" in aname.lower() and aname.endswith(".zip"):
                                     download_url = ast.get("browser_download_url")
                                     file_name = aname
                                     file_size = ast.get("size", 0)
                                     break
-                                    
-                        # 3순위: 단독 실행 인스톨러 (Setup.exe)
+
+                        # 3순위: 일반 ZIP 파일 (분할파일 .001 등 제외)
                         if not download_url:
                             for ast in assets:
                                 aname = ast.get("name", "")
-                                if aname.endswith(".exe"):
+                                if aname.endswith(".zip") and not re.search(r'\.\d{3}$', aname):
                                     download_url = ast.get("browser_download_url")
                                     file_name = aname
                                     file_size = ast.get("size", 0)
@@ -814,8 +814,10 @@ class DownloadProgressDialog(ctk.CTkToplevel):
             self.status_lbl.configure(text=f"최신 버전({self.latest_ver}) 교체 및 자동 재실행 중...")
             self.update_idletasks()
 
-            # 100% 무오류 Windows 배치 스크립트 작성 (PowerShell 보안 정책/STA 오류 원천 차단)
+            # 100% 무오류 Windows 배치 스크립트 작성 (find/tasklist 파이프라인 행 걸림 원천 차단)
             bat_path = os.path.join(tempfile.gettempdir(), f"cosrqd_update_{int(time.time())}.bat")
+            vbs_path = os.path.join(tempfile.gettempdir(), f"cosrqd_runner_{int(time.time())}.vbs")
+
             bat_content = f"""@echo off
 chcp 65001 > nul
 set TARGET_PID={current_pid}
@@ -825,23 +827,14 @@ set EXE_TARGET={exe_target}
 set DL_FILE={downloaded_file}
 set EXTRACT_DIR={temp_extract_dir}
 
-:: 1. 부모 프로세스 종료 대기 (최대 5초)
-set /a count=0
-:WAIT_LOOP
-tasklist /fi "PID eq %TARGET_PID%" 2>nul | find "%TARGET_PID%" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    set /a count+=1
-    if %count% geq 4 (
-        taskkill /f /pid %TARGET_PID% >nul 2>&1
-    )
-    goto WAIT_LOOP
-)
-timeout /t 1 /nobreak >nul
+:: 1. 메인 프로세스 종료 대기 (안전 2초 대기)
+ping 127.0.0.1 -n 3 > nul 2>&1
+taskkill /f /pid %TARGET_PID% > nul 2>&1
+ping 127.0.0.1 -n 2 > nul 2>&1
 
-:: 2. 파일 교체
+:: 2. 최신 파일 교체
 if exist "%SRC_DIR%" (
-    xcopy /y /e /q /h /r "%SRC_DIR%\\*" "%APP_DIR%\\" >nul 2>&1
+    xcopy /y /e /q /h /r "%SRC_DIR%\\*" "%APP_DIR%\\" > nul 2>&1
 )
 
 :: 3. 환경변수 정화
@@ -854,19 +847,25 @@ set PYINSTALLER_STRICT_UNLOAD_MODE=
 :: 4. 최신 버전 프로그램 실행
 start "" "%EXE_TARGET%"
 
-:: 5. 임시 파일 정리 및 배치 삭제
-timeout /t 2 /nobreak >nul
-if exist "%DL_FILE%" del /f /q "%DL_FILE%" >nul 2>&1
-if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" >nul 2>&1
+:: 5. 임시 파일 정리 및 자폭
+ping 127.0.0.1 -n 3 > nul 2>&1
+if exist "%DL_FILE%" del /f /q "%DL_FILE%" > nul 2>&1
+if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%" > nul 2>&1
+if exist "{vbs_path}" del /f /q "{vbs_path}" > nul 2>&1
 (goto) 2>nul & del "%~f0"
 """
             with open(bat_path, "w", encoding="cp949", errors="ignore") as bf:
                 bf.write(bat_content)
 
-            # 배치 파일 백그라운드 독립 실행
+            # 콘솔 검은 창을 100% 숨기기 위한 VBScript 래퍼
+            vbs_content = f'Set WshShell = CreateObject("WScript.Shell")\nWshShell.Run "{bat_path}", 0, False\n'
+            with open(vbs_path, "w", encoding="utf-8") as vf:
+                vf.write(vbs_content)
+
+            # VBScript 무창 백그라운드 실행
             flags = (subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS) if os.name == 'nt' else 0
-            subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=flags, close_fds=True)
-            print(f"[Update] 배치 업데이터 실행 완료: {bat_path}")
+            subprocess.Popen(["wscript.exe", vbs_path], creationflags=flags, close_fds=True)
+            print(f"[Update] 무창 업데이터 실행 완료: {vbs_path}")
 
             # 현재 프로그램 즉시 완전 종료 (파일 락 100% 즉시 해제)
             try:
