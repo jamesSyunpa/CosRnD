@@ -1,8 +1,8 @@
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(65, 0, 40, 0),
-    prodvers=(65, 0, 40, 0),
+    filevers=(65, 0, 41, 0),
+    prodvers=(65, 0, 41, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -17,12 +17,12 @@ VSVersionInfo(
         '041204b0',
         [StringStruct('CompanyName', 'Luckfortma'),
         StringStruct('FileDescription', 'CosRQD Cosmetic R&D Platform Setup Installer'),
-        StringStruct('FileVersion', '65.0.40.0'),
+        StringStruct('FileVersion', '65.0.41.0'),
         StringStruct('InternalName', 'Setup_CosRQD'),
         StringStruct('LegalCopyright', 'Copyright (C) 2025-2026 Luckfortma. All rights reserved.'),
-        StringStruct('OriginalFilename', 'Setup_CosRQD_v65.0.40.exe'),
+        StringStruct('OriginalFilename', 'Setup_CosRQD_v65.0.41.exe'),
         StringStruct('ProductName', 'CosRQD'),
-        StringStruct('ProductVersion', '65.0.40.0')])
+        StringStruct('ProductVersion', '65.0.41.0')])
       ]), 
     VarFileInfo([VarStruct('Translation', [1042, 1200])])
   ]

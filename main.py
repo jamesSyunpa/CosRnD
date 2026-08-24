@@ -818,7 +818,7 @@ class App(ctk.CTk):
                     
                 self.after(500, lambda: messagebox.showinfo('보고 완료', '이메일 클라이언트를 통해 에러 보고 준비를 마쳤습니다. 메일을 보내주세요.', parent=self))
             except Exception as e:
-                self.after(500, lambda: messagebox.showerror('보고 실패', f'메일 발송 도중 오류가 발생했습니다: {e}', parent=self))
+                self.after(500, lambda err=e: messagebox.showerror('보고 실패', f'메일 발송 도중 오류가 발생했습니다: {err}', parent=self))
 
         # 메인 UI가 얼지 않도록 별도 스레드로 발송 진행
         t = threading.Thread(target=send_mail_thread, daemon=True)

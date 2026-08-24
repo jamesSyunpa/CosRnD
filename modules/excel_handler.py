@@ -1010,8 +1010,8 @@ def export_production_formulation_original_to_excel(
                 col_w = ws.column_dimensions[col_letter].width or 8
                 total_width_px += col_w * 7
             full_px = int(total_width_px)
-            # create_approval_image_v2 사용 시 approval_img_height 반환
-            approval_img_path, approval_img_height = create_approval_image_v2(full_px)
+            # 결재란 이미지 생성 및 삽입
+            approval_img_path = create_approval_image(full_px)
             if not use_com_header:
                 img = XLImage(approval_img_path)
                 img.anchor = 'A1'
@@ -1027,13 +1027,9 @@ def export_production_formulation_original_to_excel(
             ws.sheet_properties.pageSetUpPr.fitToPage = True
             ws.print_options.horizontalCentered = True
             ws.page_margins.left = 0.3; ws.page_margins.right = 0.3
-            # 위쪽 여백: 1.5cm, 겹치면 2cm로 자동 조정
-            px_per_cm = 96 / 2.54
-            margin_top = 2.0 / 2.54 if approval_img_height > 1.5 * px_per_cm else 1.5 / 2.54
-            ws.page_margins.top = margin_top; ws.page_margins.bottom = 0.5  # cm -> inch
-        except Exception:
-            pass
-            ws.page_margins.top = margin_top; ws.page_margins.bottom = 0.5  # cm -> inch
+            # 위쪽 여백: 1.5cm 기본
+            ws.page_margins.top = 1.5 / 2.54
+            ws.page_margins.bottom = 0.5  # cm -> inch
         except Exception:
             pass
 

@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import os
 import sys
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 # 프로젝트 루트 경로를 sys.path에 추가 (상대 경로 import를 위함)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

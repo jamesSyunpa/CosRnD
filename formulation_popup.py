@@ -1,15 +1,16 @@
 # modules/formulation_popup.py
+import os
+import tkinter as tk
+from tkinter import ttk, messagebox
 import customtkinter as ctk
 from sqlalchemy.orm import joinedload
-from tkinter import ttk, messagebox
 from tkcalendar import DateEntry
 from database.db_manager import db_manager
 from database.models import Client, Formulation, FormulationItem, Material, User
 from datetime import datetime
-from modules.ui_components import CustomErrorDialog, CustomDropdown, AddMaterialDialog, ClientQuickSearchPopup
-
-# Circular Import 방지: document_management 대신 ui_components에서 직접 import 했습니다.
-from modules.ui_components import try_convert_to_float, HelpPopup
+from utils import center_window_on_mouse_display, safe_focus
+import modules.excel_handler as excel_handler
+from modules.ui_components import CustomErrorDialog, CustomDropdown, AddMaterialDialog, ClientQuickSearchPopup, try_convert_to_float, HelpPopup
 from modules.translation import get_texts
 from decimal import Decimal, InvalidOperation, getcontext
 

@@ -1,10 +1,11 @@
 # modules/settings_management.py
-import customtkinter as ctk
-from tkinter import messagebox, filedialog
-import configparser
+import sys
 import os
 import shutil
 import subprocess
+import customtkinter as ctk
+from tkinter import messagebox, filedialog
+import configparser
 from datetime import datetime
 from database.db_manager import db_manager, SCHEMA_VERSION
 from database.models import Base, Formulation, FormulationItem, Material, Client, User

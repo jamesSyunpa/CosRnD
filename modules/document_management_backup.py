@@ -21,6 +21,7 @@ from database.models import (
     Formulation,
     FormulationItem,
     Material,
+    Ingredient,
     User,
     DocumentPackage,
     DocumentPackageLink,

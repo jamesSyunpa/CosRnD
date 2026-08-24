@@ -1,4 +1,6 @@
 # modules/data_management.py
+import os
+import json
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import tkinter as tk
