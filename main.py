@@ -1714,12 +1714,11 @@ class App(ctk.CTk):
 
         def bind_menu_button(btn_widget, key):
             # 마우스 클릭 및 호버 바인딩
-            btn_widget.configure(command=lambda: show_dropdown(key, btn_widget))
+            btn_widget.configure(command=lambda *a, k=key, b=btn_widget: show_dropdown(k, b))
             for widget in [btn_widget, getattr(btn_widget, '_canvas', None), getattr(btn_widget, '_text_label', None)]:
                 if widget:
-                    widget.bind("<Button-1>", lambda e, k=key, b=btn_widget: show_dropdown(k, b), add="+")
-                    widget.bind("<Enter>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
-                    widget.bind("<Motion>", lambda e, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
+                    widget.bind("<Enter>", lambda *a, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
+                    widget.bind("<Motion>", lambda *a, k=key, b=btn_widget: on_hover_btn(k, b), add="+")
 
         # 전역 클릭 시 메뉴 바깥 클릭이면 안전하게 닫기
         def on_global_click(event):
@@ -1752,7 +1751,7 @@ class App(ctk.CTk):
             close_dropdown()
 
         self.bind_all("<Button-1>", on_global_click, add="+")
-        self.bind("<Escape>", lambda e: close_dropdown(), add="+")
+        self.bind("<Escape>", lambda *a: close_dropdown(), add="+")
 
         btn_font = ctk.CTkFont(size=12, weight="normal")
 
