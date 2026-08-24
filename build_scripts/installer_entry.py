@@ -110,7 +110,10 @@ def main():
             show_msg('설치 완료', f'{APP_NAME}이(가) {dest}에 설치되었습니다.')
             # 바로 실행
             try:
-                os.startfile(exe_path)
+                desktop = os.path.join(os.environ.get('USERPROFILE', ''), 'Desktop')
+                lnk_path = os.path.join(desktop, f'{APP_NAME}.lnk')
+                target_to_launch = lnk_path if os.path.exists(lnk_path) else exe_path
+                subprocess.Popen(f'cmd.exe /c start "" "{target_to_launch}"', shell=True)
             except Exception:
                 pass
             return 0
