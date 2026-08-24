@@ -33,13 +33,14 @@ def main():
     print(f"=== CosRQD {version} Setup Package Build Starting ===")
     dist_dir = os.path.join(current_dir, "dist")
     
-    # 2. Build main application (One-file CosRQD.exe 우선)
-    main_spec = os.path.join(current_dir, "build_scripts", f"CosRQD_{version}.spec")
+    # 2. Build main application (최신 소스코드가 반영된 CosRQD.exe 100% 신규 빌드)
+    main_spec = os.path.join(current_dir, "build_scripts", "CosRQD_main.spec")
     if not os.path.exists(main_spec):
-        main_spec = os.path.join(current_dir, "build_scripts", f"화장품연구관리_{version}.spec")
+        main_spec = os.path.join(current_dir, "build_scripts", f"CosRQD_{version}.spec")
     if not os.path.exists(main_spec):
-        main_spec = os.path.join(current_dir, "build_scripts", "setup_installer.spec")
+        main_spec = os.path.join(current_dir, "build_scripts", "CosRQD_v65.0.37.spec")
         
+    print(f"[Build] === 1단계: 메인 애플리케이션 (CosRQD.exe) 컴파일 시작 ===")
     run_pyinstaller(main_spec)
     
     # 3. Create app.zip bundle for installer
