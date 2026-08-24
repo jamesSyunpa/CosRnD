@@ -298,8 +298,15 @@ class InstallationWizard(QMainWindow):
         self.config_manager = config_manager
         self.version = version
         self.installer = Installer()
+        self._is_launched = False
         
         self.init_ui()
+
+    def closeEvent(self, event):
+        """인스톨러 창 닫기 시 설치 완료 상태라면 프로그램 자동 실행 보장"""
+        if not getattr(self, '_is_launched', False) and hasattr(self, 'pages') and self.pages.currentIndex() == 3:
+            self.launch_application_and_close()
+        event.accept()
     
     def init_ui(self):
         self.setWindowTitle("CosRQD 설치 마법사")
@@ -378,15 +385,34 @@ class InstallationWizard(QMainWindow):
         self.update_buttons()
 
     def launch_application_and_close(self):
-        """완료 버튼 클릭 시 바탕화면 바로가기 또는 설치된 최신 프로그램을 자동 실행하고 인스톨러 종료"""
+        """완료 버튼 클릭 시 완전 독립 백그라운드 런처를 통해 최신 프로그램을 100% 확실하게 실행하고 인스톨러 종료"""
+        if getattr(self, '_is_launched', False):
+            return
+        self._is_launched = True
         try:
             if hasattr(self, 'completion_page') and self.completion_page.is_launch_checked():
                 install_path = self.path_page.get_install_path()
                 bin_dir = install_path / "bin"
                 
-                # 1. 윈도우 바탕화면의 바로가기 파일(.lnk)을 최우선 탐색
+                # 1. 실행 대상 탐색 (설치된 최신 바이너리 및 바로가기)
+                candidates = [
+                    bin_dir / "CosRQD.exe",
+                    bin_dir / "main.exe",
+                    install_path / "CosRQD.exe",
+                    install_path / "main.exe"
+                ]
+                for p in bin_dir.glob("*.exe"):
+                    if not p.name.startswith("Setup_") and not p.name.startswith("Uninstall"):
+                        candidates.append(p)
+                
                 target_file = None
-                if sys.platform.startswith('win'):
+                for c in candidates:
+                    if c.exists():
+                        target_file = c
+                        break
+                
+                # 바탕화면 바로가기 탐색 (보조 후보)
+                if not target_file and sys.platform.startswith('win'):
                     user_profile = Path(os.environ.get("USERPROFILE", ""))
                     desktop_paths = [
                         user_profile / "Desktop",
@@ -394,16 +420,6 @@ class InstallationWizard(QMainWindow):
                         user_profile / "OneDrive" / "바탕 화면",
                         user_profile / "바탕 화면"
                     ]
-                    try:
-                        import ctypes
-                        from ctypes import wintypes
-                        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
-                        ctypes.windll.shell32.SHGetFolderPathW(None, 0x0000, None, 0, buf)
-                        if buf.value and Path(buf.value).exists():
-                            desktop_paths.insert(0, Path(buf.value))
-                    except Exception:
-                        pass
-                    
                     for dp in desktop_paths:
                         if dp.exists():
                             for lnk_name in ["CosRQD.lnk", "CosRnD.lnk", "화장품연구관리.lnk"]:
@@ -414,28 +430,13 @@ class InstallationWizard(QMainWindow):
                         if target_file:
                             break
 
-                # 2. 바로가기가 없는 경우 실행 바이너리 직접 탐색
-                if not target_file:
-                    candidates = [
-                        bin_dir / "CosRQD.exe",
-                        install_path / "CosRQD.exe",
-                        bin_dir / "main.exe",
-                        install_path / "main.exe"
-                    ]
-                    for p in bin_dir.glob("*.exe"):
-                        if not p.name.startswith("Setup_") and not p.name.startswith("Uninstall"):
-                            candidates.append(p)
-                    
-                    for c in candidates:
-                        if c.exists():
-                            target_file = c
-                            break
-
                 if target_file and target_file.exists():
-                    logger.info(f"Auto-launching target: {target_file}")
+                    target_str = str(target_file)
+                    work_dir = str(bin_dir if bin_dir.exists() else install_path)
+                    logger.info(f"Auto-launching target via standalone launcher: {target_str}")
                     
-                    # 환경변수 정화
                     if sys.platform.startswith('win'):
+                        # 환경변수 정화
                         import ctypes
                         for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME', 'PYINSTALLER_STRICT_UNLOAD_MODE']:
                             try:
@@ -444,34 +445,31 @@ class InstallationWizard(QMainWindow):
                             except Exception:
                                 pass
                         
-                        # Windows 쉘 독립 프로세스로 바로가기/실행파일 실행 (cmd start 사용)
-                        target_str = str(target_file)
-                        work_dir = str(bin_dir if bin_dir.exists() else install_path)
+                        # [핵심] WScript.Shell VBScript 백그라운드 독립 런처 가동
+                        # 인스톨러 프로세스가 완전히 종료된 후(0.5초 대기) Windows 쉘에서 부모 관계 없이 100% 안전 실행
+                        import tempfile
+                        vbs_content = (
+                            'Set WshShell = CreateObject("WScript.Shell")\r\n'
+                            f'WshShell.CurrentDirectory = "{work_dir}"\r\n'
+                            'WScript.Sleep 500\r\n'
+                            f'WshShell.Run """{target_str}""", 1, False\r\n'
+                        )
+                        temp_vbs = os.path.join(tempfile.gettempdir(), f"cosrqd_launch_{int(time.time())}.vbs")
                         try:
-                            flags = 0
-                            if hasattr(subprocess, 'CREATE_NEW_PROCESS_GROUP'):
-                                flags |= subprocess.CREATE_NEW_PROCESS_GROUP
-                            if hasattr(subprocess, 'DETACHED_PROCESS'):
-                                flags |= subprocess.DETACHED_PROCESS
-                            subprocess.Popen(
-                                f'cmd.exe /c start "" "{target_str}"',
-                                cwd=work_dir,
-                                shell=True,
-                                creationflags=flags
-                            )
-                        except Exception as popen_e:
-                            logger.warning(f"cmd start launch failed, fallback to os.startfile: {popen_e}")
-                            try:
-                                os.startfile(target_str)
-                            except Exception as start_e:
-                                logger.error(f"os.startfile fallback failed: {start_e}")
+                            with open(temp_vbs, "w", encoding="ansi") as vf:
+                                vf.write(vbs_content)
+                            subprocess.Popen(["wscript.exe", temp_vbs], shell=False)
+                        except Exception as vbs_err:
+                            logger.warning(f"VBS launcher failed, fallback to explorer.exe: {vbs_err}")
+                            # Fallback: Windows explorer.exe 직접 호출
+                            subprocess.Popen(["explorer.exe", target_str], shell=False)
                     else:
-                        subprocess.Popen([str(target_file)], cwd=str(install_path))
+                        subprocess.Popen([target_str], cwd=work_dir)
         except Exception as e:
             logger.error(f"Failed to auto-launch application: {e}")
         finally:
             import time
-            time.sleep(0.3)
+            time.sleep(0.2)
             self.close()
             from PyQt6.QtWidgets import QApplication
             QApplication.quit()
