@@ -2602,4 +2602,226 @@ def export_production_formulation_to_excel(production_data, default_filename="pr
             open_print_preview=open_print_preview,
         )
 
+
+def export_production_runs_list_to_excel(info_data, runs_data, default_filename="생산이력목록.xlsx"):
+    """
+    생산처방의 생산 이력 목록(제조 히스토리 대장)을 서식화된 엑셀 파일로 내보냅니다.
+    """
+    initial_dir = get_excel_path()
+    timestamped_filename = get_timestamped_filename(default_filename)
+    file_path = filedialog.asksaveasfilename(
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx")],
+        initialdir=initial_dir,
+        initialfile=timestamped_filename,
+        title="생산 이력 목록 엑셀 저장"
+    )
+    if not file_path:
+        return
+
+    save_excel_path(os.path.dirname(file_path))
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "생산이력목록"
+
+        # 눈금선 표시
+        ws.views.sheetView[0].showGridLines = True
+
+        # 스타일 정의
+        title_font = Font(name="맑은 고딕", size=15, bold=True, color="1B365D")
+        info_label_font = Font(name="맑은 고딕", size=9, bold=True, color="333333")
+        info_value_font = Font(name="맑은 고딕", size=9, color="111111")
+        header_font = Font(name="맑은 고딕", size=10, bold=True, color="FFFFFF")
+        data_font = Font(name="맑은 고딕", size=9)
+        bold_data_font = Font(name="맑은 고딕", size=9, bold=True)
+        summary_font = Font(name="맑은 고딕", size=10, bold=True, color="003366")
+
+        center_align = Alignment(horizontal="center", vertical="center")
+        left_align = Alignment(horizontal="left", vertical="center")
+        right_align = Alignment(horizontal="right", vertical="center")
+
+        thin_side = Side(style="thin", color="D0D7DE")
+        double_bottom_side = Side(style="double", color="333333")
+        thick_top_side = Side(style="thin", color="333333")
+
+        cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        info_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        summary_border = Border(left=thin_side, right=thin_side, top=thick_top_side, bottom=double_bottom_side)
+
+        header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+        info_label_fill = PatternFill(start_color="EAEDED", end_color="EAEDED", fill_type="solid")
+        info_val_fill = PatternFill(start_color="FAFAFA", end_color="FAFAFA", fill_type="solid")
+        summary_fill = PatternFill(start_color="E8F8F5", end_color="E8F8F5", fill_type="solid")
+        zebra_fill = PatternFill(start_color="F8F9F9", end_color="F8F9F9", fill_type="solid")
+        total_fill = PatternFill(start_color="FEF9E7", end_color="FEF9E7", fill_type="solid")
+
+        # 1. 타이틀 (A1:K1 병합)
+        ws.merge_cells("A1:K1")
+        title_cell = ws["A1"]
+        title_cell.value = "생산 이력 대장 (제조 히스토리 리포트)"
+        title_cell.font = title_font
+        title_cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[1].height = 32
+
+        # 2. 기본 정보 박스 (3행 ~ 4행)
+        ws.merge_cells("A3:B3"); ws.merge_cells("C3:D3"); ws.merge_cells("H3:K3")
+        ws.merge_cells("A4:B4"); ws.merge_cells("C4:D4"); ws.merge_cells("H4:K4")
+
+        ws["A3"] = "고객사 (업체명)"; ws["C3"] = info_data.get("업체명", "-")
+        ws["E3"] = "생산코드"; ws["F3"] = info_data.get("생산코드", "-")
+        ws["G3"] = "출력일시"; ws["H3"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        ws["A4"] = "제품명"; ws["C4"] = info_data.get("제품명", "-")
+        ws["E4"] = "LAB NO."; ws["F4"] = info_data.get("LAB NO", "-")
+        ws["G4"] = "차수 / 기준배치"; ws["H4"] = f"{info_data.get('차수', '-')} (기준 {info_data.get('기준배치', '-')})"
+
+        for r in [3, 4]:
+            ws.row_dimensions[r].height = 20
+            for col in range(1, 12):
+                c = ws.cell(row=r, column=col)
+                c.border = info_border
+                if col in [1, 2, 5, 7]:
+                    c.font = info_label_font
+                    c.fill = info_label_fill
+                    c.alignment = center_align
+                else:
+                    c.font = info_value_font
+                    c.fill = info_val_fill
+                    c.alignment = left_align if col in [3, 4] else center_align
+
+        # 3. 요약 통계 배너 (6행)
+        total_runs_count = len(runs_data)
+        total_qty_kg = sum(r.get("qty_kg", 0.0) for r in runs_data)
+        avg_qty_kg = (total_qty_kg / total_runs_count) if total_runs_count > 0 else 0.0
+
+        ws.merge_cells("A6:K6")
+        summary_cell = ws["A6"]
+        summary_cell.value = f"  📊 [요약 통계]  총 생산 횟수: {total_runs_count}건    |    누적 총 생산량: {total_qty_kg:,.1f} kg    |    평균 생산량: {avg_qty_kg:,.1f} kg"
+        summary_cell.font = summary_font
+        summary_cell.fill = summary_fill
+        summary_cell.alignment = Alignment(horizontal="left", vertical="center")
+        for col in range(1, 12):
+            ws.cell(row=6, column=col).border = cell_border
+        ws.row_dimensions[6].height = 24
+
+        # 4. 테이블 헤더 (8행)
+        headers = [
+            "NO", "생산일자", "제조번호(LOT NO)", "생산량(kg)", "비중",
+            "점도(당일)", "점도(익일)", "pH(당일)", "pH(익일)", "비고 / 특이사항", "등록일시"
+        ]
+        ws.row_dimensions[8].height = 26
+        for col_idx, h_text in enumerate(headers, 1):
+            cell = ws.cell(row=8, column=col_idx, value=h_text)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = cell_border
+
+        # 5. 데이터 행 (9행부터)
+        cur_row = 9
+        for row_data in runs_data:
+            ws.row_dimensions[cur_row].height = 20
+            row_fill = zebra_fill if cur_row % 2 == 0 else PatternFill(fill_type=None)
+
+            c1 = ws.cell(row=cur_row, column=1, value=row_data.get("no", ""))
+            c1.alignment = center_align
+
+            c2 = ws.cell(row=cur_row, column=2, value=row_data.get("date", ""))
+            c2.alignment = center_align
+
+            c3 = ws.cell(row=cur_row, column=3, value=row_data.get("lot", ""))
+            c3.alignment = center_align
+
+            c4 = ws.cell(row=cur_row, column=4, value=row_data.get("qty_kg", 0.0))
+            c4.number_format = "#,##0.0"
+            c4.alignment = right_align
+
+            c5 = ws.cell(row=cur_row, column=5, value=row_data.get("sg", ""))
+            c5.alignment = center_align
+
+            c6 = ws.cell(row=cur_row, column=6, value=row_data.get("visc_init", ""))
+            c6.alignment = center_align
+
+            c7 = ws.cell(row=cur_row, column=7, value=row_data.get("visc_next", ""))
+            c7.alignment = center_align
+
+            c8 = ws.cell(row=cur_row, column=8, value=row_data.get("ph_init", ""))
+            c8.alignment = center_align
+
+            c9 = ws.cell(row=cur_row, column=9, value=row_data.get("ph_next", ""))
+            c9.alignment = center_align
+
+            c10 = ws.cell(row=cur_row, column=10, value=row_data.get("notes", ""))
+            c10.alignment = left_align
+
+            c11 = ws.cell(row=cur_row, column=11, value=row_data.get("created", ""))
+            c11.alignment = center_align
+
+            for col in range(1, 12):
+                cell = ws.cell(row=cur_row, column=col)
+                cell.font = data_font
+                cell.border = cell_border
+                if row_fill.fill_type:
+                    cell.fill = row_fill
+
+            cur_row += 1
+
+        # 6. 합계 행 (Total Row)
+        ws.row_dimensions[cur_row].height = 24
+        ws.merge_cells(start_row=cur_row, start_column=1, end_row=cur_row, end_column=3)
+        tot_label = ws.cell(row=cur_row, column=1, value="합계 (Total)")
+        tot_label.font = bold_data_font
+        tot_label.alignment = center_align
+
+        tot_val = ws.cell(row=cur_row, column=4, value=total_qty_kg)
+        tot_val.font = bold_data_font
+        tot_val.number_format = "#,##0.0"
+        tot_val.alignment = right_align
+
+        ws.merge_cells(start_row=cur_row, start_column=5, end_row=cur_row, end_column=11)
+        tot_desc = ws.cell(row=cur_row, column=5, value=f"총 {total_runs_count}회 생산 완료")
+        tot_desc.font = bold_data_font
+        tot_desc.alignment = left_align
+
+        for col in range(1, 12):
+            cell = ws.cell(row=cur_row, column=col)
+            cell.fill = total_fill
+            cell.border = summary_border
+
+        # 7. 컬럼 너비 자동 조정
+        min_widths = {
+            1: 6,   # NO
+            2: 12,  # 생산일자
+            3: 16,  # LOT NO
+            4: 14,  # 생산량
+            5: 8,   # 비중
+            6: 12,  # 점도 당일
+            7: 12,  # 점도 익일
+            8: 10,  # pH 당일
+            9: 10,  # pH 익일
+            10: 25, # 비고
+            11: 18  # 등록일시
+        }
+
+        for col_idx in range(1, 12):
+            col_letter = get_column_letter(col_idx)
+            max_len = min_widths.get(col_idx, 10)
+            for row in range(8, cur_row + 1):
+                c_val = ws.cell(row=row, column=col_idx).value
+                if c_val is not None:
+                    d_len = _get_display_length(c_val)
+                    if d_len > max_len:
+                        max_len = d_len
+            ws.column_dimensions[col_letter].width = max(max_len + 3, min_widths.get(col_idx, 10))
+
+        wb.save(file_path)
+        try:
+            os.startfile(os.path.abspath(file_path))
+        except Exception:
+            pass
+    except Exception as e:
+        messagebox.showerror("내보내기 오류", f"생산 이력 목록 저장 중 오류가 발생했습니다: {e}")
+
     

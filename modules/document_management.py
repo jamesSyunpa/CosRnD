@@ -677,7 +677,7 @@ class DocumentManagementFrame(ctk.CTkFrame):
             self.lookup_tree.heading(
                 col_id,
                 text=header_text,
-                command=lambda c=col_id: self.sort_treeview_column(self.lookup_tree, c, False)
+                command=lambda c=col_id: self._on_lookup_header_click(c)
             )
             self.lookup_tree.column(col_id, width=width, anchor=align, stretch=stretch)
 
@@ -1285,6 +1285,41 @@ class DocumentManagementFrame(ctk.CTkFrame):
             command=lambda: self._toggle_lookup_selection("none")
         ).pack(side="left", padx=3)
 
+        # [신규] 결과 정렬 액션 툴바
+        sort_bar = ctk.CTkFrame(dash_frame, fg_color="transparent")
+        sort_bar.pack(fill="x", padx=10, pady=(0, 6))
+
+        ctk.CTkLabel(
+            sort_bar, 
+            text="🔃 결과 정렬:", 
+            font=ctk.CTkFont(size=11, weight="bold"), 
+            text_color=("gray30", "gray70")
+        ).pack(side="left", padx=(0, 6))
+
+        sort_btn_defs = [
+            ("단일 우선", "single_first", "🧪"),
+            ("복합 우선", "blend_first", "⭐"),
+            ("코드순", "code", "🔢"),
+            ("원료명순", "name", "🔤"),
+            ("공급사순", "supplier", "🏢"),
+        ]
+
+        self.lookup_sort_buttons = {}
+        for btn_text, sort_key, icon in sort_btn_defs:
+            btn = ctk.CTkButton(
+                sort_bar,
+                text=f"{icon} {btn_text}",
+                font=ctk.CTkFont(size=11),
+                fg_color=("gray80", "gray25"),
+                hover_color=("gray70", "gray35"),
+                text_color=("black", "gray90"),
+                height=24,
+                width=80,
+                command=lambda k=sort_key: self._handle_lookup_sort_button_click(k)
+            )
+            btn.pack(side="left", padx=2)
+            self.lookup_sort_buttons[sort_key] = btn
+
         # [0.01초 초고속 데이터 주입] Treeview에 전건 일괄 삽입 (경량화 객체 활용)
         self.selected_lookup_items.clear()
         for i, item in enumerate(items_data):
@@ -1324,6 +1359,95 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         if hasattr(self, 'lookup_result_label'):
             self.lookup_result_label.configure(text=f"검색 완료 (총 {len(items_data)}건 표시)")
+
+    def _on_lookup_header_click(self, col_id: str):
+        """표 헤더 클릭 시 원료/성분 조회 맞춤 정렬 수행"""
+        col_sort_map = {
+            "badge": "single_first",
+            "code": "code",
+            "name": "name",
+            "ingredients": "match",
+            "supplier": "supplier"
+        }
+        if col_id in col_sort_map:
+            self._handle_lookup_sort_button_click(col_sort_map[col_id])
+        else:
+            self.sort_treeview_column(self.lookup_tree, col_id, False)
+
+    def _handle_lookup_sort_button_click(self, sort_key: str):
+        """정렬 버튼 클릭 시 정렬을 수행하고 오름차순/내림차순 토글 및 버튼 스타일을 업데이트합니다."""
+        curr_key, curr_rev = getattr(self, '_current_lookup_sort', (None, False))
+        
+        if curr_key == sort_key:
+            new_rev = not curr_rev
+        else:
+            new_rev = False
+            
+        self._current_lookup_sort = (sort_key, new_rev)
+        self.sort_ingredient_lookup_results(sort_key, reverse=new_rev)
+        
+        # 버튼 활성 색상 및 화살표 표시 갱신
+        for k, btn in getattr(self, 'lookup_sort_buttons', {}).items():
+            base_text = btn.cget("text").replace(" ▲", "").replace(" ▼", "")
+            if k == sort_key:
+                arrow = " ▼" if new_rev else " ▲"
+                btn.configure(
+                    text=base_text + arrow,
+                    fg_color="#0284C7",
+                    hover_color="#0369A1",
+                    text_color="white"
+                )
+            else:
+                btn.configure(
+                    text=base_text,
+                    fg_color=("gray80", "gray25"),
+                    hover_color=("gray70", "gray35"),
+                    text_color=("black", "gray90")
+                )
+
+    def sort_ingredient_lookup_results(self, sort_by: str, reverse: bool = False):
+        """원료/성분 조회 검색 결과를 지정된 기준(단일, 복합, 코드, 원료명, 공급사 등)으로 정렬하고 표를 즉시 재정렬합니다."""
+        if not hasattr(self, 'lookup_tree') or not self.lookup_tree:
+            return
+        
+        children = self.lookup_tree.get_children('')
+        if not children:
+            return
+
+        def get_sort_key(iid):
+            item_tuple = self.selected_lookup_items.get(iid)
+            item_info = item_tuple[2] if item_tuple and len(item_tuple) >= 3 else {}
+            mat = item_tuple[1] if item_tuple and len(item_tuple) >= 2 else None
+            
+            is_blend = item_info.get("is_blend", False)
+            code = item_info.get("code") or (mat.code if mat else "") or self.lookup_tree.set(iid, "code") or ""
+            name = item_info.get("name") or (mat.name if mat else "") or self.lookup_tree.set(iid, "name") or ""
+            supplier = item_info.get("supplier_text") or (mat.supplier.name if mat and mat.supplier else "") or self.lookup_tree.set(iid, "supplier") or ""
+            match_count = item_info.get("match_count", 0)
+            total_count = item_info.get("total_ing_count", 0)
+
+            if sort_by == "single_first":  # 단일 우선
+                return (0 if not is_blend else 1, code.lower(), name.lower())
+            elif sort_by == "blend_first":   # 복합 우선
+                return (0 if is_blend else 1, -match_count, total_count, code.lower(), name.lower())
+            elif sort_by == "code":          # 코드순
+                return (code.lower(), name.lower())
+            elif sort_by == "name":          # 원료명순
+                return (name.lower(), code.lower())
+            elif sort_by == "supplier":      # 공급사순
+                return (supplier.lower(), name.lower(), code.lower())
+            elif sort_by == "match":         # 일치도순
+                return (-match_count, total_count, 0 if not is_blend else 1, name.lower())
+            else:
+                return (0 if not is_blend else 1, total_count, -match_count, code.lower())
+
+        sorted_iids = sorted(children, key=get_sort_key, reverse=reverse)
+
+        # Treeview 재배치 및 줄무늬 태그 갱신
+        for index, iid in enumerate(sorted_iids):
+            self.lookup_tree.move(iid, '', index)
+            row_tag = 'oddrow' if index % 2 == 0 else 'evenrow'
+            self.lookup_tree.item(iid, tags=(row_tag,))
 
     def _search_ingredients_grouped(self, search_terms, search_type):
         """성분 검색 결과를 검색어별 콤보박스로 표시 (보완 정보: 한글→영문/CAS/기능, 영문→한글/CAS/기능)"""
@@ -1695,10 +1819,10 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
 
     def import_ingredient_lookup_from_excel(self):
-        """Excel에서 성분명/CAS No 리스트를 가져와서 검색"""
+        """Excel 파일에서 성분명/원료명/CAS No 리스트를 똑똑하게 감지하여 검색창으로 가져와 자동 검색합니다."""
         file_path = filedialog.askopenfilename(
-            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")],
-            title=self.texts.get("import_lookup_from_excel", "Excel에서 가져오기"),
+            filetypes=[("Excel files", "*.xlsx *.xls *.xlsm"), ("CSV files", "*.csv"), ("All files", "*.*")],
+            title=self.texts.get("import_lookup_from_excel", "Excel에서 성분/원료 목록 가져오기"),
             parent=self
         )
         
@@ -1708,38 +1832,197 @@ class DocumentManagementFrame(ctk.CTkFrame):
         try:
             import pandas as pd
             
-            df = pd.read_excel(file_path, engine='openpyxl')
-            
-            # 첫 번째 컬럼의 값들을 검색어로 사용
-            if df.empty or len(df.columns) == 0:
-                messagebox.showwarning(self.texts.get("warning", "경고"),
-                    "Excel 파일에 데이터가 없습니다.", parent=self)
-                return
-            
-            # [수정] 컬럼명 기반으로 데이터 추출 우선 (한글전성분 -> CAS NO. -> 첫번째 컬럼 순)
-            target_col = None
-            
-            # 컬럼명 정규화 (공백 제거 등)
-            normalized_cols = {str(col).strip(): col for col in df.columns}
-            
-            if '한글전성분' in normalized_cols:
-                target_col = normalized_cols['한글전성분']
-            elif 'CAS NO.' in normalized_cols:
-                target_col = normalized_cols['CAS NO.']
-            elif 'CAS No.' in normalized_cols: # 대소문자 변형 대응
-                 target_col = normalized_cols['CAS No.']
-            
-            if target_col:
-                search_terms = df[target_col].dropna().astype(str).tolist()
+            # 엑셀 또는 CSV 로드
+            if file_path.lower().endswith('.csv'):
+                try:
+                    df = pd.read_csv(file_path, encoding='utf-8-sig')
+                except Exception:
+                    df = pd.read_csv(file_path, encoding='cp949')
             else:
-                # 지정된 헤더가 없으면 첫 번째 컬럼 사용
-                search_terms = df.iloc[:, 0].dropna().astype(str).tolist()
-            
-            if not search_terms:
-                messagebox.showwarning(self.texts.get("warning", "경고"),
-                    "검색할 데이터가 없습니다.", parent=self)
+                excel_file = pd.ExcelFile(file_path, engine='openpyxl')
+                sheet_names = excel_file.sheet_names
+                
+                target_sheet = sheet_names[0]
+                # '전성분', '원료', '성분'이 포함된 시트 우선 탐색
+                for s in sheet_names:
+                    s_clean = s.lower().replace(" ", "")
+                    if any(k in s_clean for k in ['전성분', '성분', '원료', 'ingredient', 'material', 'inci']):
+                        target_sheet = s
+                        break
+                df = pd.read_excel(file_path, sheet_name=target_sheet, engine='openpyxl')
+
+            if df.empty or len(df.columns) == 0:
+                messagebox.showwarning(self.texts.get("warning", "경고"), "선택한 파일에 데이터가 없습니다.", parent=self)
                 return
+
+            # 번호/순번 블랙리스트 키워드
+            blacklist_keywords = ['no', 'no.', '순번', '연번', '번호', '구분', 'index', 'idx', 'num', 'seq', '차수', 'id', 'sn', 'unnamed']
             
+            # 성분/원료 우선순위 키워드 그룹
+            priority_groups = [
+                # 1순위: 성분명 / 전성분
+                ['한글전성분', '전성분', '성분명', '한글성분명', '성분', 'ingredient', 'ingredients', 'inci', 'inci name', 'inci_name', '성분한글명', '원료구성성분', '한글명', 'korean_name', '성분(국문)'],
+                # 2순위: 원료명
+                ['원료명', '원료', '한글원료명', '상품명', 'raw material', 'material', 'material name', '품명', 'product name', '원료(국문)'],
+                # 3순위: CAS No
+                ['cas no', 'cas no.', 'casno', 'cas_no', 'cas 번호', 'cas번호', 'cas', 'cas_number'],
+                # 4순위: 영문 성분명
+                ['영문전성분', '영문성분명', '영문명', 'english name', 'english_name', 'inci (en)', '성분(영문)']
+            ]
+
+            detected_col = None
+
+            # 우선순위 그룹 순서대로 최적의 컬럼 탐색
+            for p_list in priority_groups:
+                if detected_col:
+                    break
+                for c in df.columns:
+                    c_clean = str(c).strip().lower()
+                    if any(k == c_clean or k in c_clean for k in p_list):
+                        sample_vals = df[c].dropna().astype(str).head(10).tolist()
+                        if sample_vals and not all(v.isdigit() and len(v) <= 4 for v in sample_vals):
+                            detected_col = c
+                            break
+
+            # 만약 우선순위 매칭이 안 된 경우, 번호 열을 제외한 텍스트 데이터가 많은 열 탐색
+            if not detected_col:
+                for c in df.columns:
+                    c_clean = str(c).strip().lower()
+                    if any(blk in c_clean for blk in blacklist_keywords):
+                        continue
+                    sample_vals = df[c].dropna().astype(str).head(10).tolist()
+                    if sample_vals and any(not v.replace('.', '', 1).isdigit() for v in sample_vals):
+                        detected_col = c
+                        break
+
+            # 유효 컬럼 목록 및 샘플 데이터 구성
+            valid_cols = []
+            for c in df.columns:
+                c_str = str(c).strip()
+                sample_text = ", ".join(df[c].dropna().astype(str).head(3).tolist())
+                if sample_text:
+                    valid_cols.append((c_str, c, sample_text))
+
+            final_col = detected_col
+
+            # 컬럼이 여러 개 존재하는 경우 사용자가 직접 선택할 수 있는 팝업 창 제공
+            if len(valid_cols) > 1:
+                col_names = [f"{vc[0]} (예: {vc[2][:30]}...)" for vc in valid_cols]
+                default_idx = 0
+                if detected_col:
+                    for i, vc in enumerate(valid_cols):
+                        if vc[1] == detected_col:
+                            default_idx = i
+                            break
+
+                col_dialog = ctk.CTkToplevel(self)
+                col_dialog.title("📥 엑셀 가져오기 열(Column) 선택")
+                col_dialog.geometry("520x280")
+                col_dialog.resizable(False, False)
+                col_dialog.transient(self)
+                col_dialog.grab_set()
+
+                self.eval(f'tk::PlaceWindow {str(col_dialog)} center')
+
+                selected_col_holder = [detected_col or valid_cols[0][1]]
+
+                ctk.CTkLabel(
+                    col_dialog,
+                    text="엑셀 파일에서 검색할 성분/원료가 포함된 열을 선택하세요:",
+                    font=ctk.CTkFont(size=13, weight="bold")
+                ).pack(pady=(20, 10), padx=20, anchor="w")
+
+                combo_var = ctk.StringVar(value=col_names[default_idx])
+                col_combo = ctk.CTkComboBox(
+                    col_dialog,
+                    values=col_names,
+                    variable=combo_var,
+                    width=460,
+                    height=36,
+                    state="readonly"
+                )
+                col_combo.pack(pady=10, padx=20)
+
+                preview_lbl = ctk.CTkLabel(
+                    col_dialog,
+                    text=f"• 자동 추천 열: [{valid_cols[default_idx][0]}]\n• 샘플 데이터: {valid_cols[default_idx][2]}",
+                    font=ctk.CTkFont(size=11),
+                    text_color=("gray40", "gray70"),
+                    justify="left"
+                )
+                preview_lbl.pack(pady=(5, 15), padx=20, anchor="w")
+
+                def on_combo_change(choice):
+                    for i, cn in enumerate(col_names):
+                        if cn == choice:
+                            selected_col_holder[0] = valid_cols[i][1]
+                            preview_lbl.configure(text=f"• 선택된 열: [{valid_cols[i][0]}]\n• 샘플 데이터: {valid_cols[i][2]}")
+                            break
+
+                col_combo.configure(command=on_combo_change)
+
+                is_confirmed = [False]
+
+                def do_confirm():
+                    is_confirmed[0] = True
+                    col_dialog.destroy()
+
+                def do_cancel():
+                    col_dialog.destroy()
+
+                btn_box = ctk.CTkFrame(col_dialog, fg_color="transparent")
+                btn_box.pack(fill="x", padx=20, pady=(10, 0))
+
+                ctk.CTkButton(
+                    btn_box, text="가져오기 및 검색", fg_color="#1976D2", hover_color="#1565C0",
+                    font=ctk.CTkFont(weight="bold"), height=34, width=150, command=do_confirm
+                ).pack(side="right", padx=(5, 0))
+
+                ctk.CTkButton(
+                    btn_box, text="취소", fg_color="gray50", hover_color="gray40",
+                    height=34, width=80, command=do_cancel
+                ).pack(side="right")
+
+                self.wait_window(col_dialog)
+
+                if not is_confirmed[0]:
+                    return
+                final_col = selected_col_holder[0]
+
+            elif valid_cols:
+                final_col = valid_cols[0][1]
+
+            if not final_col:
+                final_col = df.columns[0]
+
+            # 데이터 추출 및 정제
+            raw_terms = df[final_col].dropna().astype(str).tolist()
+            
+            # 유효 검색어 필터링 (공백 및 헤더 제외)
+            search_terms = []
+            for term in raw_terms:
+                t_clean = term.strip()
+                if not t_clean or t_clean.lower() in [str(final_col).lower(), 'nan', 'none']:
+                    continue
+                if t_clean not in search_terms:
+                    search_terms.append(t_clean)
+
+            if not search_terms:
+                messagebox.showwarning(self.texts.get("warning", "경고"), "선택한 열에 검색 가능한 데이터가 없습니다.", parent=self)
+                return
+
+            # 검색 유형 자동 설정
+            final_col_lower = str(final_col).lower()
+            if hasattr(self, 'lookup_search_type_combo'):
+                if any(k in final_col_lower for k in ['cas', 'cas_no', 'casno']):
+                    self.lookup_search_type_combo.set("CAS No")
+                elif any(k in final_col_lower for k in ['원료명', '원료', 'material']):
+                    self.lookup_search_type_combo.set("원료명")
+                elif any(k in final_col_lower for k in ['영문', 'english']):
+                    self.lookup_search_type_combo.set("성분명(영문)")
+                else:
+                    self.lookup_search_type_combo.set("전체")
+
             # 텍스트박스에 검색어 입력
             self.ingredient_lookup_textbox.delete("0.0", "end")
             self.ingredient_lookup_textbox.insert("0.0", "\n".join(search_terms))
@@ -2949,8 +3232,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
             try:
                 formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
                 if formulation:
-                    formulation_name = (formulation.experiment_name_en or formulation.experiment_name) if is_eng else formulation.experiment_name
-                    lab_no = formulation.lab_no
+                    formulation_name = formulation.experiment_name or ("Quotation" if is_eng else "가상 견적")
+                    lab_no = formulation.lab_no or ""
                     manager_name = self.get_manager_display_name(formulation.manager_name or "", session)
             finally:
                 session.close()
@@ -3017,11 +3300,12 @@ class DocumentManagementFrame(ctk.CTkFrame):
             }
         }
         
-        default_filename = f"{formulation_name}_Quotation_EN.xlsx" if is_eng else f"{formulation_name}_견적서.xlsx"
+        safe_form_name = re.sub(r'[\\/*?:"<>|]', "", formulation_name)
+        default_filename = f"{safe_form_name}_Quotation_EN.xlsx" if is_eng else f"{safe_form_name}_견적서.xlsx"
         excel_handler.export_quotation_to_excel(quotation_data, default_filename, lang=lang)
 
-    def show_folder_view(self):
-        """폴더 뷰를 표시하고 파일 뷰를 숨깁니다. (아이템 레벨로 돌아감)"""
+    def show_folder_view(self, client_id_to_load=None):
+        """폴더 뷰를 표시하고 파일 뷰를 숨깁니다."""
         self.file_view.grid_forget()
         self.folder_view.grid(row=0, column=0, sticky="nsew")
         self.list_header_label.configure(text=self.texts['formulation_folders'])
@@ -3029,9 +3313,19 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.current_folder_name = None
         self._selected_formulation_id = None
         self.update_button_states()
-        # 아이템 폴더 레벨로 돌아가기 (폴더 새로 로드하지 않음 - 이미 상태 유지됨)
-        self.current_view_level = "item"
-        self.load_folders(is_initial_load=False)
+        
+        # [수정] 뒤로가기 시 상위 폴더(업체 폴더) 상태 유지
+        if client_id_to_load is not None:
+            # 특정 업체로 이동 요청 시
+            self.current_view_level = "item"
+            self.current_client_id = client_id_to_load
+            self.load_folders(is_initial_load=False)
+        elif self.current_view_level == "item":
+            # 이전에 아이템 목록(업체 내부 또는 미지정 폴더)을 보고 있었다면 그 상태 복원
+            self.load_folders(is_initial_load=False)
+        else:
+            # 그 외(업체 목록 등)의 경우 초기화하며 로드
+            self.load_folders(is_initial_load=True)
 
     # ------------------------------
     # 패키지 탭
@@ -3205,7 +3499,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
 
         ctk.CTkButton(runs_toolbar, text="추가", width=55, command=self.add_production_run, font=("", 11)).pack(side="left", padx=(0,5))
         ctk.CTkButton(runs_toolbar, text="삭제", width=55, command=self.delete_selected_production_run, font=("", 11)).pack(side="left", padx=(0,5))
-        ctk.CTkButton(runs_toolbar, text="엑셀 내보내기", width=85, command=self.export_selected_run_to_excel, font=("", 11), fg_color="#27ae60", hover_color="#219150").pack(side="left", padx=(0,5))
+        ctk.CTkButton(runs_toolbar, text="📋 이력 목록 엑셀", width=105, command=self.export_production_runs_list_to_excel, font=("", 11), fg_color="#1E7E34", hover_color="#19692C").pack(side="left", padx=(0,5))
+        ctk.CTkButton(runs_toolbar, text="선택 작업서 엑셀", width=95, command=self.export_selected_run_to_excel, font=("", 11), fg_color="#27ae60", hover_color="#219150").pack(side="left", padx=(0,5))
         ctk.CTkButton(runs_toolbar, text="인쇄", width=55, command=self.print_selected_run, font=("", 11), fg_color="#2980b9", hover_color="#2471a3").pack(side="left")
 
         self.runs_tree = ttk.Treeview(runs_frame, columns=("date","lot","qty","sg","visc_init","visc_next","ph_init","ph_next","notes","created"), show="headings", selectmode="browse")
@@ -4087,6 +4382,80 @@ class DocumentManagementFrame(ctk.CTkFrame):
         finally:
             session.close()
 
+    def export_production_runs_list_to_excel(self):
+        """현재 선택된 생산처방의 전체 생산 이력 목록(제조 히스토리 대장)을 엑셀로 내보냅니다."""
+        prod_id = getattr(self, '_selected_production_id', None)
+        if not prod_id:
+            messagebox.showwarning("선택 필요", "생산 이력을 내보낼 생산처방을 먼저 선택하세요.", parent=self)
+            return
+
+        session = db_manager.get_session()
+        try:
+            from database.models import ProductionFormulation, ProductionRun
+            prod = session.query(ProductionFormulation).filter_by(id=prod_id).first()
+            if not prod:
+                messagebox.showerror("오류", "선택한 생산처방 정보를 찾을 수 없습니다.", parent=self)
+                return
+
+            runs = (
+                session.query(ProductionRun)
+                .filter_by(production_formulation_id=prod_id)
+                .order_by(ProductionRun.run_date.desc().nullslast(), ProductionRun.id.desc())
+                .all()
+            )
+
+            if not runs:
+                messagebox.showinfo("알림", "등록된 생산 이력이 없습니다.", parent=self)
+                return
+
+            client_name = prod.client_name or ""
+            if not client_name and prod.source_formulation and getattr(prod.source_formulation, 'oem_odm_client', None):
+                client_name = prod.source_formulation.oem_odm_client.name
+            elif not client_name and getattr(self, 'current_prod_client_name', None):
+                client_name = self.current_prod_client_name
+
+            base_w = getattr(prod, 'base_weight_g', None)
+            base_kg_str = f"{(base_w / 1000.0):,.1f} kg" if base_w is not None else "-"
+
+            info_data = {
+                "제품명": getattr(prod, 'product_name', '') or "",
+                "생산코드": getattr(prod, 'production_code', '') or "",
+                "업체명": client_name or "",
+                "LAB NO": getattr(prod, 'lab_no', '') or "",
+                "차수": getattr(prod, 'revision', '') or "",
+                "기준배치": base_kg_str
+            }
+
+            runs_data = []
+            for i, r in enumerate(runs, 1):
+                date_str = r.run_date.strftime('%Y-%m-%d') if getattr(r, 'run_date', None) else ''
+                created_str = r.created_at.strftime('%Y-%m-%d %H:%M') if getattr(r, 'created_at', None) else ''
+                qty_kg = ((getattr(r, 'quantity_g', 0) or 0) / 1000.0) if getattr(r, 'quantity_g', None) is not None else 0.0
+                runs_data.append({
+                    "no": i,
+                    "date": date_str,
+                    "lot": getattr(r, 'lot_no', '') or "",
+                    "qty_kg": qty_kg,
+                    "sg": getattr(r, 'specific_gravity', '') or "-",
+                    "visc_init": getattr(r, 'viscosity_initial', '') or "-",
+                    "visc_next": getattr(r, 'viscosity_next_day', '') or "-",
+                    "ph_init": getattr(r, 'ph_initial', '') or "-",
+                    "ph_next": getattr(r, 'ph_next_day', '') or "-",
+                    "notes": getattr(r, 'notes', '') or "",
+                    "created": created_str
+                })
+
+            p_name = getattr(prod, 'product_name', '생산처방') or "생산처방"
+            safe_p_name = re.sub(r'[\\/*?:"<>|]', "", p_name)
+            today_str = datetime.now().strftime('%Y%m%d')
+            default_filename = f"{safe_p_name}_생산이력목록_{today_str}.xlsx"
+
+            excel_handler.export_production_runs_list_to_excel(info_data, runs_data, default_filename=default_filename)
+        except Exception as e:
+            messagebox.showerror("오류", f"생산 이력 목록 내보내기 실패: {e}", parent=self)
+        finally:
+            session.close()
+
     def export_selected_run_to_excel(self):
         """선택된 생산 이력을 엑셀로 내보냅니다."""
         self._generate_run_report(mode="excel")
@@ -4317,56 +4686,124 @@ class DocumentManagementFrame(ctk.CTkFrame):
             info_left = ctk.CTkFrame(top, fg_color="transparent")
             info_left.pack(side="left", fill="x", expand=True)
             
-            # 행 1: 제품명, 차수, 생산코드, 업체명
+            # 헬퍼 함수: [라벨 : 입력창] 한 쌍(Pair) 단위 컴팩트 프레임 생성
+            def create_field_pair(parent, label_text):
+                pair = ctk.CTkFrame(parent, fg_color="transparent")
+                pair.pack(side="left", padx=(0, 10), pady=3)
+                ctk.CTkLabel(pair, text=label_text, font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 4))
+                return pair
+
+            # 행 1: 제품명, 차수, 생산코드, 업체명, 상태
             row1 = ctk.CTkFrame(info_left, fg_color="transparent")
             row1.pack(anchor="w", fill="x", pady=2)
             
-            ctk.CTkLabel(row1, text="제품명: ", font=ctk.CTkFont(size=11)).pack(side="left")
-            product_name_entry = ctk.CTkEntry(row1, width=200)
+            # 1) 제품명 쌍
+            p_name_pair = create_field_pair(row1, "제품명:")
+            product_name_entry = ctk.CTkEntry(p_name_pair, width=200)
             product_name_entry.insert(0, prod.product_name or "")
-            product_name_entry.pack(side="left", padx=2)
+            product_name_entry.pack(side="left")
             
-            ctk.CTkLabel(row1, text=" 차수: ", font=ctk.CTkFont(size=11)).pack(side="left")
-            revision_entry = ctk.CTkEntry(row1, width=80)
+            # 2) 차수 쌍
+            p_rev_pair = create_field_pair(row1, "차수:")
+            revision_entry = ctk.CTkEntry(p_rev_pair, width=65)
             revision_entry.insert(0, prod.revision or "")
-            revision_entry.pack(side="left", padx=2)
+            revision_entry.pack(side="left")
             
-            ctk.CTkLabel(row1, text=" 생산코드: ", font=ctk.CTkFont(size=11)).pack(side="left")
-            production_code_entry = ctk.CTkEntry(row1, width=120)
+            # 3) 생산코드 쌍
+            p_code_pair = create_field_pair(row1, "생산코드:")
+            production_code_entry = ctk.CTkEntry(p_code_pair, width=125)
             production_code_entry.insert(0, prod.production_code or "")
-            production_code_entry.pack(side="left", padx=2)
+            production_code_entry.pack(side="left")
             
-            ctk.CTkLabel(row1, text=" 업체명: ", font=ctk.CTkFont(size=11)).pack(side="left")
-            client_name_entry = ctk.CTkEntry(row1, width=150)
+            # 4) 업체명 쌍
+            p_client_pair = create_field_pair(row1, "업체명:")
+            client_name_entry = ctk.CTkEntry(p_client_pair, width=160)
             client_name_entry.insert(0, prod.client_name or "")
-            client_name_entry.pack(side="left", padx=2)
-            
-            # 행 2: 생산량, 제조일, 상태
+            client_name_entry.pack(side="left")
+
+            # 5) 상태 쌍
+            p_status_pair = create_field_pair(row1, "상태:")
+            try:
+                current_lvl = self._role_level()
+                current_status = prod.status or '초안'
+                allowed_next = [current_status]
+                if current_lvl >= 1:
+                    if '초안' not in allowed_next: allowed_next.append('초안')
+                if current_lvl >= 2:
+                    if '검토중' not in allowed_next: allowed_next.append('검토중')
+                if current_lvl >= 3:
+                    if '확정' not in allowed_next: allowed_next.append('확정')
+
+                full_order = ['초안', '검토중', '확정']
+                final_options = [s for s in full_order if s in allowed_next]
+                if not final_options:
+                    final_options = [current_status]
+
+                def on_status_change(choice):
+                    if choice == current_status:
+                        return
+                    if not messagebox.askyesno("상태 변경", f"상태를 '{current_status}'에서 '{choice}'(으)로 변경하시겠습니까?\n변경 즉시 저장됩니다.", parent=win):
+                        status_combo.set(current_status)
+                        return
+                    
+                    session_update = db_manager.get_session()
+                    try:
+                        p_update = session_update.query(ProductionFormulation).filter_by(id=prod.id).first()
+                        if p_update:
+                            p_update.status = choice
+                            if choice == '확정':
+                                if hasattr(self, 'current_user') and self.current_user:
+                                    p_update.approved_by_user_id = self.current_user.id
+                            session_update.commit()
+                            messagebox.showinfo("성공", f"상태가 '{choice}'(으)로 변경되었습니다.", parent=win)
+                            prod.status = choice 
+                            self.refresh_production_list()
+                        else:
+                            messagebox.showerror("오류", "데이터를 찾을 수 없습니다.", parent=win)
+                    except Exception as e:
+                        session_update.rollback()
+                        messagebox.showerror("오류", f"상태 변경 실패: {e}", parent=win)
+                        status_combo.set(current_status)
+                    finally:
+                        session_update.close()
+
+                status_combo = ctk.CTkComboBox(p_status_pair, values=final_options, width=100, height=26, font=("", 11), command=on_status_change)
+                status_combo.set(current_status)
+                status_combo.pack(side="left")
+                
+            except Exception as e:
+                print(f"Status Combo Error: {e}")
+                ctk.CTkLabel(p_status_pair, text=prod.status or '', font=ctk.CTkFont(size=11)).pack(side="left")
+
+            # 행 2: 생산량, 제조일, 결제방 + 액션 버튼들
             row2 = ctk.CTkFrame(info_left, fg_color="transparent")
             row2.pack(anchor="w", fill="x", pady=2)
             
-            ctk.CTkLabel(row2, text="생산량(kg): ", font=ctk.CTkFont(size=11)).pack(side="left")
-            base_weight_entry = ctk.CTkEntry(row2, width=80)
+            # 6) 생산량(kg) 쌍
+            p_weight_pair = create_field_pair(row2, "생산량(kg):")
+            base_weight_entry = ctk.CTkEntry(p_weight_pair, width=75)
             base_weight_kg = ((prod.base_weight_g or 0)/1000)
             base_weight_entry.insert(0, f"{base_weight_kg:.1f}")
-            base_weight_entry.pack(side="left", padx=2)
+            base_weight_entry.pack(side="left")
             
-            ctk.CTkLabel(row2, text=" 제조일: ", font=ctk.CTkFont(size=11)).pack(side="left")
-            effective_date_entry = DateEntry(row2, date_pattern='yyyy-mm-dd', state='normal', width=100)
+            # 7) 제조일 쌍
+            p_date_pair = create_field_pair(row2, "제조일:")
+            effective_date_entry = DateEntry(p_date_pair, date_pattern='yyyy-mm-dd', state='normal', width=12)
             if prod.effective_date:
                 effective_date_entry.set_date(prod.effective_date)
-            effective_date_entry.pack(side="left", padx=2)
+            effective_date_entry.pack(side="left")
 
-            # 행 3: 결제방 + 버튼들
-            row3 = ctk.CTkFrame(info_left, fg_color="transparent")
-            row3.pack(anchor="w", fill="x", pady=2)
-            
-            ctk.CTkLabel(row3, text="결제방: ", font=ctk.CTkFont(size=11)).pack(side="left")
-            payment_room_entry = ctk.CTkEntry(row3, width=200)
+            # 8) 결제방 쌍
+            p_payment_pair = create_field_pair(row2, "결제방:")
+            payment_room_entry = ctk.CTkEntry(p_payment_pair, width=140)
             payment_room_entry.insert(0, prod.payment_room or "")
-            payment_room_entry.pack(side="left", padx=2)
-            
-            # 버튼들
+            payment_room_entry.pack(side="left")
+
+            # 액션 버튼 프레임 (2행 우측으로 자연스럽게 일렬 정렬)
+            btn_box = ctk.CTkFrame(row2, fg_color="transparent")
+            btn_box.pack(side="left", padx=(15, 0))
+
+            # 저장 함수
             def save_edits():
                 session_save = db_manager.get_session()
                 try:
@@ -4405,94 +4842,121 @@ class DocumentManagementFrame(ctk.CTkFrame):
                     messagebox.showerror("오류", f"저장 실패: {e}", parent=win)
                 finally:
                     session_save.close()
-            
-            ctk.CTkButton(row3, text="💾 저장", width=100, fg_color="blue",
-                         command=save_edits).pack(side="left", padx=(15, 3))
-            ctk.CTkButton(row3, text="🖨 인쇄 미리보기", width=120,
-                         command=self.print_preview_selected_production).pack(side="left", padx=3)
-            ctk.CTkButton(row3, text="닫기", width=80, fg_color="gray",
+
+            # 엑셀 내보내기 함수
+            def export_current_edit_to_excel():
+                curr_name = product_name_entry.get().strip() or prod.product_name or ""
+                curr_rev = revision_entry.get().strip() or prod.revision or ""
+                curr_code = production_code_entry.get().strip() or prod.production_code or ""
+                curr_client = client_name_entry.get().strip() or prod.client_name or ""
+                curr_payment = payment_room_entry.get().strip() or prod.payment_room or ""
+                try:
+                    curr_kg = float(base_weight_entry.get().strip())
+                    base_w = curr_kg * 1000.0
+                except Exception:
+                    base_w = getattr(prod, 'base_weight_g', 1000.0) or 1000.0
+                try:
+                    curr_date = effective_date_entry.get_date()
+                    date_str = curr_date.strftime('%Y-%m-%d')
+                except Exception:
+                    date_str = prod.effective_date.strftime('%Y-%m-%d') if getattr(prod, 'effective_date', None) else ""
+
+                session_exp = db_manager.get_session()
+                try:
+                    approver_name = ""
+                    app_user_id = getattr(prod, 'approved_by_user_id', None)
+                    if app_user_id:
+                        from database.models import User
+                        approver = session_exp.query(User).filter_by(id=app_user_id).first()
+                        if approver:
+                            approver_name = approver.real_name or approver.username
+                    elif getattr(prod, 'approved_by', None):
+                        approver_name = prod.approved_by.real_name or prod.approved_by.username
+
+                    # 레시피 트리에서 직접 추출하여 가장 최신 데이터 반영
+                    rows = []
+                    recipe_children = recipe_tree.get_children() if hasattr(recipe_tree, 'get_children') else []
+                    if recipe_children:
+                        for idx, item_iid in enumerate(recipe_children, 1):
+                            vals = recipe_tree.item(item_iid, "values")
+                            if len(vals) >= 6:
+                                r_val = try_convert_to_float(str(vals[4]).replace('%', '')) if len(vals) > 4 else 0.0
+                                a_val = try_convert_to_float(str(vals[6]).replace('g', '').replace('kg', '')) if len(vals) > 6 else 0.0
+                                rows.append({
+                                    "no": idx,
+                                    "phase": vals[0] if len(vals) > 0 else "A",
+                                    "material_code": vals[2] if len(vals) > 2 else "",
+                                    "material_name": vals[3] if len(vals) > 3 else "",
+                                    "ratio": r_val if isinstance(r_val, (int, float)) else 0.0,
+                                    "amount": a_val if isinstance(a_val, (int, float)) else 0.0
+                                })
+                    else:
+                        items_data = getattr(prod, 'items_snapshot', None) or []
+                        if isinstance(items_data, str):
+                            import json
+                            items_data = json.loads(items_data)
+                        for idx, it in enumerate(items_data, 1):
+                            r_val = it.get('ratio', 0.0)
+                            a_val = it.get('amount') or (r_val * base_w / 100.0)
+                            rows.append({
+                                "no": idx,
+                                "phase": it.get('phase', 'A'),
+                                "material_code": it.get('material_code', ''),
+                                "material_name": it.get('material_name', ''),
+                                "ratio": r_val,
+                                "amount": a_val
+                            })
+
+                    step_rows = []
+                    prod_steps = getattr(prod, 'steps', None) or []
+                    if prod_steps:
+                        for s in sorted(prod_steps, key=lambda x: getattr(x, 'step_no', 0) or 0):
+                            step_rows.append({
+                                "step_no": getattr(s, 'step_no', 1),
+                                "phase": getattr(s, 'phase', '') or "",
+                                "equipment": getattr(s, 'equipment', '') or "",
+                                "rpm": getattr(s, 'rpm', '') or "",
+                                "temperature": getattr(s, 'temperature', '') or "",
+                                "time_min": getattr(s, 'time_min', '') or "",
+                                "instruction": getattr(s, 'instruction', '') or "",
+                                "notes": getattr(s, 'notes', '') or ""
+                            })
+
+                    details = {
+                        "제품명": curr_name,
+                        "생산코드": curr_code,
+                        "LAB NO.": getattr(prod, 'lab_no', '') or "",
+                        "차수": curr_rev,
+                        "거래처": curr_client,
+                        "결제방": curr_payment,
+                        "생산량(kg)": f"{(base_w/1000):,.1f} kg",
+                        "제조일": date_str,
+                        "상태": getattr(prod, 'status', '초안') or "초안",
+                        "승인자": approver_name,
+                        "비고": (getattr(prod, 'notes', '') or "").strip(),
+                        "출력일시": datetime.now().strftime('%Y-%m-%d %H:%M'),
+                    }
+
+                    production_data = {"details": details, "items": rows, "steps": step_rows}
+                    default_filename = f"생산처방_{curr_name}_{curr_rev}.xlsx"
+                    excel_handler.export_production_formulation_to_excel(
+                        production_data,
+                        default_filename=default_filename,
+                        mode="revised"
+                    )
+                except Exception as ex:
+                    messagebox.showerror("오류", f"엑셀 내보내기 실패: {ex}", parent=win)
+                finally:
+                    session_exp.close()
+
+            ctk.CTkButton(btn_box, text="💾 저장", width=85, height=28, fg_color="#2563EB", hover_color="#1D4ED8",
+                         font=ctk.CTkFont(weight="bold"), command=save_edits).pack(side="left", padx=3)
+            ctk.CTkButton(btn_box, text="📊 엑셀 내보내기", width=115, height=28, fg_color="#1E7E34", hover_color="#19692C",
+                         font=ctk.CTkFont(weight="bold"), command=export_current_edit_to_excel).pack(side="left", padx=3)
+            ctk.CTkButton(btn_box, text="🖨️ 인쇄 미리보기", width=115, height=28, fg_color="#0284C7", hover_color="#0369A1",
+                         font=ctk.CTkFont(weight="bold"), command=self.print_preview_selected_production).pack(side="left", padx=3)
+            ctk.CTkButton(btn_box, text="닫기", width=65, height=28, fg_color="gray50", hover_color="gray40",
                          command=win.destroy).pack(side="left", padx=3)
-
-            # Status ComboBox Logic
-            try:
-                # 1. Determine allowed status options based on role
-                # Default flow: 초안 -> 검토중 -> 확정
-                # RD (Level 1): Can set '초안'
-                # RQ (Level 2): Can set '검토중' (if current is '초안' or '검토중')
-                # RQD/Admin (Level 3): Can set '확정' (if current is '검토중' or '확정')
-                
-                current_lvl = self._role_level()
-                current_status = prod.status or '초안'
-                
-                allowed_next = []
-                # 현재 상태를 항상 포함 (변경 취소 등을 위해)
-                allowed_next.append(current_status)
-                
-                if current_lvl >= 1: # RD+
-                    if '초안' not in allowed_next: allowed_next.append('초안')
-                
-                if current_lvl >= 2: # RQ+
-                    if '검토중' not in allowed_next: allowed_next.append('검토중')
-                    
-                if current_lvl >= 3: # RQD+
-                    if '확정' not in allowed_next: allowed_next.append('확정')
-
-                # Filter valid transitions (Optional strict workflow: Draft -> Under Review -> Approved)
-                # For now, allow role-based selection as requested.
-                
-                # Deduplicate and Sort?
-                # Keeping simple list: ['초안', '검토중', '확정'] filtered by level
-                full_order = ['초안', '검토중', '확정']
-                final_options = [s for s in full_order if s in allowed_next]
-                
-                if not final_options:
-                    final_options = [current_status]
-
-                ctk.CTkLabel(row2, text=" | 상태: ", font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
-                
-                def on_status_change(choice):
-                    if choice == current_status:
-                        return
-                        
-                    if not messagebox.askyesno("상태 변경", f"상태를 '{current_status}'에서 '{choice}'(으)로 변경하시겠습니까?\n변경 즉시 저장됩니다.", parent=win):
-                        status_combo.set(current_status)
-                        return
-                    
-                    session_update = db_manager.get_session()
-                    try:
-                        p_update = session_update.query(ProductionFormulation).filter_by(id=prod.id).first()
-                        if p_update:
-                            p_update.status = choice
-                            # 승인자 처리: 확정 시 현재 사용자
-                            if choice == '확정':
-                                p_update.approved_by_id = self.current_user.id
-                                p_update.approved_at = datetime.now()
-                            elif choice == '초안':
-                                # 상태가 내려가면 승인정보 초기화? 정책에 따라 다름. 일단 유지.
-                                pass
-                                
-                            session_update.commit()
-                            messagebox.showinfo("성공", f"상태가 '{choice}'(으)로 변경되었습니다.", parent=win)
-                            # Update local object for display
-                            prod.status = choice 
-                            # Refresh list in main window
-                            self.refresh_production_list()
-                        else:
-                            messagebox.showerror("오류", "데이터를 찾을 수 없습니다.", parent=win)
-                    except Exception as e:
-                        session_update.rollback()
-                        messagebox.showerror("오류", f"상태 변경 실패: {e}", parent=win)
-                        status_combo.set(current_status)
-                    finally:
-                        session_update.close()
-
-                status_combo = ctk.CTkComboBox(row2, values=final_options, width=100, height=22, font=("", 11), command=on_status_change)
-                status_combo.set(current_status)
-                status_combo.pack(side="left", padx=(5,0))
-                
-            except Exception as e:
-                print(f"Status Combo Error: {e}")
-                ctk.CTkLabel(row2, text=f" | 상태: {prod.status or ''}", font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
             
 
 
@@ -6611,80 +7075,6 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
         finally:
             session.close()
 
-    def export_quotation(self):
-        """현재 견적 내용을 엑셀 파일로 내보냅니다."""
-        if not self._selected_formulation_id:
-            messagebox.showwarning(self.texts['selection_error'], self.texts['select_formulation_and_create_quotation'], parent=self)
-            return
-
-        session = db_manager.get_session()
-        try:
-            formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
-            if not formulation: return
-
-            try:
-                profit_margin = float(self.quotation_profit_margin_entry.get().strip())
-            except (ValueError, TypeError):
-                profit_margin = 15.0
-
-            quotation_data = {
-                "details": {
-                    "실험품명": formulation.experiment_name,
-                    "담당자": self.get_manager_display_name(formulation.manager_name or "", session),
-                    "LAB NO.": formulation.lab_no,
-                    "기준 중량": self.quotation_weight_entry.get() + "g",
-                    "개당 용량": (self.quotation_unit_capacity_entry.get() if hasattr(self, 'quotation_unit_capacity_entry') else "50") + "g",
-                    "산출 수량": (self.quotation_unit_count_entry.get() + " EA") if hasattr(self, 'quotation_unit_count_entry') else "1 EA",
-                },
-                "extra_expenses": {
-                    "인력비": (self.quotation_labor_entry.get() if hasattr(self, 'quotation_labor_entry') else "0") + " 원",
-                    "제조비": (self.quotation_mfg_cost_entry.get() if hasattr(self, 'quotation_mfg_cost_entry') else "0") + " 원",
-                    "운송비": (self.quotation_shipping_entry.get() if hasattr(self, 'quotation_shipping_entry') else "0") + " 원",
-                    "용기": (self.quotation_container_entry.get() if hasattr(self, 'quotation_container_entry') else "0") + " 원",
-                    "1kg당 총단가": self.quotation_cost_per_kg_label.cget("text") if hasattr(self, 'quotation_cost_per_kg_label') else "-",
-                    "개당(EA) 총단가": self.quotation_cost_per_unit_label.cget("text") if hasattr(self, 'quotation_cost_per_unit_label') else "-",
-                },
-                "items": [self.quotation_tree.item(item, "values") for item in self.quotation_tree.get_children()],
-                "summary": {
-                    "총 함량": self.quotation_total_ratio_label.cget("text") if hasattr(self, 'quotation_total_ratio_label') else "100%",
-                    "총 원료 원가": self.total_raw_cost_label.cget("text"),
-                    "총 제조 원가": self.total_combined_cost_label.cget("text") if hasattr(self, 'total_combined_cost_label') else self.total_raw_cost_label.cget("text"),
-                    f"이윤({profit_margin:.0f}%) 포함 공급가": self.price_with_profit_label.cget("text"),
-                    "최종가 (VAT 10% 포함)": self.price_with_vat_label.cget("text"),
-                }
-            }
-            
-            default_filename = f"{formulation.experiment_name}_견적서.xlsx"
-            excel_handler.export_quotation_to_excel(quotation_data, default_filename)
-
-        finally:
-            session.close()
-
-    def show_folder_view(self, client_id_to_load=None):
-        """폴더 뷰를 표시하고 파일 뷰를 숨깁니다."""
-        self.file_view.grid_forget()
-        self.folder_view.grid(row=0, column=0, sticky="nsew")
-        self.list_header_label.configure(text=self.texts['formulation_folders'])
-        self.current_view = "folders"
-        self.current_folder_name = None
-        self._selected_formulation_id = None
-        self.update_button_states()
-        
-        # [수정] 뒤로가기 시 상위 폴더(업체 폴더) 상태 유지
-        if client_id_to_load is not None:
-            # 특정 업체로 이동 요청 시
-            self.current_view_level = "item"
-            self.current_client_id = client_id_to_load
-            self.load_folders(is_initial_load=False)
-        elif self.current_view_level == "item":
-            # 이전에 아이템 목록(업체 내부 또는 미지정 폴더)을 보고 있었다면 그 상태 복원
-            self.load_folders(is_initial_load=False)
-        else:
-            # 그 외(업체 목록 등)의 경우 초기화하며 로드
-            self.load_folders(is_initial_load=True)
-
-
-
     def export_all_formulations(self):
         """
         관리자 기능: DB에 저장된 모든 처방과 그 구성 원료를 엑셀 파일로 내보냅니다.
@@ -7649,8 +8039,7 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
 
         # 생성 버튼은 강제 생성(force=True)으로 호출하여 탭 활성화 여부와 무관하게 생성되도록 함
         ctk.CTkButton(top_control_frame, text=self.texts['create_all_lists'], width=90, height=26, command=lambda: self.generate_all_ingredient_lists(force=True), font=("", 11)).pack(side="left")
-        ctk.CTkButton(top_control_frame, text="📊 전성분 엑셀 (KO)", width=110, height=26, command=lambda: self.export_all_ingredient_lists(lang="ko"), font=("", 11)).pack(side="left", padx=(5, 0))
-        ctk.CTkButton(top_control_frame, text="🌐 영문 전성분 (EN)", width=120, height=26, fg_color="#1565C0", hover_color="#0D47A1", command=lambda: self.export_all_ingredient_lists(lang="en"), font=("", 11)).pack(side="left", padx=(5, 0))
+        ctk.CTkButton(top_control_frame, text="📊 전성분 엑셀 내보내기", width=120, height=26, command=self.export_all_ingredient_lists, font=("", 11)).pack(side="left", padx=(5, 0))
 
         # --- 열 선택 메뉴 버튼 (컨트롤 프레임에 추가) ---
         # 이 버튼은 나중에 생성될 Treeview를 참조해야 하므로, UI 구성 후 마지막에 command를 설정합니다.
@@ -8114,21 +8503,16 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
                 }}
 
 
-        # 4. 디자인용 전성분 데이터 추출
+        # 4. 디자인용 전성분 데이터 추출 (국문 및 영문 INCI 통합)
         ko_text = self.design_ko_textbox.get("1.0", "end-1c").strip()
         en_text = self.design_en_textbox.get("1.0", "end-1c").strip()
         if (ko_text or en_text) and self.texts['press_button_placeholder'] not in ko_text:
-            if is_eng:
-                design_headers = ["Type", "INCI Ingredients"]
-                design_data = [("INCI (English):", en_text)]
-                sheets_data["Packaging INCI"] = {"type": "table", "content": {"headers": design_headers, "data": design_data}}
-            else:
-                design_headers = ["구분", "전성분 목록"]
-                design_data = [
-                    ("국문:", ko_text),
-                    ("영문 (INCI):", en_text)
-                ]
-                sheets_data[self.texts['ingredients_for_design']] = {"type": "table", "content": {"headers": design_headers, "data": design_data}}
+            design_headers = ["구분", "전성분 목록"]
+            design_data = [
+                ("국문:", ko_text),
+                ("영문 (INCI):", en_text)
+            ]
+            sheets_data[self.texts['ingredients_for_design']] = {"type": "table", "content": {"headers": design_headers, "data": design_data}}
 
         if not sheets_data:
             messagebox.showwarning(self.texts['export_error'], self.texts['no_data_to_export_create_list'], parent=self)
@@ -8138,8 +8522,8 @@ LAB NO: {prod_snapshot.get('LAB NO', '')}
         formulation = session.query(Formulation).filter_by(id=self._selected_formulation_id).first()
         session.close()
         
-        f_name = (formulation.experiment_name_en or formulation.experiment_name) if (formulation and is_eng) else (formulation.experiment_name if formulation else "전성분목록")
-        default_filename = f"{f_name}_Ingredients_EN.xlsx" if is_eng else f"{f_name}_전성분목록.xlsx"
+        f_name = formulation.experiment_name if formulation else "전성분목록"
+        default_filename = f"{f_name}_전성분목록.xlsx"
         
         excel_handler.export_ingredient_lists_to_excel(sheets_data, default_filename)
 

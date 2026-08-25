@@ -224,6 +224,95 @@ class InstallationProgressPage(QWidget):
             self.progress_bar.setValue(percent)
 
 
+def launch_target_application(target_path: Path, working_dir: Path) -> bool:
+    """
+    설치된 메인 프로그램을 Windows 쉘과 완전히 독립된 프로세스로 100% 확실하게 실행합니다.
+    5중 안전망:
+      1차: os.startfile (Windows Shell을 통한 표준 실행 - 가장 신뢰성 높음)
+      2차: ctypes ShellExecuteW API 직접 호출
+      3차: cmd.exe start (DETACHED_PROCESS 플래그)
+      4차: PowerShell Start-Process
+      5차: subprocess.Popen
+    """
+    try:
+        target_str = str(target_path)
+        work_str = str(working_dir)
+        
+        # 1. PyInstaller 및 파이썬 관련 환경변수 OS 레벨 완전 정화
+        if sys.platform.startswith('win'):
+            import ctypes
+            for k in [
+                '_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME',
+                'PYINSTALLER_STRICT_UNLOAD_MODE', 'PYINSTALLER_SUPPRESS_TEMP_ERRORS'
+            ]:
+                try:
+                    ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
+                    os.environ.pop(k, None)
+                except Exception:
+                    pass
+
+        # 1차 시도: os.startfile (가장 확실하고 표준적인 Windows Shell 실행)
+        if sys.platform.startswith('win'):
+            try:
+                os.startfile(target_str)
+                logger.info(f"[자동실행 1차] os.startfile 성공: {target_str}")
+                return True
+            except Exception as e1:
+                logger.warning(f"[자동실행 1차] os.startfile 실패: {e1}")
+
+        # 2차 시도: Windows ShellExecuteW API
+        if sys.platform.startswith('win'):
+            try:
+                import ctypes
+                res = ctypes.windll.shell32.ShellExecuteW(None, "open", target_str, None, work_str, 1)
+                if int(res) > 32:
+                    logger.info(f"[자동실행 2차] ShellExecuteW 성공: {target_str} (코드: {res})")
+                    return True
+                else:
+                    logger.warning(f"[자동실행 2차] ShellExecuteW 반환 코드 오류: {res}")
+            except Exception as e2:
+                logger.warning(f"[자동실행 2차] ShellExecuteW 실패: {e2}")
+
+        # 3차 시도: cmd.exe start (독립 프로세스 그룹)
+        if sys.platform.startswith('win'):
+            try:
+                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                subprocess.Popen(
+                    ["cmd.exe", "/c", "start", "", target_str],
+                    cwd=work_str,
+                    creationflags=flags,
+                    close_fds=True
+                )
+                logger.info(f"[자동실행 3차] cmd start 성공: {target_str}")
+                return True
+            except Exception as e3:
+                logger.warning(f"[자동실행 3차] cmd start 실패: {e3}")
+
+        # 4차 시도: PowerShell Start-Process
+        if sys.platform.startswith('win'):
+            try:
+                escaped_target = target_str.replace("'", "''")
+                escaped_work = work_str.replace("'", "''")
+                ps_cmd = f"Start-Process -FilePath '{escaped_target}' -WorkingDirectory '{escaped_work}'"
+                subprocess.Popen(
+                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    close_fds=True
+                )
+                logger.info(f"[자동실행 4차] PowerShell Start-Process 성공: {target_str}")
+                return True
+            except Exception as e4:
+                logger.warning(f"[자동실행 4차] PowerShell Start-Process 실패: {e4}")
+
+        # 5차 시도: 일반 subprocess.Popen
+        subprocess.Popen([target_str], cwd=work_str, close_fds=True)
+        logger.info(f"[자동실행 5차] subprocess.Popen 성공: {target_str}")
+        return True
+    except Exception as e:
+        logger.error(f"모든 자동실행 시도 실패: {e}")
+        return False
+
+
 class CompletionPage(QWidget):
     """Installation completion page"""
     
@@ -233,7 +322,7 @@ class CompletionPage(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(20)
+        layout.setSpacing(15)
         
         # Success message
         title = QLabel("🎉 설치 완료!")
@@ -244,18 +333,19 @@ class CompletionPage(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.message_label = QLabel(
-            "CosRQD 시스템이 성공적으로 설치되었습니다.\n\n"
-            "'완료' 버튼을 클릭하면 프로그램이 자동으로 실행됩니다."
+            "CosRQD 시스템이 컴퓨터에 성공적으로 설치되었습니다.\n\n"
+            "'완료' 버튼을 클릭하면 설치 마법사가 완료됩니다."
         )
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setWordWrap(True)
 
-        self.launch_checkbox = QCheckBox("🚀 CosRQD 바로 실행 (권장)")
+        self.launch_checkbox = QCheckBox("🚀 설치 완료 후 CosRQD 프로그램 자동 실행 (권장)")
         self.launch_checkbox.setChecked(True)
         chk_font = QFont()
-        chk_font.setPointSize(10)
+        chk_font.setPointSize(11)
         chk_font.setBold(True)
         self.launch_checkbox.setFont(chk_font)
+        self.launch_checkbox.stateChanged.connect(self._on_launch_checkbox_changed)
         
         layout.addStretch()
         layout.addWidget(title)
@@ -267,8 +357,21 @@ class CompletionPage(QWidget):
         chk_container.addStretch()
         layout.addLayout(chk_container)
         
+        self.sub_label = QLabel("💡 체크 시 '완료' 버튼을 누르면 프로그램이 즉시 자동 실행됩니다.")
+        self.sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sub_label.setStyleSheet("color: #2563EB; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.sub_label)
+        
         layout.addStretch()
         self.setLayout(layout)
+
+    def _on_launch_checkbox_changed(self, state):
+        if self.is_launch_checked():
+            self.sub_label.setText("💡 체크 시 '완료' 버튼을 누르면 프로그램이 즉시 자동 실행됩니다.")
+            self.sub_label.setStyleSheet("color: #2563EB; font-size: 11px; font-weight: bold;")
+        else:
+            self.sub_label.setText("💡 체크 해제 시 설치 마법사만 종료되며, 바탕화면 바로가기를 통해 직접 실행할 수 있습니다.")
+            self.sub_label.setStyleSheet("color: #64748B; font-size: 11px;")
     
     def is_launch_checked(self) -> bool:
         """Check if launch checkbox is checked"""
@@ -279,15 +382,17 @@ class CompletionPage(QWidget):
         if success:
             self.message_label.setText(
                 f"{message}\n\n"
-                "'완료' 버튼을 클릭하면 프로그램이 즉시 실행됩니다."
+                "바탕화면 및 시작메뉴에 바로가기 아이콘이 생성되었습니다."
             )
             self.launch_checkbox.setVisible(True)
+            self.sub_label.setVisible(True)
         else:
             self.message_label.setText(
                 f"설치 실패:\n{message}\n\n"
                 "다시 시도하거나 지원팀에 문의하세요."
             )
             self.launch_checkbox.setVisible(False)
+            self.sub_label.setVisible(False)
 
 
 class InstallationWizard(QMainWindow):
@@ -305,7 +410,8 @@ class InstallationWizard(QMainWindow):
     def closeEvent(self, event):
         """인스톨러 창 닫기 시 설치 완료 상태라면 프로그램 자동 실행 보장"""
         if not getattr(self, '_is_launched', False) and hasattr(self, 'pages') and self.pages.currentIndex() == 3:
-            self.launch_application_and_close()
+            if hasattr(self, 'completion_page') and self.completion_page.is_launch_checked():
+                self.launch_application_and_close()
         event.accept()
     
     def init_ui(self):
@@ -385,12 +491,13 @@ class InstallationWizard(QMainWindow):
         self.update_buttons()
 
     def launch_application_and_close(self):
-        """완료 버튼 클릭 시 완전 독립 백그라운드 런처를 통해 최신 프로그램을 100% 확실하게 실행하고 인스톨러 종료"""
+        """완료 버튼 클릭 시 사용자의 자동실행 설정에 따라 프로그램을 즉시 실행하고 인스톨러 종료"""
         if getattr(self, '_is_launched', False):
             return
         self._is_launched = True
         try:
-            if hasattr(self, 'completion_page') and self.completion_page.is_launch_checked():
+            should_launch = hasattr(self, 'completion_page') and self.completion_page.is_launch_checked()
+            if should_launch:
                 install_path = self.path_page.get_install_path()
                 bin_dir = install_path / "bin"
                 
@@ -431,48 +538,20 @@ class InstallationWizard(QMainWindow):
                             break
 
                 if target_file and target_file.exists():
-                    target_str = str(target_file)
-                    work_dir = str(bin_dir if bin_dir.exists() else install_path)
-                    logger.info(f"Auto-launching target via standalone launcher: {target_str}")
-                    
-                    if sys.platform.startswith('win'):
-                        # 환경변수 정화
-                        import ctypes
-                        for k in ['_MEIPASS', '_MEIPASS2', 'PYTHONPATH', 'PYTHONHOME', 'PYINSTALLER_STRICT_UNLOAD_MODE']:
-                            try:
-                                ctypes.windll.kernel32.SetEnvironmentVariableW(k, None)
-                                os.environ.pop(k, None)
-                            except Exception:
-                                pass
-                        
-                        # [핵심] WScript.Shell VBScript 백그라운드 독립 런처 가동
-                        # 인스톨러 프로세스가 완전히 종료된 후(0.5초 대기) Windows 쉘에서 부모 관계 없이 100% 안전 실행
-                        import tempfile
-                        vbs_content = (
-                            'Set WshShell = CreateObject("WScript.Shell")\r\n'
-                            f'WshShell.CurrentDirectory = "{work_dir}"\r\n'
-                            'WScript.Sleep 500\r\n'
-                            f'WshShell.Run """{target_str}""", 1, False\r\n'
-                        )
-                        temp_vbs = os.path.join(tempfile.gettempdir(), f"cosrqd_launch_{int(time.time())}.vbs")
-                        try:
-                            with open(temp_vbs, "w", encoding="ansi") as vf:
-                                vf.write(vbs_content)
-                            subprocess.Popen(["wscript.exe", temp_vbs], shell=False)
-                        except Exception as vbs_err:
-                            logger.warning(f"VBS launcher failed, fallback to explorer.exe: {vbs_err}")
-                            # Fallback: Windows explorer.exe 직접 호출
-                            subprocess.Popen(["explorer.exe", target_str], shell=False)
-                    else:
-                        subprocess.Popen([target_str], cwd=work_dir)
+                    work_dir = bin_dir if bin_dir.exists() else install_path
+                    logger.info(f"Auto-launching application: {target_file}")
+                    launch_target_application(target_file, work_dir)
+                else:
+                    logger.warning(f"Target executable not found in {bin_dir}")
         except Exception as e:
             logger.error(f"Failed to auto-launch application: {e}")
         finally:
-            import time
-            time.sleep(0.2)
+            time.sleep(0.3)
             self.close()
             from PyQt6.QtWidgets import QApplication
-            QApplication.quit()
+            app_inst = QApplication.instance()
+            if app_inst:
+                app_inst.quit()
             import os as _os
             _os._exit(0)
     
@@ -1050,11 +1129,17 @@ def run_launcher_gui(config_manager: ConfigManager, version: str):
         config_manager: ConfigManager instance
         version: Application version
     """
-    app = QApplication(sys.argv)
-    app.setApplicationName("CosRQD 런처")
+    app = QApplication.instance()
+    if not app:
+        app = QApplication(sys.argv)
+    app.setApplicationName("CosRQD 설치 마법사")
+    
+    # 실행 파일명이 Setup_ 등으로 시작하거나 인스톨러인 경우 항상 설치 마법사(InstallationWizard) 실행
+    exe_name = Path(sys.executable).name.lower()
+    is_setup_exe = "setup" in exe_name or "installer" in exe_name or not getattr(sys, 'frozen', False)
     
     # Check if already installed
-    if config_manager.exists():
+    if not is_setup_exe and config_manager.exists():
         window = LauncherMainWindow(config_manager)
     else:
         window = InstallationWizard(config_manager, version)

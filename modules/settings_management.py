@@ -15,6 +15,7 @@ from utils import center_window_on_mouse_display
 from utils.update_manager import UpdateManager, UpdateDialog
 from modules.translation import get_texts
 from modules import excel_handler
+from utils.company_profile import get_company_profile, save_company_profile
 
 class DBPathOptionsDialog(ctk.CTkToplevel):
     """DB 경로 설정 시 관리자에게 옵션을 제공하는 대화상자"""
@@ -255,9 +256,49 @@ class SettingsManagementFrame(ctk.CTkFrame):
         scrollable_frame.pack(fill="both", expand=True)
         scrollable_frame.grid_columnconfigure(0, weight=1)
 
+        # --- 🏢 자회사(자사) 정보 설정 (Company Profile) ---
+        comp_frame = ctk.CTkFrame(scrollable_frame, fg_color=("gray95", "gray17"), corner_radius=8, border_width=1, border_color=("gray80", "gray28"))
+        comp_frame.grid(row=0, column=0, padx=20, pady=(10, 15), sticky="ew")
+        comp_frame.grid_columnconfigure((1, 3), weight=1)
+
+        ctk.CTkLabel(comp_frame, text="🏢 자회사(자사) 기본 정보 설정 (모든 엑셀 및 문서 자동 반영)", font=ctk.CTkFont(size=14, weight="bold"), text_color=("#1F497D", "#38BDF8")).grid(row=0, column=0, columnspan=4, padx=12, pady=(10, 8), sticky="w")
+
+        prof = get_company_profile()
+        self.comp_entries = {}
+
+        comp_fields = [
+            ("회사명 (국문)", "company_name_ko", 1, 0), ("회사명 (영문)", "company_name_en", 1, 2),
+            ("대표자명", "representative", 2, 0), ("사업자등록번호", "biz_no", 2, 2),
+            ("본사/공장 주소 (국문)", "address_ko", 3, 0), ("주소 (영문)", "address_en", 3, 2),
+            ("대표 전화번호", "phone", 4, 0), ("긴급연락 전화번호", "emergency_phone", 4, 2),
+            ("팩스번호", "fax", 5, 0), ("이메일", "email", 5, 2),
+            ("연구소/부서명 (국문)", "department_ko", 6, 0), ("영문 부서명 (EN)", "department_en", 6, 2),
+            ("품질/작성 담당자 (국문)", "manager_name", 7, 0), ("영문 담당자명 (EN)", "manager_name_en", 7, 2),
+            ("표준서 양식/관리번호", "form_doc_no", 8, 0), ("개정 번호", "form_rev_no", 8, 2)
+        ]
+
+        for lbl, k, r, c in comp_fields:
+            ctk.CTkLabel(comp_frame, text=lbl, font=ctk.CTkFont(size=11, weight="bold")).grid(row=r, column=c, padx=10, pady=4, sticky="w")
+            ent = ctk.CTkEntry(comp_frame, height=28)
+            ent.grid(row=r, column=c+1, padx=8, pady=4, sticky="ew")
+            ent.insert(0, prof.get(k, ""))
+            self.comp_entries[k] = ent
+
+        def save_comp_profile_event():
+            p_data = {k: ent.get().strip() for k, ent in self.comp_entries.items()}
+            if save_company_profile(p_data):
+                messagebox.showinfo("저장 완료", "자회사 정보가 안전하게 저장되었습니다.\n앞으로 출력되는 모든 엑셀 문서(MSDS, 제품표준서, 성적서 등)에 자동으로 적용됩니다.", parent=self)
+
+        btn_save_comp = ctk.CTkButton(
+            comp_frame, text="💾 자회사 정보 저장", width=160, height=32,
+            fg_color="#2E7D32", hover_color="#1B5E20", font=ctk.CTkFont(weight="bold"),
+            command=save_comp_profile_event
+        )
+        btn_save_comp.grid(row=9, column=2, columnspan=2, padx=10, pady=(8, 12), sticky="e")
+
         # --- UI 설정 ---
         ui_frame = ctk.CTkFrame(scrollable_frame)
-        ui_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
+        ui_frame.grid(row=1, column=0, padx=20, pady=(0, 15), sticky="ew")
         ui_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(ui_frame, text="테마 설정").grid(row=0, column=0, padx=10, pady=10, sticky="w")
@@ -271,7 +312,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
         # --- 경로 설정 ---
         # --- 경로 설정 ---
         path_frame = ctk.CTkFrame(scrollable_frame)
-        path_frame.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="ew")
+        path_frame.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="ew")
         path_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(path_frame, text="공유 DB 경로", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
@@ -305,7 +346,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
 
         # --- 공유 데이터베이스 동기화 설정 ---
         sync_cfg_frame = ctk.CTkFrame(scrollable_frame)
-        sync_cfg_frame.grid(row=2, column=0, padx=20, pady=(0, 20), sticky="ew")
+        sync_cfg_frame.grid(row=3, column=0, padx=20, pady=(0, 20), sticky="ew")
         sync_cfg_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(sync_cfg_frame, text="🔄 공유 DB 실시간 동기화", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 6), sticky="w")
@@ -376,6 +417,9 @@ class SettingsManagementFrame(ctk.CTkFrame):
         )
         self.check_update_btn.pack(side="left")
 
+        # --- 엑셀 폼(템플릿) 내보내기 섹션 (등급별 맞춤 노출) ---
+        self.setup_excel_template_export_section(scrollable_frame)
+
         # --- DB 백업 / 복원 & 데이터 관리 섹션 ---
         self.setup_db_backup_restore_section(scrollable_frame)
 
@@ -385,10 +429,102 @@ class SettingsManagementFrame(ctk.CTkFrame):
 
         self.load_settings()
 
+    def setup_excel_template_export_section(self, parent_frame):
+        """사용자 권한(등급)별 엑셀 폼(템플릿) 다운로드 섹션을 설정합니다."""
+        export_frame = ctk.CTkFrame(parent_frame)
+        export_frame.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="ew")
+
+        # 역할 라벨 취득
+        role = getattr(self.current_user, 'role', 'RD')
+        is_admin = getattr(self.current_user, 'is_admin', False)
+        role_names = {
+            'MSAD': '마스터 관리자',
+            'RQD': '연구책임자',
+            'RQ': '선임연구원',
+            'RD': '연구원',
+            'QC': '품질관리'
+        }
+        role_display = role_names.get(role, role)
+        if is_admin and role != 'MSAD':
+            role_display = f"{role_display} (관리자)"
+
+        # 상단 헤더
+        header_box = ctk.CTkFrame(export_frame, fg_color="transparent")
+        header_box.pack(fill="x", padx=15, pady=(12, 4))
+        
+        ctk.CTkLabel(
+            header_box,
+            text="📊 엑셀 폼(템플릿) 다운로드",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(side="left")
+
+        role_badge = ctk.CTkLabel(
+            header_box,
+            text=f"접속 등급: {role_display}",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#0284C7",
+            fg_color=("gray90", "#1E293B"),
+            corner_radius=6,
+            padx=8,
+            pady=2
+        )
+        role_badge.pack(side="right")
+
+        ctk.CTkLabel(
+            export_frame,
+            text="현재 계정 등급에 맞춰 일괄 등록 및 연구 서식 작성을 위한 표준 엑셀 양식을 다운로드합니다.",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "gray70")
+        ).pack(anchor="w", padx=15, pady=(0, 10))
+
+        # 버튼 컨테이너 (그리드)
+        btn_container = ctk.CTkFrame(export_frame, fg_color="transparent")
+        btn_container.pack(fill="x", padx=15, pady=(0, 15))
+
+        # 등급별 허용 템플릿 리스트 구성
+        # 1) 처방 템플릿: RD, RQ, RQD, MSAD, 관리자
+        # 2) 원료 템플릿: QC, RD, RQ, RQD, MSAD, 관리자
+        # 3) 거래처 템플릿: QC, RD, RQ, RQD, MSAD, 관리자
+        # 4) 사용자 템플릿: RQD, MSAD, 관리자
+        templates = []
+        
+        # 처방 템플릿 (연구 권한)
+        if is_admin or role in ['RD', 'RQ', 'RQD', 'MSAD'] or (hasattr(self.current_user, 'has_research_access') and self.current_user.has_research_access()):
+            templates.append(("🧪 처방 템플릿", self.export_formulation_template, "#2563EB", "#1D4ED8"))
+
+        # 원료 템플릿 (성분/원료 권한)
+        if is_admin or role in ['QC', 'RD', 'RQ', 'RQD', 'MSAD'] or (hasattr(self.current_user, 'can_view_material_data') and self.current_user.can_view_material_data()):
+            templates.append(("🌿 원료 템플릿", self.export_material_template, "#059669", "#047857"))
+
+        # 거래처 템플릿 (거래처 권한)
+        if is_admin or role in ['QC', 'RD', 'RQ', 'RQD', 'MSAD'] or (hasattr(self.current_user, 'can_view_client_data') and self.current_user.can_view_client_data()):
+            templates.append(("🏢 거래처 템플릿", self.export_client_template, "#4B5563", "#374151"))
+
+        # 사용자 템플릿 (관리자/마스터급)
+        if is_admin or role in ['RQD', 'MSAD'] or (hasattr(self.current_user, 'is_master_admin') and self.current_user.is_master_admin()):
+            templates.append(("👥 사용자 템플릿", self.export_user_template, "#7C3AED", "#6D28D9"))
+
+        # 동적 그리드 배치
+        col_count = len(templates)
+        for c in range(col_count):
+            btn_container.grid_columnconfigure(c, weight=1)
+
+        for col_idx, (t_text, t_cmd, fg_c, hover_c) in enumerate(templates):
+            btn = ctk.CTkButton(
+                btn_container,
+                text=t_text,
+                command=t_cmd,
+                fg_color=fg_c,
+                hover_color=hover_c,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                height=34
+            )
+            btn.grid(row=0, column=col_idx, padx=4, sticky="ew")
+
     def setup_db_backup_restore_section(self, parent_frame):
         """데이터 백업, 전체 불러오기(복원), 검증 섹션을 설정합니다."""
         backup_section = ctk.CTkFrame(parent_frame)
-        backup_section.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="ew")
+        backup_section.grid(row=5, column=0, padx=20, pady=(0, 20), sticky="ew")
         backup_section.grid_columnconfigure((0, 1, 2), weight=1)
         
         header_box = ctk.CTkFrame(backup_section, fg_color="transparent")
@@ -451,86 +587,17 @@ class SettingsManagementFrame(ctk.CTkFrame):
         validate_button.grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
     def setup_admin_only_features(self, parent_frame):
-        # --- 엑셀 폼 내보내기 ---
-        export_frame = ctk.CTkFrame(parent_frame)
-        export_frame.grid(row=5, column=0, padx=20, pady=(20, 10), sticky="ew")
-        export_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
-        ctk.CTkLabel(export_frame, text="엑셀 폼 내보내기", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
-        ctk.CTkButton(export_frame, text="원료 템플릿", command=self.export_material_template).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
-        ctk.CTkButton(export_frame, text="거래처 템플릿", command=self.export_client_template).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
-        ctk.CTkButton(export_frame, text="사용자 템플릿", command=self.export_user_template).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
-        ctk.CTkButton(export_frame, text="처방 템플릿", command=self.export_formulation_template).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
-
-        # --- 마스터 보안 복구 센터 (오직 최고 마스터/대표 전용 - 일반 관리자 및 직원은 완전 은닉) ---
-        is_master_owner = (getattr(self.current_user, 'role', '') == 'MSAD') or (getattr(self.current_user, 'username', '').lower() in ['admin', 'master', 'ceo'])
-        
-        if is_master_owner:
-            recovery_frame = ctk.CTkFrame(parent_frame, fg_color="#1E293B")
-            recovery_frame.grid(row=6, column=0, padx=20, pady=(20, 10), sticky="ew")
-            recovery_frame.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(recovery_frame, text="🛡️ 마스터 보안 데이터 복구 센터 (대표 전용)", font=ctk.CTkFont(size=14, weight="bold"), text_color="#38BDF8").grid(row=0, column=0, pady=(10, 2))
-            ctk.CTkLabel(recovery_frame, text="각 PC의 AppData 심층 은닉 볼트에 암호화 보관된 삭제 데이터(처방/원료/거래처/사용자/DB)를 대표 마스터키로 완벽 복구합니다.", font=ctk.CTkFont(size=11), text_color="#94A3B8").grid(row=1, column=0, pady=(0, 8))
-            
-            master_recovery_btn = ctk.CTkButton(
-                recovery_frame,
-                text="🔑 대표 마스터 인증 및 데이터 복구 센터 열기",
-                command=self.open_master_recovery_vault,
-                fg_color="#0284C7",
-                hover_color="#0369A1",
-                height=36,
-                font=ctk.CTkFont(weight="bold")
-            )
-            master_recovery_btn.grid(row=2, column=0, padx=20, pady=(0, 12), sticky="ew")
-
-        # --- 데이터 리셋 ---
+        # --- 데이터 리셋 (관리자 전용) ---
         reset_frame = ctk.CTkFrame(parent_frame)
-        reset_frame.grid(row=7, column=0, padx=20, pady=(40, 20), sticky="ew")
+        reset_frame.grid(row=6, column=0, padx=20, pady=(20, 20), sticky="ew")
         reset_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
-        ctk.CTkLabel(reset_frame, text="데이터 초기화", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
+        ctk.CTkLabel(reset_frame, text="데이터 초기화 (관리자 전용)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
         reset_button_style = {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}
         ctk.CTkButton(reset_frame, text="원료 데이터", command=lambda: self.confirm_reset("materials"), **reset_button_style).grid(row=1, column=0, padx=5, pady=10, sticky="ew")
         ctk.CTkButton(reset_frame, text="거래처 데이터", command=lambda: self.confirm_reset("clients"), **reset_button_style).grid(row=1, column=1, padx=5, pady=10, sticky="ew")
         ctk.CTkButton(reset_frame, text="사용자 데이터", command=lambda: self.confirm_reset("users"), **reset_button_style).grid(row=1, column=2, padx=5, pady=10, sticky="ew")
         all_reset_style = {"fg_color": "#B71C1C", "hover_color": "#7f0000"}
         ctk.CTkButton(reset_frame, text="전체 데이터", command=lambda: self.confirm_reset("all"), **all_reset_style).grid(row=1, column=3, padx=5, pady=10, sticky="ew")
-
-    def open_master_recovery_vault(self):
-        """마스터키 인증 후 복구 센터 팝업 대화상자를 엽니다. (대표 권한 엄격 검증)"""
-        # 1차 권한 검증: 오직 최고 마스터(MSAD / admin / master)만 실행 가능
-        is_master_owner = (getattr(self.current_user, 'role', '') == 'MSAD') or (getattr(self.current_user, 'username', '').lower() in ['admin', 'master', 'ceo'])
-        if not is_master_owner:
-            messagebox.showerror("접근 거부", "이 기능은 최고 대표 관리자(MSAD) 전용 보안 기능입니다.\n접근 권한이 없습니다.", parent=self)
-            return
-
-        # 2차 마스터키 입력 다이얼로그
-        key_dialog = ctk.CTkInputDialog(text="대표 마스터 보안 복구키 (Master Secret Key)를 입력하세요:\n(대표 본인 로그인 비밀번호 또는 마스터키)", title="대표 마스터 보안 인증")
-        entered_key = key_dialog.get_input()
-        
-        if not entered_key:
-            return
-
-        # 마스터키 검증: 대표 본인의 로그인 비밀번호 또는 마스터키
-        is_valid = False
-        if entered_key.strip() in ["master777!", "luxforma2026!", "admin"]:
-            is_valid = True
-        elif hasattr(self.current_user, 'password'):
-            import bcrypt
-            try:
-                if bcrypt.checkpw(entered_key.encode('utf-8'), self.current_user.password.encode('utf-8')):
-                    is_valid = True
-            except Exception:
-                pass
-
-        if not is_valid:
-            messagebox.showerror("인증 실패", "대표 마스터 보안 복구키가 올바르지 않습니다.\n접근이 거부되었습니다.", parent=self)
-            return
-
-        # 마스터 복구 대화상자 열기
-        try:
-            from master_recovery_suite import MasterRecoveryDialog
-            MasterRecoveryDialog(self, current_user=self.current_user, app=self.app)
-        except Exception as e:
-            messagebox.showerror("오류", f"복구 센터를 여는 중 오류 발생: {e}", parent=self)
 
     def load_settings(self):
         config = configparser.ConfigParser()
