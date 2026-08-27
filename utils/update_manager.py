@@ -189,7 +189,7 @@ class UpdateManager:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
 
         # 기본 안전 폴백
-        return "v65.0.49"
+        return "v65.0.50"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:
@@ -876,12 +876,11 @@ set PYTHONHOME=
 set PYINSTALLER_STRICT_UNLOAD_MODE=
 set PYINSTALLER_SUPPRESS_TEMP_ERRORS=
 
-:: 4. 최신 버전 프로그램 클린 실행 (Windows Explorer 쉘 독립 실행)
-cd /d "%APP_DIR%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%EXE_TARGET%' -WorkingDirectory '%APP_DIR%'" > nul 2>&1
-if errorlevel 1 (
-    start "" "%EXE_TARGET%"
-)
+:: 4. 최신 버전 프로그램 클린 실행 (Windows Task Scheduler 완전 격리 실행)
+schtasks /create /tn "CosRQD_Update_Launch" /tr "\"%EXE_TARGET%\"" /sc once /st 23:59 /f /it > nul 2>&1
+schtasks /run /tn "CosRQD_Update_Launch" > nul 2>&1
+ping 127.0.0.1 -n 2 > nul 2>&1
+schtasks /delete /tn "CosRQD_Update_Launch" /f > nul 2>&1
 
 :: 5. 임시 파일 정리 및 자폭
 ping 127.0.0.1 -n 3 > nul 2>&1

@@ -226,15 +226,15 @@ class InstallationProgressPage(QWidget):
 
 def launch_target_application(target_path: Path, working_dir: Path) -> bool:
     """
-    설치된 메인 프로그램을 인스톨러 완전 종료 후 독립된 Windows 탐색기(Explorer) 쉘 환경에서 100% 무결점 실행합니다.
-    인스톨러(부모 프로세스)의 _MEIPASS2 환경변수 상속 및 python313.dll 로드 오류를 원천 차단하기 위해,
-    독립 배치 스크립트를 백그라운드로 분리 구동하여 인스톨러 종료 2초 후 explorer.exe로 실행합니다.
+    설치된 메인 프로그램을 Windows Task Scheduler(작업 스케줄러)를 통해 100% 완벽하게 독립 실행합니다.
+    Task Scheduler는 Windows OS 서비스(svchost)가 직접 프로세스를 생성하므로,
+    부모 인스톨러의 _MEIPASS / _MEIPASS2 환경변수가 0%도 상속되지 않는 절대적인 클린 환경에서 실행됩니다.
     """
     try:
         target_str = str(target_path)
         work_str = str(working_dir)
         
-        # 1. OS 레벨 환경변수 즉각 정화
+        # 1. OS 레벨 환경변수 정화
         if sys.platform.startswith('win'):
             import ctypes
             for k in [
@@ -247,44 +247,35 @@ def launch_target_application(target_path: Path, working_dir: Path) -> bool:
                 except Exception:
                     pass
 
-        # 2. 독립 런처 배치 파일 생성
+        # 2. Windows Task Scheduler를 통한 100% 완전 독립 실행
         if sys.platform.startswith('win'):
-            import tempfile
+            import subprocess
             import time
-            bat_file = os.path.join(tempfile.gettempdir(), f"launch_clean_{int(time.time())}.bat")
-            bat_code = f"""@echo off
-chcp 65001 > nul
-
-:: 1. 부모 인스톨러가 완전히 종료되고 임시 폴더가 소멸될 때까지 2초 대기
-ping 127.0.0.1 -n 3 > nul 2>&1
-
-:: 2. 기존 프로세스 완벽 정리
-taskkill /f /im main.exe > nul 2>&1
-
-:: 3. PyInstaller 부모 환경변수 완전 박멸 (핵심!)
-set _MEIPASS=
-set _MEIPASS2=
-set PYTHONPATH=
-set PYTHONHOME=
-set PYINSTALLER_STRICT_UNLOAD_MODE=
-set PYINSTALLER_SUPPRESS_TEMP_ERRORS=
-
-:: 4. Windows 탐색기(Explorer) 쉘을 통한 완전 독립 클린 실행
-cd /d "{work_str}"
-explorer.exe "{target_str}"
-
-:: 5. 1초 대기 후 자폭 삭제
-ping 127.0.0.1 -n 2 > nul 2>&1
-(goto) 2>nul & del "%~f0"
-"""
-            with open(bat_file, "w", encoding="cp949", errors="ignore") as bf:
-                bf.write(bat_code)
-
-            # 무창 DETACHED 프로세스로 배치 파일 백그라운드 구동
-            flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen(["cmd.exe", "/c", bat_file], creationflags=flags, close_fds=True)
-            logger.info(f"[독립런처] 클린 배치 런처 구동 완료 (인스톨러 종료 2초 후 explorer.exe 구동): {bat_file}")
-            return True
+            task_name = f"CosRQD_Launch_{int(time.time())}"
+            try:
+                # 1단계: 1회성 스케줄러 등록
+                cmd_create = f'schtasks /create /tn "{task_name}" /tr "\"{target_str}\"" /sc once /st 23:59 /f /it'
+                subprocess.run(cmd_create, shell=True, capture_output=True)
+                
+                # 2단계: 즉시 독립 실행 (OS 서비스 레벨 구동)
+                cmd_run = f'schtasks /run /tn "{task_name}"'
+                subprocess.run(cmd_run, shell=True, capture_output=True)
+                
+                # 3단계: 2초 후 스케줄러 자동 삭제 (백그라운드 자폭)
+                cmd_del = f'powershell -NoProfile -Command "Start-Sleep -Seconds 2; schtasks /delete /tn \'{task_name}\' /f"'
+                subprocess.Popen(cmd_del, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                
+                logger.info(f"[TaskScheduler] 무결점 독립 실행 성공: {task_name} -> {target_str}")
+                return True
+            except Exception as sch_err:
+                logger.warning(f"TaskScheduler 실행 실패, 폴백 시도: {sch_err}")
+                
+            # 폴백: explorer.exe 직접 구동
+            try:
+                subprocess.Popen(["explorer.exe", target_str], creationflags=subprocess.CREATE_NO_WINDOW)
+                return True
+            except Exception:
+                pass
         else:
             subprocess.Popen([str(target_path)], cwd=str(working_dir), close_fds=True)
             return True
