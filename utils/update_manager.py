@@ -189,7 +189,7 @@ class UpdateManager:
             print(f"[UpdateManager] 로컬 버전 읽기 오류: {e}")
 
         # 기본 안전 폴백
-        return "v65.0.47"
+        return "v65.0.48"
 
     @classmethod
     def parse_version_tuple(cls, ver_str: str) -> tuple:
@@ -856,25 +856,32 @@ set EXE_TARGET={exe_target}
 set DL_FILE={downloaded_file}
 set EXTRACT_DIR={temp_extract_dir}
 
-:: 1. 메인 프로세스 종료 대기 (안전 2초 대기)
+:: 1. 메인 프로세스 완전 종료 대기 (안전 3초 대기 및 프로세스 확인사살)
 ping 127.0.0.1 -n 3 > nul 2>&1
 taskkill /f /pid %TARGET_PID% > nul 2>&1
-ping 127.0.0.1 -n 2 > nul 2>&1
+taskkill /f /im CosRQD.exe /t > nul 2>&1
+taskkill /f /im main.exe /t > nul 2>&1
+ping 127.0.0.1 -n 3 > nul 2>&1
 
 :: 2. 최신 파일 교체
 if exist "%SRC_DIR%" (
     xcopy /y /e /q /h /r "%SRC_DIR%\\*" "%APP_DIR%\\" > nul 2>&1
 )
 
-:: 3. 환경변수 정화
+:: 3. 환경변수 완전 정화
 set _MEIPASS=
 set _MEIPASS2=
 set PYTHONPATH=
 set PYTHONHOME=
 set PYINSTALLER_STRICT_UNLOAD_MODE=
+set PYINSTALLER_SUPPRESS_TEMP_ERRORS=
 
-:: 4. 최신 버전 프로그램 실행
-start "" "%EXE_TARGET%"
+:: 4. 최신 버전 프로그램 클린 실행 (Windows Explorer 쉘 독립 실행)
+cd /d "%APP_DIR%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%EXE_TARGET%' -WorkingDirectory '%APP_DIR%'" > nul 2>&1
+if errorlevel 1 (
+    start "" "%EXE_TARGET%"
+)
 
 :: 5. 임시 파일 정리 및 자폭
 ping 127.0.0.1 -n 3 > nul 2>&1

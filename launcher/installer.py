@@ -325,6 +325,18 @@ class Installer:
             InstallationError: If installation fails
         """
         logger.info(f"Starting installation to: {install_path}")
+
+        # 0. 이전 실행 중인 프로그램 프로세스 완전 강제 종료 및 파일 락 완벽 해제
+        if sys.platform.startswith('win'):
+            try:
+                import subprocess
+                for proc in ["CosRQD.exe", "CosRnD.exe", "main.exe", "화장품연구관리.exe"]:
+                    subprocess.run(["taskkill", "/F", "/IM", proc, "/T"], capture_output=True)
+                import time
+                time.sleep(0.8)
+                logger.info("이전 실행 프로세스 정리 완료")
+            except Exception as kill_err:
+                logger.warning(f"이전 프로세스 정리 시도 중 예외: {kill_err}")
         
         # Validate path
         self.validate_install_path(install_path)

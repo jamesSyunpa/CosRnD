@@ -226,19 +226,15 @@ class InstallationProgressPage(QWidget):
 
 def launch_target_application(target_path: Path, working_dir: Path) -> bool:
     """
-    설치된 메인 프로그램을 Windows 쉘과 완전히 독립된 프로세스로 100% 확실하게 실행합니다.
-    5중 안전망:
-      1차: os.startfile (Windows Shell을 통한 표준 실행 - 가장 신뢰성 높음)
-      2차: ctypes ShellExecuteW API 직접 호출
-      3차: cmd.exe start (DETACHED_PROCESS 플래그)
-      4차: PowerShell Start-Process
-      5차: subprocess.Popen
+    설치된 메인 프로그램을 인스톨러 완전 종료 후 독립된 Windows 탐색기(Explorer) 쉘 환경에서 100% 무결점 실행합니다.
+    인스톨러(부모 프로세스)의 _MEIPASS 환경변수 상속 및 python313.dll 로드 오류를 원천 차단하기 위해,
+    백그라운드 독립 VBScript 런처를 통해 인스톨러 종료 1.5초 후 Shell.Application으로 실행합니다.
     """
     try:
-        target_str = str(target_path)
-        work_str = str(working_dir)
+        target_str = str(target_path).replace("'", "''")
+        work_str = str(working_dir).replace("'", "''")
         
-        # 1. PyInstaller 및 파이썬 관련 환경변수 OS 레벨 완전 정화
+        # 1. OS 레벨 환경변수 정화
         if sys.platform.startswith('win'):
             import ctypes
             for k in [
@@ -251,66 +247,48 @@ def launch_target_application(target_path: Path, working_dir: Path) -> bool:
                 except Exception:
                     pass
 
-        # 1차 시도: os.startfile (가장 확실하고 표준적인 Windows Shell 실행)
+        # 2. 독립 런처 VBScript 생성 (인스톨러 완전 종료 대기 -> 탐색기 쉘 실행 -> 자폭)
         if sys.platform.startswith('win'):
-            try:
-                os.startfile(target_str)
-                logger.info(f"[자동실행 1차] os.startfile 성공: {target_str}")
-                return True
-            except Exception as e1:
-                logger.warning(f"[자동실행 1차] os.startfile 실패: {e1}")
+            import tempfile
+            import time
+            vbs_file = os.path.join(tempfile.gettempdir(), f"launch_cosrqd_{int(time.time())}.vbs")
+            vbs_code = f'''
+WScript.Sleep 1500
 
-        # 2차 시도: Windows ShellExecuteW API
-        if sys.platform.startswith('win'):
-            try:
-                import ctypes
-                res = ctypes.windll.shell32.ShellExecuteW(None, "open", target_str, None, work_str, 1)
-                if int(res) > 32:
-                    logger.info(f"[자동실행 2차] ShellExecuteW 성공: {target_str} (코드: {res})")
-                    return True
-                else:
-                    logger.warning(f"[자동실행 2차] ShellExecuteW 반환 코드 오류: {res}")
-            except Exception as e2:
-                logger.warning(f"[자동실행 2차] ShellExecuteW 실패: {e2}")
+' 1. 기존 실행 중인 이전 프로세스 최종 확인 및 정리
+Set WshShell = CreateObject("WScript.Shell")
+On Error Resume Next
+WshShell.Run "taskkill /F /IM CosRQD.exe /IM main.exe /T", 0, True
+WScript.Sleep 500
 
-        # 3차 시도: cmd.exe start (독립 프로세스 그룹)
-        if sys.platform.startswith('win'):
-            try:
-                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                subprocess.Popen(
-                    ["cmd.exe", "/c", "start", "", target_str],
-                    cwd=work_str,
-                    creationflags=flags,
-                    close_fds=True
-                )
-                logger.info(f"[자동실행 3차] cmd start 성공: {target_str}")
-                return True
-            except Exception as e3:
-                logger.warning(f"[자동실행 3차] cmd start 실패: {e3}")
+' 2. Windows Explorer 쉘 객체를 통한 순수 OS 환경 실행 (부모 _MEIPASS 완벽 차단)
+Set objShell = CreateObject("Shell.Application")
+objShell.ShellExecute "{target_str}", "", "{work_str}", "open", 1
 
-        # 4차 시도: PowerShell Start-Process
-        if sys.platform.startswith('win'):
-            try:
-                escaped_target = target_str.replace("'", "''")
-                escaped_work = work_str.replace("'", "''")
-                ps_cmd = f"Start-Process -FilePath '{escaped_target}' -WorkingDirectory '{escaped_work}'"
-                subprocess.Popen(
-                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    close_fds=True
-                )
-                logger.info(f"[자동실행 4차] PowerShell Start-Process 성공: {target_str}")
-                return True
-            except Exception as e4:
-                logger.warning(f"[자동실행 4차] PowerShell Start-Process 실패: {e4}")
+' 3. 런처 스크립트 자폭
+On Error Resume Next
+Set fso = CreateObject("Scripting.FileSystemObject")
+fso.DeleteFile WScript.ScriptFullName
+'''
+            with open(vbs_file, "w", encoding="utf-8") as vf:
+                vf.write(vbs_code.strip())
 
-        # 5차 시도: 일반 subprocess.Popen
-        subprocess.Popen([target_str], cwd=work_str, close_fds=True)
-        logger.info(f"[자동실행 5차] subprocess.Popen 성공: {target_str}")
-        return True
+            # VBScript 무창 백그라운드 독립 실행
+            flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            subprocess.Popen(["wscript.exe", vbs_file], creationflags=flags, close_fds=True)
+            logger.info(f"[독립런처] 무창 런처 실행 완료 (인스톨러 종료 1.5초 후 탐색기 쉘 구동): {vbs_file}")
+            return True
+        else:
+            subprocess.Popen([str(target_path)], cwd=str(working_dir), close_fds=True)
+            return True
     except Exception as e:
-        logger.error(f"모든 자동실행 시도 실패: {e}")
-        return False
+        logger.error(f"독립 실행 런처 구동 실패: {e}")
+        # 폴백 시도
+        try:
+            os.startfile(str(target_path))
+            return True
+        except Exception:
+            return False
 
 
 class CompletionPage(QWidget):
