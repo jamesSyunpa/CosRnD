@@ -200,9 +200,11 @@ class CustomDropdown(ctk.CTkFrame):
                 entry_widget.bind("<KeyRelease>", self._on_key_release, add="+")
                 entry_widget.bind("<Return>", self._on_enter_press, add="+")
 
-            # CTkComboBox의 _open_dropdown_menu 메서드 후킹하여 휠 스크롤 가속 주입
+            # CTkComboBox의 _open_dropdown_menu 메서드 후킹하여 원본 전체 목록 복원 및 휠 스크롤 가속 주입
             orig_open = self.combobox._open_dropdown_menu
             def _wrapped_open():
+                if self.raw_values:
+                    self.combobox.configure(values=self.raw_values)
                 orig_open()
                 self._apply_wheel_acceleration()
             self.combobox._open_dropdown_menu = _wrapped_open
@@ -248,6 +250,9 @@ class CustomDropdown(ctk.CTkFrame):
 
     def _on_focus_in(self, event=None):
         try:
+            if self.raw_values:
+                self.filtered_values = list(self.raw_values)
+                self.combobox.configure(values=self.raw_values)
             entry_widget = getattr(self.combobox, '_entry', None)
             if entry_widget:
                 entry_widget.after(10, lambda: entry_widget.select_range(0, 'end'))
@@ -256,6 +261,9 @@ class CustomDropdown(ctk.CTkFrame):
 
     def _on_click(self, event=None):
         try:
+            if self.raw_values:
+                self.filtered_values = list(self.raw_values)
+                self.combobox.configure(values=self.raw_values)
             entry_widget = getattr(self.combobox, '_entry', None)
             if entry_widget:
                 entry_widget.after(20, lambda: entry_widget.select_range(0, 'end'))
@@ -918,16 +926,17 @@ class ProductionPreviewPane(ctk.CTkFrame):
 
 
 class ClientQuickSearchPopup(ctk.CTkToplevel):
-    """[v65 초고속 거래처 검색 & 선택 팝업] 수천 개 거래처 실시간 검색, 유형별 필터, 휠 스크롤 4배 가속 및 더블클릭 즉시 선택"""
-    def __init__(self, master, on_select_callback, initial_type=None):
+    """[v65 초고속 거래처 검색 & 선택 팝업] 수천 개 거래처 실시간 검색, 모든 유형별 필터 가로 스크롤, 휠 스크롤 4배 가속 및 선택된 거래처 자동 활성화"""
+    def __init__(self, master, on_select_callback, initial_type=None, initial_client=None):
         super().__init__(master)
         self.withdraw()
         self.on_select_callback = on_select_callback
         self.initial_type = initial_type
+        self.initial_client = initial_client
 
         self.title("거래처 빠른 검색")
-        self.geometry("660x520")
-        self.minsize(580, 420)
+        self.geometry("780x560")
+        self.minsize(680, 440)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -950,26 +959,27 @@ class ClientQuickSearchPopup(ctk.CTkToplevel):
         ctk.CTkButton(search_frame, text="검색", width=60, command=self._apply_filter).grid(row=0, column=2, padx=3)
         ctk.CTkButton(search_frame, text="초기화", width=60, fg_color="gray50", hover_color="gray40", command=self._reset_search).grid(row=0, column=3, padx=3)
 
-        # --- 2. 유형 필터 툴바 ---
+        # --- 2. 유형 필터 툴바 (모든 거래처 카테고리 가로 스크롤 지원) ---
         filter_toolbar = ctk.CTkFrame(self, fg_color=("gray92", "#242526"), corner_radius=6)
         filter_toolbar.grid(row=1, column=0, padx=12, pady=4, sticky="ew")
-        filter_toolbar.grid_columnconfigure(1, weight=1)
+
+        filter_scroll = ctk.CTkScrollableFrame(filter_toolbar, orientation="horizontal", height=34, fg_color="transparent")
+        filter_scroll.pack(side="left", fill="x", expand=True, padx=4, pady=2)
 
         unique_types = ["전체"] + db_manager.get_unique_client_types()
-        display_types = unique_types if len(unique_types) <= 5 else unique_types[:5]
         self.type_filter_seg = ctk.CTkSegmentedButton(
-            filter_toolbar,
-            values=display_types,
+            filter_scroll,
+            values=unique_types,
             command=self._on_type_changed,
             height=26,
             font=ctk.CTkFont(size=11)
         )
-        default_type = initial_type if initial_type in display_types else "전체"
+        default_type = initial_type if (initial_type and initial_type in unique_types) else "전체"
         self.type_filter_seg.set(default_type)
-        self.type_filter_seg.grid(row=0, column=0, padx=8, pady=6, sticky="w")
+        self.type_filter_seg.pack(side="left", padx=2, pady=2)
 
         self.count_label = ctk.CTkLabel(filter_toolbar, text="총 0건", font=ctk.CTkFont(size=11), text_color=("gray40", "gray70"))
-        self.count_label.grid(row=0, column=2, padx=12, pady=6, sticky="e")
+        self.count_label.pack(side="right", padx=12, pady=2)
 
         # --- 3. 거래처 목록 Treeview ---
         tree_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -979,11 +989,11 @@ class ClientQuickSearchPopup(ctk.CTkToplevel):
 
         tree_cols = ("type", "name", "manager", "phone", "address")
         self.client_tree = ttk.Treeview(tree_frame, columns=tree_cols, show="headings", selectmode="browse")
-        self.client_tree.heading("type", text="구분"); self.client_tree.column("type", width=70, anchor="center")
-        self.client_tree.heading("name", text="거래처명"); self.client_tree.column("name", width=160)
+        self.client_tree.heading("type", text="구분"); self.client_tree.column("type", width=80, anchor="center")
+        self.client_tree.heading("name", text="거래처명"); self.client_tree.column("name", width=170)
         self.client_tree.heading("manager", text="담당자"); self.client_tree.column("manager", width=90)
         self.client_tree.heading("phone", text="연락처"); self.client_tree.column("phone", width=110)
-        self.client_tree.heading("address", text="주소"); self.client_tree.column("address", width=180, stretch=True)
+        self.client_tree.heading("address", text="주소"); self.client_tree.column("address", width=220, stretch=True)
         self.client_tree.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.client_tree.yview)
@@ -1043,6 +1053,13 @@ class ClientQuickSearchPopup(ctk.CTkToplevel):
                 }
                 for c in clients
             ]
+
+            # 만약 initial_client가 있고 initial_type이 없었다면 해당 업체의 유형으로 탭 자동 동기화
+            if self.initial_client and (not self.initial_type or self.initial_type == "전체"):
+                found_c = next((c for c in self.raw_clients if c["name"].strip().lower() == self.initial_client.strip().lower()), None)
+                if found_c and found_c.get("type"):
+                    self.type_filter_seg.set(found_c["type"])
+
             self._apply_filter()
         finally:
             session.close()
@@ -1050,6 +1067,7 @@ class ClientQuickSearchPopup(ctk.CTkToplevel):
     def _on_search_key_release(self, event=None):
         if event and event.keysym in ("Return", "Escape", "Up", "Down"):
             return
+        self.initial_client = None  # 직접 타이핑 검색 시에는 자동 지정 해제
         if self.search_timer:
             self.after_cancel(self.search_timer)
         self.search_timer = self.after(150, self._apply_filter)
@@ -1058,6 +1076,7 @@ class ClientQuickSearchPopup(ctk.CTkToplevel):
         self._apply_filter()
 
     def _reset_search(self):
+        self.initial_client = None
         self.search_entry.delete(0, "end")
         self.type_filter_seg.set("전체")
         self._apply_filter()
@@ -1101,10 +1120,23 @@ class ClientQuickSearchPopup(ctk.CTkToplevel):
 
         self.count_label.configure(text=f"검색 결과: 총 {len(matched)}건")
 
-        if matched:
+        # 선택된 거래처(initial_client)가 있으면 해당 항목으로 즉시 활성화 및 화면 스크롤
+        target_iid = None
+        if self.initial_client:
+            for c in matched:
+                if c["name"].strip().lower() == self.initial_client.strip().lower():
+                    target_iid = str(c["id"])
+                    break
+
+        if target_iid and self.client_tree.exists(target_iid):
+            self.client_tree.selection_set(target_iid)
+            self.client_tree.focus(target_iid)
+            self.client_tree.see(target_iid)
+        elif matched:
             first_iid = str(matched[0]["id"])
             self.client_tree.selection_set(first_iid)
             self.client_tree.focus(first_iid)
+            self.client_tree.see(first_iid)
 
     def _on_confirm_select(self):
         selected = self.client_tree.selection()

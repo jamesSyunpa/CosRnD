@@ -215,10 +215,6 @@ class DocumentManagementFrame(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # 도움말 버튼 (place로 겹치게 배치)
-        self.help_button = ctk.CTkButton(self, text=self.texts['help'], width=80, command=self.show_help)
-        self.help_button.place(relx=0.98, y=10, anchor="ne")
-
         # 패키지 전용 모드일 경우 별도 레이아웃으로 처리
         if self.mode == "package_only":
             self.tab_view = None
@@ -2852,6 +2848,8 @@ class DocumentManagementFrame(ctk.CTkFrame):
         if not self.quotation_tree.get_children():
             self.quotation_total_ratio_label.configure(text="0.0000 %")
             self.total_raw_cost_label.configure(text="0 원")
+            if hasattr(self, 'total_combined_cost_label'):
+                self.total_combined_cost_label.configure(text="0 원")
             self.price_with_vat_label.configure(text="0 원")
             self.price_with_profit_label.configure(text="0 원")
             if hasattr(self, 'quotation_cost_per_kg_label'):

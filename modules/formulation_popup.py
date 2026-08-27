@@ -1262,7 +1262,9 @@ class FormulationEditPopup(ctk.CTkToplevel):
         """대량 거래처 고속 검색 및 즉각 선택 팝업 열기"""
         cur_type = self.formulation_client_type_combo.get()
         init_t = cur_type if cur_type != self.texts.get('select_type', '- 선택 -') else None
-        ClientQuickSearchPopup(self, self._on_quick_client_selected, initial_type=init_t)
+        cur_client = self.formulation_client_name_combo.get()
+        init_c = cur_client if cur_client not in [self.texts.get('select_client', '- 거래처 선택 -'), self.texts.get('no_clients_found', '등록된 거래처 없음')] else None
+        ClientQuickSearchPopup(self, self._on_quick_client_selected, initial_type=init_t, initial_client=init_c)
 
     def _on_quick_client_selected(self, client_name, client_type):
         """빠른 검색 팝업에서 거래처 선택 시 콤보박스 및 담당자 정보 즉시 자동 동기화"""

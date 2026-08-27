@@ -90,9 +90,6 @@ class SettingsManagementFrame(ctk.CTkFrame):
         self.tab_view = ctk.CTkTabview(top_frame, anchor="center", command=self.on_tab_change)
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        self.help_button = ctk.CTkButton(top_frame, text="도움말", width=80, command=self.show_help)
-        self.help_button.place(relx=0.98, y=10, anchor="ne")
-
         # Maintain a mapping between internal tab keys (stable identifiers)
         # and the displayed tab labels (localized). This allows other modules
         # to request a tab using a stable key like 'settings_sub'.
@@ -381,7 +378,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
 
         # --- 소프트웨어 업데이트 설정 ---
         update_cfg_frame = ctk.CTkFrame(scrollable_frame)
-        update_cfg_frame.grid(row=3, column=0, padx=20, pady=(0, 20), sticky="ew")
+        update_cfg_frame.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="ew")
         update_cfg_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(update_cfg_frame, text="업데이트 방식", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
@@ -432,7 +429,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
     def setup_excel_template_export_section(self, parent_frame):
         """사용자 권한(등급)별 엑셀 폼(템플릿) 다운로드 섹션을 설정합니다."""
         export_frame = ctk.CTkFrame(parent_frame)
-        export_frame.grid(row=4, column=0, padx=20, pady=(0, 20), sticky="ew")
+        export_frame.grid(row=5, column=0, padx=20, pady=(0, 20), sticky="ew")
 
         # 역할 라벨 취득
         role = getattr(self.current_user, 'role', 'RD')
@@ -524,7 +521,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
     def setup_db_backup_restore_section(self, parent_frame):
         """데이터 백업, 전체 불러오기(복원), 검증 섹션을 설정합니다."""
         backup_section = ctk.CTkFrame(parent_frame)
-        backup_section.grid(row=5, column=0, padx=20, pady=(0, 20), sticky="ew")
+        backup_section.grid(row=6, column=0, padx=20, pady=(0, 20), sticky="ew")
         backup_section.grid_columnconfigure((0, 1, 2), weight=1)
         
         header_box = ctk.CTkFrame(backup_section, fg_color="transparent")
@@ -589,7 +586,7 @@ class SettingsManagementFrame(ctk.CTkFrame):
     def setup_admin_only_features(self, parent_frame):
         # --- 데이터 리셋 (관리자 전용) ---
         reset_frame = ctk.CTkFrame(parent_frame)
-        reset_frame.grid(row=6, column=0, padx=20, pady=(20, 20), sticky="ew")
+        reset_frame.grid(row=7, column=0, padx=20, pady=(20, 20), sticky="ew")
         reset_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
         ctk.CTkLabel(reset_frame, text="데이터 초기화 (관리자 전용)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=4, pady=(10, 5))
         reset_button_style = {"fg_color": "#D32F2F", "hover_color": "#B71C1C"}

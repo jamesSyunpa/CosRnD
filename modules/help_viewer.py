@@ -125,63 +125,8 @@ YOUTUBE_VIDEO_GUIDES = [
     }
 ]
 
-# ==============================================================================
-# 2. 네이버 카페 공식 문서/매뉴얼 목록
-# ==============================================================================
-CAFE_DOC_GUIDES = [
-    {
-        "category": "카페 문서",
-        "title": "CosRQD 화장품 연구관리 시스템 시작 가이드",
-        "desc": "프로그램 최초 로그인, 사내 공유 DB 설정 및 기본 테마 설정 안내",
-        "keywords": ["시작", "로그인", "설정", "설치", "DB", "기초", "공유"],
-        "url": "https://cafe.naver.com/ca-fe/cafes/31737320/articles/4",
-        "type": "cafe"
-    },
-    {
-        "category": "카페 문서",
-        "title": "신규 처방 작성 및 배합비(%) 자동 계산 가이드",
-        "desc": "성분 배합비 자동 산출, 원료 검색 및 처방 이력 버전 관리 방법",
-        "keywords": ["처방", "배합비", "처방전", "원료", "함량", "레시피", "이력"],
-        "url": "https://cafe.naver.com/ca-fe/cafes/31737320/articles/4",
-        "type": "cafe"
-    },
-    {
-        "category": "카페 문서",
-        "title": "화장품 표준 원료 데이터베이스 및 기술서류(TDS/MSDS/COA) 관리",
-        "desc": "원료 검색, 성분 분석, 규격서/성적서 등록 및 처방 연동 관리 가이드",
-        "keywords": ["원료", "성분", "샘플", "견적", "TDS", "MSDS", "COA", "다운로드", "서류"],
-        "url": "https://cafe.naver.com/cosrqd",
-        "type": "cafe"
-    },
-    {
-        "category": "카페 문서",
-        "title": "시험성적서(COA) 및 원료목록보고서 엑셀 원클릭 발행",
-        "desc": "완제품/반제품 시험성적서 작성 및 원료목록보고서 자동 생성 가이드",
-        "keywords": ["성적서", "COA", "품질", "원료목록", "보고서", "엑셀", "출력"],
-        "url": "https://cafe.naver.com/ca-fe/cafes/31737320/articles/4",
-        "type": "cafe"
-    },
-    {
-        "category": "카페 문서",
-        "title": "생산처방전 생성 및 제조 파트/결재방 연동 가이드",
-        "desc": "연구 처방을 실제 생산 배치(Batch)용 생산처방전으로 변환 및 결재 승인",
-        "keywords": ["생산", "생산처방", "제조", "배치", "결재", "공정", "파트"],
-        "url": "https://cafe.naver.com/ca-fe/cafes/31737320/articles/4",
-        "type": "cafe"
-    },
-    {
-        "category": "카페 커뮤니티",
-        "title": "CosRQD 공식 네이버 카페 전체 게시판 바로가기",
-        "desc": "질의응답(Q&A), 기능 개선 요청 및 최신 화장품 R&D 정보 커뮤니티",
-        "keywords": ["카페", "커뮤니티", "질문", "Q&A", "게시판", "업데이트", "건의"],
-        "url": "https://cafe.naver.com/ca-fe/cafes/31737320",
-        "type": "cafe"
-    }
-]
-
-
 class HelpViewer(ctk.CTkToplevel):
-    """YouTube 동영상 설명서 및 네이버 카페 가이드 통합 뷰어 팝업 다이얼로그"""
+    """YouTube 동영상 사용 설명서 전용 뷰어 팝업 다이얼로그"""
     def __init__(self, master=None, title="CosRQD 도움말 / 동영상 사용 설명서"):
         super().__init__(master)
         
@@ -203,67 +148,32 @@ class HelpViewer(ctk.CTkToplevel):
 
         self.attributes("-topmost", True)
         
-        # 전체 데이터 통합
+        # 동영상 가이드 목록
         self.video_topics = YOUTUBE_VIDEO_GUIDES
-        self.doc_topics = CAFE_DOC_GUIDES
-        self.all_topics = self.video_topics + self.doc_topics
-        
-        self.current_tab = "동영상 가이드"
         
         # 1. 헤더 영역
         hdr_frame = ctk.CTkFrame(self, fg_color="transparent")
         hdr_frame.pack(fill="x", padx=20, pady=(15, 8))
         
         title_box = ctk.CTkFrame(hdr_frame, fg_color="transparent")
-        title_box.pack(side="left")
+        title_box.pack(side="left", fill="x", expand=True)
         
         ctk.CTkLabel(
             title_box, 
-            text="🎬 CosRQD 도움말 & 동영상 가이드", 
+            text=f"🎬 CosRQD 동영상 사용 가이드 (총 {len(self.video_topics)}편)", 
             font=ctk.CTkFont(size=18, weight="bold")
         ).pack(anchor="w")
         
         ctk.CTkLabel(
             title_box,
-            text="각 항목의 '영상 보기'를 클릭하시면 브라우저 새 창에서 고화질 동영상이 재생됩니다.",
+            text="각 항목의 '영상 보기'를 클릭하시면 웹 브라우저 새 창에서 고화질 동영상이 즉시 재생됩니다.",
             font=ctk.CTkFont(size=11),
             text_color="gray"
         ).pack(anchor="w", pady=(2, 0))
-        
-        # 우측 공식 카페 버튼
-        cafe_btn = ctk.CTkButton(
-            hdr_frame,
-            text="☕ 공식 카페 바로가기",
-            width=140,
-            height=30,
-            fg_color="#03c75a",
-            hover_color="#02b150",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=lambda: self.open_url("https://cafe.naver.com/cosrqd")
-        )
-        cafe_btn.pack(side="right")
 
-        # 2. 카테고리 필터 탭 (SegmentedButton)
-        tab_frame = ctk.CTkFrame(self, fg_color="transparent")
-        tab_frame.pack(fill="x", padx=20, pady=(4, 8))
-        
-        self.seg_btn = ctk.CTkSegmentedButton(
-            tab_frame,
-            values=[
-                f"🎬 동영상 가이드 ({len(self.video_topics)})",
-                f"📋 전체 보기 ({len(self.all_topics)})",
-                f"📄 카페 문서 ({len(self.doc_topics)})"
-            ],
-            command=self.on_tab_changed,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            height=32
-        )
-        self.seg_btn.pack(side="left")
-        self.seg_btn.set(f"🎬 동영상 가이드 ({len(self.video_topics)})")
-
-        # 3. 검색창 영역
+        # 2. 검색창 영역
         search_frame = ctk.CTkFrame(self, fg_color="transparent")
-        search_frame.pack(fill="x", padx=20, pady=(0, 10))
+        search_frame.pack(fill="x", padx=20, pady=(6, 10))
         
         self.search_entry = ctk.CTkEntry(
             search_frame,
@@ -274,17 +184,17 @@ class HelpViewer(ctk.CTkToplevel):
         self.search_entry.pack(fill="x")
         self.search_entry.bind("<KeyRelease>", self.on_search)
 
-        # 4. 도움말 목록 스크롤 프레임
+        # 3. 도움말 목록 스크롤 프레임
         self.list_frame = ctk.CTkScrollableFrame(self)
         self.list_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
-        # 5. 하단 닫기 푸터
+        # 4. 하단 닫기 푸터
         footer_frame = ctk.CTkFrame(self, fg_color="transparent", height=40)
         footer_frame.pack(fill="x", padx=20, pady=(0, 15))
         
         ctk.CTkLabel(
             footer_frame,
-            text="💡 유튜브 영상 및 카페 가이드는 PC 웹 브라우저 새 창에서 편리하게 시청하실 수 있습니다.",
+            text="💡 유튜브 동영상 설명서는 PC 웹 브라우저 새 창에서 고화질로 편리하게 시청하실 수 있습니다.",
             font=ctk.CTkFont(size=11),
             text_color="gray"
         ).pack(side="left")
@@ -298,29 +208,12 @@ class HelpViewer(ctk.CTkToplevel):
         )
         close_btn.pack(side="right")
 
-        # 초기 렌더링 (동영상 가이드 탭)
+        # 초기 렌더링
         self.render_topics(self.video_topics)
-
-    def on_tab_changed(self, value):
-        if "동영상" in value:
-            self.current_tab = "동영상 가이드"
-        elif "카페" in value:
-            self.current_tab = "카페 문서"
-        else:
-            self.current_tab = "전체"
-        self.on_search()
-
-    def get_tab_topics(self):
-        if self.current_tab == "동영상 가이드":
-            return self.video_topics
-        elif self.current_tab == "카페 문서":
-            return self.doc_topics
-        else:
-            return self.all_topics
 
     def on_search(self, event=None):
         query = self.search_entry.get().strip().lower()
-        base_topics = self.get_tab_topics()
+        base_topics = self.video_topics
         
         if not query:
             self.render_topics(base_topics)
@@ -349,20 +242,19 @@ class HelpViewer(ctk.CTkToplevel):
             
             ctk.CTkLabel(
                 empty_box,
-                text="🔍 검색된 가이드 항목이 없습니다.",
+                text="🔍 검색된 동영상 가이드가 없습니다.",
                 font=ctk.CTkFont(size=14, weight="bold")
             ).pack(pady=(0, 6))
             
             ctk.CTkLabel(
                 empty_box,
-                text="검색어를 다시 확인하시거나 공식 카페 Q&A 게시판에 문의해 주세요.",
+                text="검색어를 다시 확인하시거나 번호(예: 1, 6, 8)로 검색해 보세요.",
                 font=ctk.CTkFont(size=12),
                 text_color="gray"
             ).pack()
             return
 
         for item in topics:
-            is_youtube = item.get("type") == "youtube"
             card = ctk.CTkFrame(self.list_frame, corner_radius=8)
             card.pack(fill="x", pady=5, padx=5)
 
@@ -374,18 +266,11 @@ class HelpViewer(ctk.CTkToplevel):
             top_line = ctk.CTkFrame(info_frame, fg_color="transparent")
             top_line.pack(fill="x", anchor="w")
 
-            if is_youtube:
-                badge_text = "🎬 동영상 가이드"
-                badge_color = "#FF0000"
-            else:
-                badge_text = f"[{item['category']}]"
-                badge_color = "#0284C7"
-
             cat_badge = ctk.CTkLabel(
                 top_line,
-                text=badge_text,
+                text="🎬 동영상 가이드",
                 font=ctk.CTkFont(size=11, weight="bold"),
-                text_color=badge_color
+                text_color="#FF0000"
             )
             cat_badge.pack(side="left", padx=(0, 8))
 
@@ -409,32 +294,20 @@ class HelpViewer(ctk.CTkToplevel):
 
             # 우측 새창 열기 액션 버튼
             url = item["url"]
-            if is_youtube:
-                action_btn = ctk.CTkButton(
-                    card,
-                    text="▶ 영상 보기 ↗",
-                    width=115,
-                    height=34,
-                    fg_color="#CC0000",
-                    hover_color="#990000",
-                    font=ctk.CTkFont(size=12, weight="bold"),
-                    command=lambda u=url: self.open_url(u)
-                )
-            else:
-                action_btn = ctk.CTkButton(
-                    card,
-                    text="문서 보기 ↗",
-                    width=115,
-                    height=34,
-                    fg_color="#2563EB",
-                    hover_color="#1D4ED8",
-                    font=ctk.CTkFont(size=12, weight="bold"),
-                    command=lambda u=url: self.open_url(u)
-                )
+            action_btn = ctk.CTkButton(
+                card,
+                text="▶ 영상 보기 ↗",
+                width=115,
+                height=34,
+                fg_color="#CC0000",
+                hover_color="#990000",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                command=lambda u=url: self.open_url(u)
+            )
             action_btn.pack(side="right", padx=14, pady=10)
 
     def open_url(self, url):
-        """웹 브라우저를 통해 새 창/새 탭에서 동영상 또는 가이드 페이지를 엽니다."""
+        """웹 브라우저를 통해 새 창/새 탭에서 동영상을 엽니다."""
         try:
             webbrowser.open_new_tab(url)
         except Exception as e:
